@@ -1,0 +1,9 @@
+
+# FVM Version Cache
+.fvm/
+# Local SDK, caches and build output
+.fvm/
+.dart_tool/
+build/
+.pub-cache/
+.DS_Store
