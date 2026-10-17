@@ -81,7 +81,11 @@ function browser(options = {}) {
   const reg = Object.assign(new Events(), {
     scope: new URL('./', document.baseURI).href,
     active, waiting: null, installing: null,
-    async update() { calls.push('update'); if (options.updateFails) throw new Error('offline'); },
+    async update() {
+      calls.push('update');
+      if (options.updateFails) throw new Error('offline');
+      await options.updateRequest?.();
+    },
   });
   const sw = Object.assign(new Events(), {
     controller: active,
@@ -129,11 +133,11 @@ test('public API and state are exact, string-based, and non-polling', async () =
   assert.deepEqual(Object.keys(b.api).sort(), [
     'readSettings', 'writeSettings', 'readIntroSeen', 'markIntroSeen', 'getState', 'subscribe',
     'readTimer', 'writeTimer', 'armTimerSound', 'playTimerSound',
-    'unsubscribe', 'setKeepAwake', 'startPresentation', 'toggleFullscreen', 'checkForUpdate', 'applyUpdate', 'dispose',
+    'unsubscribe', 'setKeepAwake', 'startPresentation', 'toggleFullscreen', 'checkForUpdate', 'applyUpdate', 'refreshPage', 'dispose',
   ].sort());
   assert.deepEqual(Object.keys(b.state()).sort(), [
     'visible', 'resumeSerial', 'storageAvailable', 'wakeSupported', 'wakeStatus', 'fullscreenSupported',
-    'fullscreen', 'fullscreenError', 'standalone', 'offlineStatus', 'offlineCompleted', 'offlineTotal', 'updateAvailable', 'updateError', 'secureContext',
+    'fullscreen', 'fullscreenError', 'standalone', 'offlineStatus', 'offlineCompleted', 'offlineTotal', 'updateAvailable', 'updateError', 'refreshing', 'secureContext',
   ].sort());
   assert.equal(b.state().wakeStatus, 'off');
   assert.equal(b.state().offlineStatus, 'unavailable');
@@ -431,6 +435,161 @@ test('existing complete installation remains ready offline; failed fresh install
   assert.equal(existing.state().offlineStatus, 'ready');
   assert.equal(fresh.state().offlineStatus, 'failed');
   existing.api.dispose(); fresh.api.dispose();
+});
+
+test('manual refresh checks the server once and preserves settings and timers', async () => {
+  const b = browser({ sw: true });
+  await settle();
+  b.api.writeSettings('saved settings'); b.api.writeTimer('saved timer');
+  b.api.refreshPage(); b.api.refreshPage();
+  assert.equal(b.state().refreshing, true);
+  assert.equal(b.reloads(), 0);
+  await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  assert.equal(b.reloads(), 1);
+  assert.equal(b.api.readSettings(), 'saved settings');
+  assert.equal(b.api.readTimer(), 'saved timer');
+  assert.equal(b.timers.size, 0);
+  b.api.dispose();
+});
+
+test('manual refresh waits for installation and the accepted controller before reloading', async () => {
+  const options = { sw: true };
+  const b = browser(options);
+  await settle();
+  const next = b.worker('installing');
+  options.updateRequest = () => {
+    b.reg.installing = next;
+    b.reg.emit('updatefound');
+  };
+  b.api.refreshPage();
+  await settle();
+  assert.equal(b.reloads(), 0);
+  assert.equal(b.state().refreshing, true);
+  b.reg.installing = null; b.reg.waiting = next;
+  next.state = 'installed'; next.emit('statechange');
+  assert.deepEqual(next.messages.map(m => m.type), ['SKIP_WAITING']);
+  assert.equal(b.reloads(), 0);
+  b.reg.waiting = null; b.reg.active = next;
+  next.state = 'activated'; next.emit('statechange');
+  assert.equal(b.reloads(), 0, 'activation alone must not reload an old controller');
+  b.sw.controller = next; b.sw.emit('controllerchange');
+  b.sw.emit('controllerchange');
+  assert.equal(b.reloads(), 1);
+  assert.equal(b.timers.size, 0);
+  b.api.dispose();
+});
+
+test('manual refresh accepts an already downloaded update or one activated in another tab', async () => {
+  for (const alreadyActive of [false, true]) {
+    const b = browser({ sw: true, activeVersion: alreadyActive ? 'two' : 'one' });
+    await settle();
+    const next = b.worker('installed');
+    if (!alreadyActive) b.reg.waiting = next;
+    b.api.refreshPage(); await settle();
+    if (!alreadyActive) {
+      assert.equal(next.messages[0].type, 'SKIP_WAITING');
+      assert.equal(b.reloads(), 0);
+      b.sw.controller = next; b.sw.emit('controllerchange');
+    }
+    assert.equal(b.reloads(), 1);
+    b.api.dispose();
+  }
+});
+
+test('refresh without a release worker falls back to an ordinary reload', async () => {
+  for (const options of [{}, { sw: true, secure: false }, { sw: true, noActive: true, status: 404 }]) {
+    const b = browser(options);
+    await settle();
+    b.api.refreshPage(); await settle();
+    assert.equal(b.reloads(), 1);
+    assert.equal(b.state().refreshing, false);
+    assert.equal(b.timers.size, 0);
+    b.api.dispose();
+  }
+});
+
+test('failed refresh keeps the current page and allows an explicit retry', async () => {
+  const options = { sw: true, updateFails: true };
+  const b = browser(options);
+  await settle();
+  b.api.refreshPage(); await settle();
+  assert.equal(b.reloads(), 0);
+  assert.equal(b.state().updateError, true);
+  assert.equal(b.state().refreshing, false);
+  options.updateFails = false;
+  b.api.refreshPage(); await settle();
+  assert.equal(b.reloads(), 1);
+  b.api.dispose();
+});
+
+test('a failed install never activates or reloads through manual refresh', async () => {
+  const options = { sw: true };
+  const b = browser(options);
+  await settle();
+  const next = b.worker('installing');
+  options.updateRequest = () => { b.reg.installing = next; b.reg.emit('updatefound'); };
+  b.api.refreshPage(); await settle();
+  b.reg.installing = null; next.state = 'redundant'; next.emit('statechange');
+  assert.equal(b.state().updateError, true);
+  assert.equal(b.state().refreshing, false);
+  assert.equal(b.reloads(), 0);
+  assert.equal(next.messages.some(m => m.type === 'SKIP_WAITING'), false);
+  b.api.dispose();
+});
+
+test('refresh timeout fences a late check and permits a new request', async () => {
+  const delayed = deferred();
+  const options = { sw: true, updateRequest: () => delayed.promise };
+  const b = browser(options);
+  await settle();
+  b.api.refreshPage(); await settle();
+  for (const callback of [...b.timers.values()]) callback();
+  assert.equal(b.state().refreshing, false);
+  assert.equal(b.state().updateError, true);
+  delayed.resolve(); await settle();
+  assert.equal(b.reloads(), 0);
+  options.updateRequest = undefined;
+  b.api.refreshPage(); await settle();
+  assert.equal(b.reloads(), 1);
+  b.api.dispose();
+});
+
+test('timed-out or hidden refresh does not reload on a late controller change', async () => {
+  for (const cancel of ['timeout', 'pagehide', 'dispose']) {
+    const b = browser({ sw: true });
+    await settle();
+    const next = b.worker('installed'); b.reg.waiting = next;
+    b.api.refreshPage(); await settle();
+    if (cancel === 'timeout') for (const callback of [...b.timers.values()]) callback();
+    if (cancel === 'pagehide') b.events.emit('pagehide');
+    if (cancel === 'dispose') b.api.dispose();
+    b.reg.waiting = null; b.reg.active = next; next.state = 'activated';
+    b.sw.controller = next; b.sw.emit('controllerchange');
+    if (cancel === 'pagehide') b.events.emit('pageshow');
+    await settle();
+    assert.equal(b.reloads(), 0, cancel);
+    assert.equal(b.state().refreshing, false);
+    b.api.dispose();
+    assert.equal(b.timers.size, 0);
+  }
+});
+
+test('an old refresh check cannot complete a newer request after page restoration', async () => {
+  const first = deferred(); const second = deferred();
+  const options = { sw: true, updateRequest: () => first.promise };
+  const b = browser(options);
+  await settle();
+  b.api.refreshPage(); await settle();
+  b.events.emit('pagehide'); b.events.emit('pageshow');
+  options.updateRequest = () => second.promise;
+  b.api.refreshPage(); await settle();
+  first.resolve(); await settle();
+  assert.equal(b.state().refreshing, true);
+  assert.equal(b.reloads(), 0);
+  second.resolve(); await settle();
+  assert.equal(b.reloads(), 1);
+  b.api.dispose();
 });
 
 test('status timeout reports failure and pagehide/dispose cancel every pending channel', async () => {

@@ -32,6 +32,7 @@
     offlineTotal: 0,
     updateAvailable: false,
     updateError: false,
+    refreshing: false,
     secureContext: win.isSecureContext === true,
   };
   if (!state.wakeSupported) state.wakeStatus = 'unsupported';
@@ -51,11 +52,13 @@
   const storageFailures = new Set();
   let setupPending = null;
   let swEpoch = 0;
-  let updatePending = false;
+  let updatePending = null;
   const explicitlyCheckedWorkers = new WeakSet();
   let probeAbort = null;
   let acceptedWorker = null;
   let reloading = false;
+  let refreshTimer = null;
+  let refreshWorker = null;
   let readySerial = 0;
   const observedWorkers = new WeakSet();
   const observedRegistrations = new WeakSet();
@@ -214,7 +217,7 @@
     if (disposed || paused || !registration) return;
     patch({ updateAvailable: activeUpdateAvailable || Boolean(registration.waiting && ownsWorker(registration.waiting)) });
     if (registration.installing) {
-      if (updatePending) explicitlyCheckedWorkers.add(registration.installing);
+      if (updatePending || state.refreshing) explicitlyCheckedWorkers.add(registration.installing);
       observeWorker(registration.installing);
     }
     if (registration.waiting) observeWorker(registration.waiting);
@@ -222,6 +225,7 @@
       observeWorker(registration.active);
       if (registration.active.state === 'activated') queryReady();
     }
+    continueRefresh();
   }
   function observeWorker(worker) {
     if (!ownsWorker(worker) || observedWorkers.has(worker)) return;
@@ -292,27 +296,76 @@
   }
   function checkForUpdate() {
     if (disposed || paused || updatePending) return;
-    updatePending = true;
+    const operation = {};
+    updatePending = operation;
     const epoch = swEpoch;
+    const cancelled = () => disposed || paused || epoch !== swEpoch || updatePending !== operation;
     patch({ updateError: false });
     (async () => {
       if (!registration || ![registration.active, registration.waiting, registration.installing].some(ownsWorker)) {
         registration = null;
         if (!(await setupSW())) throw new Error('Release worker unavailable');
       }
-      if (disposed || paused || epoch !== swEpoch) return;
+      if (cancelled()) return;
       await registration.update();
-      if (epoch === swEpoch) refreshRegistration();
+      if (!cancelled()) refreshRegistration();
     })().catch(() => {
-      if (!paused && epoch === swEpoch) patch({ updateError: true });
-    }).finally(() => { updatePending = false; });
+      if (!cancelled()) patch({ updateError: true });
+    }).finally(() => {
+      if (updatePending !== operation) return;
+      updatePending = null;
+      continueRefresh();
+    });
+  }
+  function finishRefresh(failed = false) {
+    if (state.refreshing) updatePending = null;
+    if (refreshTimer !== null) win.clearTimeout(refreshTimer);
+    refreshTimer = null;
+    if (refreshWorker && acceptedWorker === refreshWorker) acceptedWorker = null;
+    refreshWorker = null;
+    patch({ refreshing: false, ...(failed ? { updateError: true } : {}) });
+  }
+  function reloadPage() {
+    if (disposed || paused || reloading) return;
+    finishRefresh();
+    reloading = true;
+    win.location.reload();
+  }
+  function continueRefresh() {
+    if (!state.refreshing || disposed || paused || updatePending || reloading) return;
+    const owned = registration && [registration.active, registration.waiting, registration.installing].some(ownsWorker);
+    // Development servers may intentionally have no release worker.
+    if (!owned && state.offlineStatus === 'unavailable') { reloadPage(); return; }
+    if (state.updateError) { finishRefresh(true); return; }
+    if (ownsWorker(registration?.installing)) return;
+    if (ownsWorker(registration?.waiting)) {
+      refreshWorker = registration.waiting;
+      applyUpdate();
+      if (state.updateError) finishRefresh(true);
+      return;
+    }
+    if (ownsWorker(registration?.active)) {
+      if (acceptedWorker) return;
+      if (registration.active.state === 'activated') reloadPage();
+      // Initial activation is observed by refreshRegistration/statechange.
+      return;
+    }
+    finishRefresh(true);
+  }
+  function refreshPage() {
+    if (disposed || paused || state.refreshing || acceptedWorker || reloading) return;
+    patch({ refreshing: true, updateError: false });
+    if (!state.secureContext || !sw) { reloadPage(); return; }
+    // No polling: update completion and worker lifecycle events advance this
+    // explicit request. A stalled download/activation must remain retryable.
+    refreshTimer = win.setTimeout(() => finishRefresh(true), 90000);
+    checkForUpdate();
   }
   function applyUpdate() {
     if (disposed || paused || acceptedWorker || reloading) return;
     if (!registration?.waiting) {
       if (activeUpdateAvailable && ownsWorker(registration?.active)) {
-        reloading = true;
-        win.location.reload();
+        reloadPage();
       }
       return;
     }
@@ -326,8 +379,7 @@
     if (disposed || paused) return;
     // Initial clients.claim and another tab's acceptance MUST NOT reload us.
     if (acceptedWorker && sw.controller === acceptedWorker && !reloading) {
-      reloading = true;
-      win.location.reload();
+      reloadPage();
       return;
     }
     refreshRegistration();
@@ -341,7 +393,9 @@
   }
   function pageHide() {
     if (disposed) return;
+    finishRefresh();
     paused = true;
+    updatePending = null;
     swEpoch += 1;
     patch({ visible: false });
     stopWake();
@@ -358,6 +412,7 @@
   }
   function dispose() {
     if (disposed) return;
+    finishRefresh();
     subscriber = null;
     keepAwake = false;
     stopWake();
@@ -434,6 +489,7 @@
     toggleFullscreen: () => performFullscreen(false),
     checkForUpdate,
     applyUpdate,
+    refreshPage,
     dispose,
   };
   setupSW();

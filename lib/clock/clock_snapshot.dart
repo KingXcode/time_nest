@@ -28,7 +28,7 @@ final class ClockSnapshot {
           '星期${weekdays[now.weekday - 1]}',
       hoursMinutes: '${_twoDigits(hour)}:${_twoDigits(now.minute)}',
       seconds: _twoDigits(now.second),
-      milliseconds: now.millisecond.toString().padLeft(3, '0'),
+      milliseconds: (now.millisecond ~/ 100).toString(),
       period: isTwelveHour ? (now.hour < 12 ? 'AM' : 'PM') : null,
     );
   }
@@ -38,6 +38,8 @@ final class ClockSnapshot {
   final String dateLabel;
   final String hoursMinutes;
   final String seconds;
+
+  /// One fractional-second digit, truncated so it never rounds into the next second.
   final String milliseconds;
   final String? period;
 

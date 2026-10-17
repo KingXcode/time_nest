@@ -16,7 +16,7 @@ void main() {
         expect(snapshot.dateLabel, '2026年10月16日  星期五');
         expect(snapshot.hoursMinutes, '14:47');
         expect(snapshot.seconds, '08');
-        expect(snapshot.milliseconds, '357');
+        expect(snapshot.milliseconds, '3');
         expect(snapshot.period, isNull);
         expect(snapshot.seconds, isNot(contains(':')));
         expect(snapshot.milliseconds, isNot(contains('.')));
@@ -31,55 +31,53 @@ void main() {
       expect(midnight.dateLabel, '2026年1月2日  星期五');
       expect(midnight.hoursMinutes, '00:00');
       expect(midnight.seconds, '00');
-      expect(midnight.milliseconds, '000');
+      expect(midnight.milliseconds, '0');
       final padded = ClockSnapshot.fromDateTime(
         DateTime(2026, 1, 2, 1, 2, 3, 7),
         defaults,
       );
       expect(padded.hoursMinutes, '01:02');
       expect(padded.seconds, '03');
-      expect(padded.milliseconds, '007');
+      expect(padded.milliseconds, '0');
     });
 
-    test(
-      'milliseconds have exactly three digits at every formatting boundary',
-      () {
-        const cases = <int, String>{
-          0: '000',
-          1: '001',
-          7: '007',
-          9: '009',
-          10: '010',
-          99: '099',
-          100: '100',
-          357: '357',
-          999: '999',
-        };
-        for (final entry in cases.entries) {
-          final snapshot = ClockSnapshot.fromDateTime(
-            DateTime(2026, 10, 16, 23, 59, 59, entry.key),
-            defaults,
-          );
-          expect(snapshot.milliseconds, entry.value);
-          expect(snapshot.milliseconds, hasLength(3));
-          expect(snapshot.hoursMinutes, '23:59');
-          expect(snapshot.seconds, '59');
-        }
-      },
-    );
-
-    test(
-      'microseconds do not round milliseconds or carry into another second',
-      () {
-        final now = DateTime(2026, 12, 31, 23, 59, 59, 999, 999);
-        final snapshot = ClockSnapshot.fromDateTime(now, defaults);
-        expect(snapshot.time, same(now));
-        expect(snapshot.dateLabel, '2026年12月31日  星期四');
+    test('fractional seconds have one truncated digit at every boundary', () {
+      const cases = <int, String>{
+        0: '0',
+        1: '0',
+        7: '0',
+        9: '0',
+        10: '0',
+        99: '0',
+        100: '1',
+        199: '1',
+        200: '2',
+        357: '3',
+        899: '8',
+        900: '9',
+        999: '9',
+      };
+      for (final entry in cases.entries) {
+        final snapshot = ClockSnapshot.fromDateTime(
+          DateTime(2026, 10, 16, 23, 59, 59, entry.key),
+          defaults,
+        );
+        expect(snapshot.milliseconds, entry.value);
+        expect(snapshot.milliseconds, hasLength(1));
         expect(snapshot.hoursMinutes, '23:59');
         expect(snapshot.seconds, '59');
-        expect(snapshot.milliseconds, '999');
-      },
-    );
+      }
+    });
+
+    test('sub-tenth values never round or carry into another second', () {
+      final now = DateTime(2026, 12, 31, 23, 59, 59, 999, 999);
+      final snapshot = ClockSnapshot.fromDateTime(now, defaults);
+      expect(snapshot.time, same(now));
+      expect(snapshot.dateLabel, '2026年12月31日  星期四');
+      expect(snapshot.hoursMinutes, '23:59');
+      expect(snapshot.seconds, '59');
+      expect(snapshot.milliseconds, '9');
+    });
 
     test('all weekday labels are correct from Monday through Sunday', () {
       const names = <String>['一', '二', '三', '四', '五', '六', '日'];
@@ -103,7 +101,7 @@ void main() {
         final snapshot = ClockSnapshot.fromDateTime(now, settings);
         expect(snapshot.hoursMinutes, '14:47');
         expect(snapshot.seconds, '08');
-        expect(snapshot.milliseconds, '357');
+        expect(snapshot.milliseconds, '3');
         expect(settings.effectiveMilliseconds, isFalse);
       }
     });
@@ -120,7 +118,7 @@ void main() {
         expect(snapshot.dateLabel, '2026年10月16日  星期五');
         expect(snapshot.hoursMinutes, '23:59');
         expect(snapshot.seconds, '58');
-        expect(snapshot.milliseconds, '123');
+        expect(snapshot.milliseconds, '1');
       }
     });
   });
@@ -180,11 +178,11 @@ void main() {
       );
       expect(before.hoursMinutes, '11:59');
       expect(before.seconds, '59');
-      expect(before.milliseconds, '999');
+      expect(before.milliseconds, '9');
       expect(before.period, 'AM');
       expect(noon.hoursMinutes, '12:00');
       expect(noon.seconds, '00');
-      expect(noon.milliseconds, '000');
+      expect(noon.milliseconds, '0');
       expect(noon.period, 'PM');
       expect(noon.dateLabel, before.dateLabel);
     });
@@ -205,7 +203,7 @@ void main() {
       expect(midnight.period, 'AM');
       expect(midnight.dateLabel, '2026年10月17日  星期六');
       expect(midnight.seconds, '00');
-      expect(midnight.milliseconds, '000');
+      expect(midnight.milliseconds, '0');
     });
   });
 
@@ -262,12 +260,12 @@ void main() {
         expect(before.dateLabel, beforeLabel);
         expect(before.hoursMinutes, '23:59');
         expect(before.seconds, '59');
-        expect(before.milliseconds, '999');
+        expect(before.milliseconds, '9');
         expect(after.time, same(nextTime));
         expect(after.dateLabel, afterLabel);
         expect(after.hoursMinutes, '00:00');
         expect(after.seconds, '00');
-        expect(after.milliseconds, '000');
+        expect(after.milliseconds, '0');
       });
     }
 
@@ -287,7 +285,7 @@ void main() {
           expect(snapshot.dateLabel, '2026年10月16日  星期五');
           expect(snapshot.hoursMinutes, hoursMinutes);
           expect(snapshot.seconds, seconds);
-          expect(snapshot.milliseconds, '000');
+          expect(snapshot.milliseconds, '0');
         }
       },
     );
@@ -304,7 +302,7 @@ void main() {
         expect(backward.dateLabel, '2026年10月16日  星期五');
         expect(backward.hoursMinutes, '01:02');
         expect(backward.seconds, '03');
-        expect(backward.milliseconds, '004');
+        expect(backward.milliseconds, '0');
         expect(first.time, same(later));
         expect(repeated.time, same(later));
         expect(repeated.dateLabel, first.dateLabel);

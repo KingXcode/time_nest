@@ -98,7 +98,7 @@ class SettingsPanel extends StatelessWidget {
                     SwitchListTile.adaptive(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('显示毫秒'),
-                      subtitle: const Text('三位数字，按屏幕刷新；关闭可减少耗电'),
+                      subtitle: const Text('1 位小数（0.1 秒），关闭可减少耗电'),
                       value: value.effectiveMilliseconds,
                       onChanged: value.showSeconds
                           ? (enabled) => onChanged(
@@ -213,17 +213,36 @@ class SettingsPanel extends StatelessWidget {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
+                        OutlinedButton.icon(
+                          onPressed: state.refreshing
+                              ? null
+                              : browser.refreshPage,
+                          icon: state.refreshing
+                              ? const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.refresh_rounded, size: 18),
+                          label: Text(state.refreshing ? '正在刷新…' : '刷新页面'),
+                        ),
                         OutlinedButton(
-                          onPressed: browser.checkForUpdate,
+                          onPressed: state.refreshing
+                              ? null
+                              : browser.checkForUpdate,
                           child: const Text('检查更新'),
                         ),
                         if (state.updateAvailable)
                           FilledButton(
-                            onPressed: browser.applyUpdate,
+                            onPressed: state.refreshing
+                                ? null
+                                : browser.applyUpdate,
                             child: const Text('更新并重新加载'),
                           ),
                       ],
                     ),
+                    const _Note('刷新页面会先检查服务器更新，加载新版后重新打开；保留已保存的设置和计时。'),
                     if (state.updateAvailable)
                       const _Note('新版本已就绪。仅在你确认后刷新，当前展示不会被中断。'),
                     if (state.updateError)

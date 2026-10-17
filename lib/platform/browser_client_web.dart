@@ -36,6 +36,8 @@ external void _toggleFullscreen();
 external void _checkForUpdate();
 @JS('shike.applyUpdate')
 external void _applyUpdate();
+@JS('shike.refreshPage')
+external void _refreshPage();
 
 BrowserClient createBrowserClient() {
   try {
@@ -89,6 +91,8 @@ class WebBrowserClient extends BrowserClient {
   void checkForUpdate() => _checkForUpdate();
   @override
   void applyUpdate() => _applyUpdate();
+  @override
+  void refreshPage() => _refreshPage();
   @override
   void dispose() {
     _unsubscribe();

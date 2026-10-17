@@ -51,4 +51,6 @@ class MemoryBrowserClient extends BrowserClient {
   void checkForUpdate() {}
   @override
   void applyUpdate() {}
+  @override
+  void refreshPage() {}
 }

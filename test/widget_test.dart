@@ -11,6 +11,7 @@ class TestBrowser extends MemoryBrowserClient {
   BrowserState current = const BrowserState();
   bool? requestedAwake;
   int starts = 0;
+  int refreshes = 0;
   @override
   BrowserState get state => current;
   void update(BrowserState state) {
@@ -22,6 +23,8 @@ class TestBrowser extends MemoryBrowserClient {
   void setKeepAwake(bool enabled) => requestedAwake = enabled;
   @override
   void startPresentation() => starts++;
+  @override
+  void refreshPage() => refreshes++;
 }
 
 void main() {
@@ -57,7 +60,7 @@ void main() {
     expect(find.text('2026年10月16日  星期五'), findsOneWidget);
     expect(find.text('14:47'), findsOneWidget);
     expect(find.text(':08'), findsOneWidget);
-    expect(find.text('.357'), findsOneWidget);
+    expect(find.text('.3'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -165,9 +168,30 @@ void main() {
       await tester.pump();
     }
     expect(find.text('00:00'), findsOneWidget);
-    expect(find.text('.007'), findsOneWidget);
+    expect(find.text('.0'), findsOneWidget);
     expect(find.text('2027年1月1日  星期五'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('refresh button invokes browser and disables while loading', (
+    tester,
+  ) async {
+    final browser = TestBrowser();
+    await launch(tester, browser);
+    await openSettings(tester);
+    await tester.ensureVisible(find.text('刷新页面'));
+    await tester.tap(find.text('刷新页面'));
+    expect(browser.refreshes, 1);
+    browser.update(const BrowserState(refreshing: true));
+    await tester.pump();
+    expect(find.text('正在刷新…'), findsOneWidget);
+    await tester.tap(find.text('正在刷新…'));
+    expect(browser.refreshes, 1);
+    browser.update(const BrowserState(updateError: true));
+    await tester.pump();
+    expect(find.text('刷新页面'), findsOneWidget);
+    expect(find.text('更新检查或加载失败，当前版本仍可使用。请联网后重试。'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -191,7 +215,7 @@ void main() {
   ) async {
     await launch(tester, TestBrowser(settings: '{broken'));
     expect(find.text('14:47'), findsOneWidget);
-    expect(find.text('.357'), findsOneWidget);
+    expect(find.text('.3'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }

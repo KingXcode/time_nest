@@ -20,6 +20,7 @@ class BrowserState {
     this.offlineTotal = 0,
     this.updateAvailable = false,
     this.updateError = false,
+    this.refreshing = false,
     this.secureContext = false,
   });
 
@@ -38,6 +39,7 @@ class BrowserState {
     offlineTotal: (json['offlineTotal'] as num?)?.toInt() ?? 0,
     updateAvailable: json['updateAvailable'] == true,
     updateError: json['updateError'] == true,
+    refreshing: json['refreshing'] == true,
     secureContext: json['secureContext'] == true,
   );
 
@@ -55,6 +57,7 @@ class BrowserState {
   final int offlineTotal;
   final bool updateAvailable;
   final bool updateError;
+  final bool refreshing;
   final bool secureContext;
 
   String get wakeLabel => switch (wakeStatus) {
@@ -92,6 +95,7 @@ abstract class BrowserClient extends ChangeNotifier {
   void toggleFullscreen();
   void checkForUpdate();
   void applyUpdate();
+  void refreshPage();
 }
 
 BrowserClient createBrowserClient() => implementation.createBrowserClient();

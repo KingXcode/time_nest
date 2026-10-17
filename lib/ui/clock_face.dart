@@ -100,7 +100,7 @@ class ClockFace extends StatelessWidget {
                             if (settings.effectiveMilliseconds)
                               _Digits(
                                 clock.milliseconds,
-                                4,
+                                2,
                                 80,
                                 Color.lerp(clockBackground, color, .72)!,
                                 prefix: '.',
