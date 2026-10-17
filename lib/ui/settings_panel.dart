@@ -9,49 +9,52 @@ class SettingsPanel extends StatelessWidget {
     required this.settings,
     required this.onChanged,
     required this.browser,
+    required this.onClose,
   });
 
   final ValueNotifier<ClockSettings> settings;
   final ValueChanged<ClockSettings> onChanged;
   final BrowserClient browser;
+  final VoidCallback onClose;
 
   @override
-  Widget build(BuildContext context) => Dialog(
-    insetPadding: const EdgeInsets.all(16),
-    constraints: const BoxConstraints(maxWidth: 460, maxHeight: 720),
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    borderRadius: BorderRadius.circular(24),
+    clipBehavior: Clip.antiAlias,
     child: AnimatedBuilder(
       animation: Listenable.merge([settings, browser]),
       builder: (context, _) {
         final value = settings.value;
         final state = browser.state;
         return Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 16, 12, 8),
+              padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
               child: Row(
                 children: [
                   const Expanded(
                     child: Text(
                       '展示设置',
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: 20,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
                   IconButton(
                     tooltip: '关闭设置',
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: onClose,
                     icon: const Icon(Icons.close_rounded),
                   ),
                 ],
               ),
             ),
-            Flexible(
+            Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                primary: false,
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

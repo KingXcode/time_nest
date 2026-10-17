@@ -34,6 +34,7 @@ class _ClockScreenState extends State<ClockScreen>
   late final TimerController _timer;
   final _sceneFocus = FocusNode(debugLabel: 'Clock scene');
   final _toolbarFocus = FocusNode(debugLabel: 'Clock toolbar');
+  final _settingsFocus = FocusNode(debugLabel: 'Display settings');
   Timer? _hideTimer;
   bool _toolbarVisible = false;
   bool _panelOpen = false;
@@ -143,44 +144,83 @@ class _ClockScreenState extends State<ClockScreen>
     _changeSettings(_settings.value.copyWith(keepAwake: true));
     _browser.startPresentation();
     if (_introVisible) _dismissIntro();
+    setState(() => _panelOpen = false);
     _sceneFocus.requestFocus();
     _reveal();
   }
 
-  Future<void> _openSettings() async {
-    if (_panelOpen) return;
-    _panelOpen = true;
+  void _toggleSettings() {
+    if (_panelOpen) {
+      _closeSettings();
+      return;
+    }
     _hideTimer?.cancel();
-    await showDialog<void>(
-      context: context,
-      builder: (context) => Shortcuts(
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-        },
-        child: Actions(
-          actions: {
-            DismissIntent: CallbackAction<DismissIntent>(
-              onInvoke: (_) {
-                Navigator.of(context).pop();
-                return null;
-              },
-            ),
-          },
-          child: Focus(
-            autofocus: true,
-            child: SettingsPanel(
-              settings: _settings,
-              onChanged: _changeSettings,
-              browser: _browser,
-            ),
+    setState(() {
+      _panelOpen = true;
+      _toolbarVisible = true;
+    });
+    _settingsFocus.requestFocus();
+  }
+
+  void _closeSettings() {
+    setState(() => _panelOpen = false);
+    _sceneFocus.requestFocus();
+    _reveal();
+  }
+
+  Widget _workspace(BoxConstraints box) {
+    // OrientationFrame supplies the effective page orientation, including
+    // manual rotation. Keep one Flex so rotating preserves the panel's scroll.
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    return Flex(
+      direction: landscape ? Axis.horizontal : Axis.vertical,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Column(
+            key: const Key('display-area'),
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: _timer.mode == 'clock'
+                      ? ClockFace(clock: _clock, settings: _settings.value)
+                      : TimerFace(
+                          timer: _timer,
+                          settings: _settings.value,
+                          intensity: _clock.intensity,
+                          armSound: _browser.armTimerSound,
+                        ),
+                ),
+              ),
+              if (!_panelOpen)
+                if (_introVisible && _timer.mode == 'clock')
+                  _Intro(onDismiss: _dismissIntro, onStart: _startPresentation)
+                else
+                  SizedBox(height: _timer.mode == 'clock' ? 52 : 28),
+            ],
           ),
         ),
-      ),
+        if (_panelOpen) ...[
+          SizedBox(width: landscape ? 16 : 0, height: landscape ? 0 : 12),
+          SizedBox(
+            key: const Key('settings-dock'),
+            width: landscape ? (box.maxWidth * .44).clamp(260, 380) : null,
+            height: landscape ? null : box.maxHeight * .60,
+            child: Focus(
+              focusNode: _settingsFocus,
+              child: SettingsPanel(
+                settings: _settings,
+                onChanged: _changeSettings,
+                browser: _browser,
+                onClose: _closeSettings,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
-    if (!mounted) return;
-    _panelOpen = false;
-    _sceneFocus.requestFocus();
-    setState(() => _toolbarVisible = false);
   }
 
   @override
@@ -194,6 +234,7 @@ class _ClockScreenState extends State<ClockScreen>
     _settings.dispose();
     _sceneFocus.dispose();
     _toolbarFocus.dispose();
+    _settingsFocus.dispose();
     if (widget.browser == null) _browser.dispose();
     super.dispose();
   }
@@ -205,6 +246,12 @@ class _ClockScreenState extends State<ClockScreen>
       focusNode: _sceneFocus,
       autofocus: true,
       onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.escape &&
+            _panelOpen) {
+          _closeSettings();
+          return KeyEventResult.handled;
+        }
         if (event is KeyDownEvent && !_panelOpen) _reveal();
         return KeyEventResult.ignored;
       },
@@ -221,34 +268,8 @@ class _ClockScreenState extends State<ClockScreen>
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 52),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: _timer.mode == 'clock'
-                              ? ClockFace(
-                                  clock: _clock,
-                                  settings: _settings.value,
-                                )
-                              : TimerFace(
-                                  timer: _timer,
-                                  settings: _settings.value,
-                                  intensity: _clock.intensity,
-                                  armSound: _browser.armTimerSound,
-                                ),
-                        ),
-                      ),
-                      if (_introVisible && _timer.mode == 'clock')
-                        _Intro(
-                          onDismiss: _dismissIntro,
-                          onStart: _startPresentation,
-                        )
-                      else
-                        SizedBox(height: _timer.mode == 'clock' ? 52 : 28),
-                    ],
-                  ),
+                  top: 52,
+                  child: LayoutBuilder(builder: (_, box) => _workspace(box)),
                 ),
                 Align(
                   alignment: Alignment.topCenter,
@@ -321,7 +342,7 @@ class _ClockScreenState extends State<ClockScreen>
                                   ),
                                 ),
                                 const Spacer(),
-                                if (!_introVisible)
+                                if (!_introVisible || _panelOpen)
                                   TextButton(
                                     onPressed: _startPresentation,
                                     child: const Text('开始展示'),
@@ -355,7 +376,13 @@ class _ClockScreenState extends State<ClockScreen>
                                 ),
                                 IconButton(
                                   tooltip: '展示设置',
-                                  onPressed: _openSettings,
+                                  onPressed: _toggleSettings,
+                                  isSelected: _panelOpen,
+                                  selectedIcon: const Icon(
+                                    Icons.tune_rounded,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
                                   icon: const Icon(
                                     Icons.tune_rounded,
                                     size: 22,
@@ -369,7 +396,7 @@ class _ClockScreenState extends State<ClockScreen>
                     ),
                   ),
                 ),
-                if (!_introVisible && _toolbarVisible)
+                if (!_introVisible && _toolbarVisible && !_panelOpen)
                   Align(
                     alignment: Alignment.bottomCenter,
                     child: Padding(

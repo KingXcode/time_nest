@@ -129,6 +129,7 @@ void main() {
     final browser = TestBrowser();
     await launch(tester, browser);
     await openSettings(tester);
+    await tester.ensureVisible(find.text('12 小时'));
     await tester.tap(find.text('12 小时'));
     await tester.pump();
     expect(ClockSettings.decode(browser.settings).hourCycle, 'h12');
