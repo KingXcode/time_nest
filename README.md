@@ -1,199 +1,159 @@
-# Time Nest
+# 此刻 · Time Nest
 
-基于 Flutter Web 的极简桌面时钟项目，计划将闲置手机作为长期横屏展示的桌面时钟，首要目标设备为 iPhone 8 Plus。
+**横放手机，让时间安静一点。**
 
-> **当前阶段：工程初始化。** 已创建仅启用 Web 的 Flutter 工程，并通过 FVM 固定 SDK 版本。当前页面仍是 Flutter 默认计数器示例，尚未实现时钟业务功能，也未完成目标设备实机验收。
+「此刻」是一款基于 Flutter Web 的极简桌面时钟，面向闲置手机的长时间横屏展示，首要目标设备为 iPhone 8 Plus。应用显示名为「此刻」，工程及仓库名称保持 `time_nest`。
 
-## 技术栈
+> 第一版功能已实现。自动化验证与实机验收是两回事：iPhone 的具体 iOS 版本、Safari / 主屏幕模式、电源管理和长时间发热仍需实测。详见 [第一版验收记录](<docs/verification-v1.md>)。
 
-| 项目 | 版本或方案 |
+## 第一版功能
+
+- 本地年月日、星期、时分秒与三位毫秒；12/24 小时制，12 小时制带 AM/PM。
+- 时分、秒、毫秒三个字号层级，固定宽度、本地等宽数字字体；横竖屏与桌面窗口响应式布局。
+- 点击屏幕显示操作入口，约 4 秒无操作隐藏；键盘聚焦操作区或设置打开时不隐藏，Escape 关闭设置。
+- 本地保存设置，存储禁用、损坏或写入失败时仍能显示时间，并提示无法保存。
+- 秒与毫秒开关、文字亮度、跨午夜夜间模式；关闭毫秒后降为秒/分钟边界调度。
+- 常亮与全屏能力检测、真实状态提示及失败降级；不保证所有 iPhone 模式都支持。
+- 主屏幕图标、安装指引和独立展示配置。
+- 发布构建自动生成完整离线缓存；新版本必须经用户确认后才刷新。
+
+不包含后端、账号、网络校时、天气、日程、原生安装包或后台常驻服务。
+
+**三位毫秒只是显示格式，不代表每毫秒刷新或毫秒级计时准确度。系统时间错误时，页面也会错误。**
+
+## 技术基线
+
+| 项目 | 方案 |
 | --- | --- |
-| Flutter | **3.47.5**，官方 stable 版本 |
-| Dart | **3.13.4**，随 Flutter SDK 提供 |
-| SDK 管理 | FVM，项目配置见 [.fvmrc](<.fvmrc>) |
-| 第一版平台 | Web |
-| 测试 | Flutter Test；Safari 兼容性需实机验收 |
+| Flutter / Dart | 官方 stable **3.47.5 / 3.13.4** |
+| SDK 管理 | FVM，[.fvmrc](<.fvmrc>) 固定版本 |
+| 展示 | Flutter Web，JavaScript + 本地 CanvasKit；不依赖 WasmGC |
+| 时间更新 | Flutter Ticker + 系统时间快照；无毫秒时用边界定时器 |
+| 存储及浏览器能力 | localStorage、Wake Lock、Fullscreen，封装于独立桥接层 |
+| 离线 | 构建时扫描资源并生成带 SHA-256 校验的 Service Worker |
+| 验证 | Flutter 单元/组件测试、Node 浏览器能力模拟、真实 Chrome/CDP 冒烟 |
 
-不使用鸿蒙定制 SDK，不依赖系统全局 Flutter 版本。项目命令统一使用 `fvm flutter` 和 `fvm dart`。
+统一使用 `fvm flutter` / `fvm dart`，不修改全局 SDK，不使用鸿蒙分支。
 
-## 功能目标与范围
+## 开发运行
 
-### 核心展示目标
-
-- 显示本地年月日、星期，以及 `HH:mm:ss.SSS` 格式的时间。
-- 时分、秒、毫秒采用三个字号层级，数字等宽、布局稳定。
-- 横屏优先，兼容竖屏和桌面浏览器窗口。
-- 使用设备系统时间；页面恢复可见时立即校准，不累加固定时间间隔。
-
-### 后续计划（尚未实现）
-
-- 本地设置、文字亮度调节和夜间模式。
-- 根据浏览器能力尝试屏幕常亮，并提供失败状态和降级说明。
-- 主屏幕安装引导、离线缓存和版本更新提示。
-
-上述增强功能的具体范围与默认行为仍需在开发时确认。第一版不包含账号、后端、天气、日程或原生平台工程。
-
-> 三位毫秒是显示格式，不代表每毫秒刷新一次，也不保证毫秒级计时准确度。系统时间错误时，时钟显示也会错误。
-
-## 快速开始
-
-### 1. 准备环境
-
-安装 Git、[FVM](https://fvm.app/documentation/getting-started/installation) 和用于本地调试的 Chrome。Dart 随项目 Flutter SDK 提供，无需单独安装或升级。
-
-```bash
-git --version
-fvm --version
-```
-
-### 2. 获取项目
-
-远程仓库位于内网，需要具备对应网络访问条件和仓库权限。已有本地工程时，跳过克隆步骤，直接进入项目根目录。
+安装 Git、[FVM](https://fvm.app/documentation/getting-started/installation) 和 Chrome。克隆需要内网访问与仓库权限；已有项目可跳过克隆。
 
 ```bash
 git clone http://192.168.12.175/git/niesiyang/time_nest.git
 cd time_nest
-```
-
-### 3. 安装指定 SDK 和依赖
-
-```bash
-# 根据 .fvmrc 安装项目指定版本
 fvm install
-
-# 确认使用 Flutter 3.47.5 / Dart 3.13.4
 fvm flutter --version
-
-# 获取项目依赖
 fvm flutter pub get
-```
-
-如需显式重新关联本地 SDK：
-
-```bash
-fvm use 3.47.5
-```
-
-无需执行 `fvm global`，也不要直接运行 `flutter upgrade` 改变项目 SDK 基线。
-
-### 4. 启动调试
-
-```bash
 fvm flutter run -d chrome
 ```
 
-当前启动后显示默认计数器示例，而不是成品时钟。
-
-查看可用设备或检查开发环境：
-
-```bash
-fvm flutter devices
-fvm flutter doctor
-```
-
-本项目仅启用 Web，不必为此安装 Android、iOS 或桌面原生开发工具链；应重点检查 Flutter 和 Web 调试所需环境。
-
-### 编辑器 SDK 配置
-
-如编辑器未自动识别 FVM，可将 Flutter SDK 路径设为项目内的 `.fvm/flutter_sdk`。例如 VS Code 的工作区配置项为：
+如编辑器没有自动识别 SDK，将 Flutter SDK 路径设为项目内的 `.fvm/flutter_sdk`。例如 VS Code 工作区设置：
 
 ```json
-{
-  "dart.flutterSdkPath": ".fvm/flutter_sdk"
-}
+{"dart.flutterSdkPath": ".fvm/flutter_sdk"}
 ```
 
-避免使用某位开发者机器上的绝对 SDK 路径作为共享配置。
+不需要为本项目安装 Android、iOS 或桌面原生工具链。Web 调试不启用发布版离线缓存，避免旧缓存干扰热重载。
 
-## 手机布局预览
+### 手机布局预览
 
-手机与电脑接入同一可信局域网后，可启动网络调试服务：
+在可信局域网中运行：
 
 ```bash
 fvm flutter run -d web-server --web-hostname=0.0.0.0 --web-port=8080
 ```
 
-在手机浏览器中打开 `http://电脑的局域网IP:8080`。若无法连接，检查防火墙、端口占用和网络隔离设置。调试结束后按 `Ctrl+C` 停止服务。
+手机访问 `http://电脑局域网IP:8080`，结束后按 `Ctrl+C`。这个 HTTP 地址只能辅助检查布局；常亮、Service Worker 和安装体验请使用 HTTPS。电脑 localhost 的安全上下文例外不适用于手机访问电脑的 IP。
 
-> 该 HTTP 方式主要用于布局预览。Service Worker、屏幕常亮等能力需要安全上下文，必须在 HTTPS 环境下进一步验证；电脑上的 localhost 例外不适用于手机访问电脑的局域网地址。
+## 使用方式与默认规则
 
-## 代码检查与测试
+首次打开即可看时间，不需要先点按钮。可以关闭引导，也可以点“开始展示”明确请求常亮与浏览器支持的全屏。再次轻点页面可打开“展示设置”。
 
-在项目根目录执行：
-
-```bash
-# 检查格式，不自动修改文件
-fvm dart format --output=none --set-exit-if-changed lib test
-
-# 静态分析
-fvm flutter analyze
-
-# 自动化测试
-fvm flutter test
-```
-
-需要自动格式化时：
-
-```bash
-fvm dart format lib test
-```
-
-当前 [组件测试](<test/widget_test.dart>) 仅覆盖默认计数器示例。后续需增加时间格式、日期边界、生命周期、设置及浏览器能力降级测试。模板测试通过不能代替时钟功能或实机验收。
-
-## Web 构建与部署
-
-生成发布版本：
-
-```bash
-fvm flutter build web --release
-```
-
-构建产物位于 `build/web/`，需将该目录作为完整静态站点部署到支持 HTTPS 的服务，不建议直接双击构建后的 HTML 文件运行。
-
-若部署地址使用 `/time_nest/` 子路径：
-
-```bash
-fvm flutter build web --release --base-href=/time_nest/
-```
-
-`--base-href` 必须与实际部署路径一致，并保留开头和结尾的 `/`。
-
-构建成功不代表已经具备离线访问、完善的主屏幕安装体验或屏幕常亮能力。当前 [Web Manifest](<web/manifest.json>) 仍是模板配置，图标、配色与方向配置需要随产品开发调整。
-
-## 工程文件
-
-| 文件 | 用途 |
+| 设置 | 默认值与行为 |
 | --- | --- |
-| [应用入口](<lib/main.dart>) | 当前为默认 Flutter 计数器示例 |
-| [组件测试](<test/widget_test.dart>) | 默认示例的交互测试 |
-| [Web 入口](<web/index.html>) | 浏览器页面入口 |
-| [Web Manifest](<web/manifest.json>) | Web 应用名称、图标和显示配置 |
-| [依赖配置](<pubspec.yaml>) | 项目信息、Dart 约束与依赖 |
-| [依赖锁定](<pubspec.lock>) | 应用依赖的解析版本 |
-| [分析规则](<analysis_options.yaml>) | Dart 静态分析配置 |
-| [FVM 配置](<.fvmrc>) | 固定项目 Flutter 版本 |
-| [设计文档](<desk-clock-design.md>) | 产品需求、交互与验收参考 |
+| 时制 | 24 小时；可切换 12 小时 + AM/PM |
+| 秒 / 毫秒 | 均显示；隐藏秒时同时隐藏毫秒，但保留原毫秒偏好 |
+| 文字亮度 | 100%，可调范围 15%～100%；不影响按钮可读性、不控制系统背光 |
+| 夜间模式 | 默认关闭，预设 22:00～07:00，夜间亮度 25% |
+| 夜间边界 | 包含开始、不含结束，支持跨午夜；起止相同不启用；取日常/夜间亮度较小值 |
+| 常亮 | 默认关闭；偏好不等于锁已获取，界面显示实际状态 |
 
-## 目标设备与已知限制
+Safari 添加到主屏幕：分享菜单 → 添加到主屏幕 → 从图标重新打开。横放手机前请手动关闭系统方向锁定。
 
-- 首要目标设备为 iPhone 8 Plus，实际 iOS 小版本需要记录并验证。
-- Safari 普通页面与添加到主屏幕后的运行模式需要分别测试。
-- 不保证所有浏览器都支持全屏、方向锁定或屏幕常亮。
-- 页面进入后台后可能暂停更新，时钟实现需处理恢复时的时间校准。
-- 网页中的“文字亮度”不等于系统屏幕背光亮度。
-- 长期展示的耗电、发热与稳定性需要实机观察，不预先承诺性能结果。
-- 自动化测试和桌面浏览器调试不能代替真实 iPhone Safari 验收。
+常亮不可用时，可以在设备策略允许的前提下，把系统“显示与亮度 → 自动锁定”设为“永不”；这是系统级设置，离开展示后建议恢复。长期展示注意散热和电池健康，异常发热或鼓包时停止充电使用。
 
-## 版本管理约定
+## 发布构建与离线
 
-需要提交源码、测试、必要的工程配置与文档，并保留 [.fvmrc](<.fvmrc>)、[pubspec.yaml](<pubspec.yaml>) 和应用的 [pubspec.lock](<pubspec.lock>)。
+需要 Node.js 22+。**请使用项目构建脚本，而不只运行 Flutter build**：脚本关闭 CDN 依赖与 Flutter 默认 SW，然后为实际产物生成完整预缓存清单。
 
-[.gitignore](<.gitignore>) 已排除 `.fvm/`、`.dart_tool/`、`.pub-cache/`、`build/` 和 `.DS_Store`。不要将本地 SDK、缓存、构建产物、密码、令牌或私钥提交到仓库。
+```bash
+bash tool/build_web.sh
+```
 
-升级 Flutter 时，应明确选择版本、更新 FVM 配置，并完成依赖解析、静态分析、测试、Web 构建和目标设备回归，不跟随浮动的 `stable` 自动升级。
+部署 `build/web/` 的全部内容到 HTTPS 静态站点。使用子路径时：
 
-## 设计文档说明
+```bash
+bash tool/build_web.sh --base-href=/time_nest/
+```
 
-[桌面时钟设计文档](<desk-clock-design.md>) 保留了项目启动时的设计稿，其中“尚未创建工程”以及 Vite + TypeScript、DOM/CSS 等技术方案已不代表当前工程现状。
+`--base-href` 必须与部署路径一致，并保留两侧 `/`。该脚本固定发布到 `build/web/`，不接受 `--output`、`--wasm`、debug/profile 或启用 CDN 的参数。
 
-当前已确认采用 **Flutter Web + FVM 固定 Flutter 3.47.5**。原文涉及旧技术栈、目录结构与实现方式的内容需要后续同步修订；产品展示目标、浏览器能力边界和实机验收要求仍可作为参考，不应将设计稿中的规划当作已实现功能。
+本机验证发布产物（不要直接双击 HTML）：
+
+```bash
+python3 -m http.server 8080 --bind 127.0.0.1 --directory build/web
+```
+
+打开 `http://127.0.0.1:8080`。子路径版本必须挂载在匹配的子路径，不能直接用上述根路径命令代替。
+
+### 缓存和更新策略
+
+- 首次联网加载并完整校验、缓存页面、脚本、图标、字体和本地 CanvasKit 后，设置中才显示“离线资源已就绪”。
+- 之后可以离线重新打开。清理站点数据或系统回收存储可能使离线失效；不承诺永久离线。
+- 设置中可主动“检查更新”。发现新版本后，点“更新并重新加载”才刷新，不在长期展示中突然刷新。
+- 多标签页各自保留完整旧版本资源；一个标签确认后，其他标签仍可继续展示，并保留确认更新入口。
+- 当前版本缓存缺失时，仅允许联网补齐与该版本哈希一致的资源，不混用新旧构建。旧版本已被替换且缓存丢失时，可能需要联网清除站点数据后重开。
+- 部署应一次性发布完整构建目录，不要只替换脚本；建议入口、bootstrap 和 SW 使用可重新校验的缓存头（如 `Cache-Control: no-cache`）。资源安装时的内容哈希检查可发现部署中途新旧混用。
+
+CanvasKit 的完整离线资源比普通 DOM 时钟大，首次缓存需等待；不能据桌面测试推断老设备内存、功耗或帧率。
+
+## 检查与测试
+
+```bash
+fvm dart format --output=none --set-exit-if-changed lib test
+fvm flutter analyze
+fvm flutter test
+node --test test_web/*.test.mjs
+```
+
+发布构建后可运行真实 Chrome 冒烟验证：
+
+```bash
+node tool/browser_smoke.mjs
+```
+
+脚本默认使用 macOS 的 Google Chrome；其他环境设置 `CHROME_BIN`。脚本创建临时本地 HTTP 服务和隔离的 headless Chrome，执行后关闭二者。截图与报告放入 `build/verification/`，不修改系统浏览器配置；这不是 iOS Safari 实测。
+
+## 代码入口
+
+| 文件 | 职责 |
+| --- | --- |
+| [应用入口](<lib/main.dart>) | 品牌、中文本地化、暗色主题 |
+| [时钟调度](<lib/clock/clock_controller.dart>) | 单一更新循环、系统时间读取、暂停恢复 |
+| [时间格式](<lib/clock/clock_snapshot.dart>) | 从同一快照生成所有时间字段 |
+| [设置模型](<lib/clock/clock_settings.dart>) | 默认值、校验、夜间区间及 JSON |
+| [主页面](<lib/ui/clock_screen.dart>) / [时钟布局](<lib/ui/clock_face.dart>) | 响应式显示、工具栏和生命周期 |
+| [设置面板](<lib/ui/settings_panel.dart>) | 设置交互、状态与更新提示 |
+| [浏览器桥接](<web/platform.js>) | 本地存储、常亮、全屏、安装模式与 SW 注册 |
+| [SW 模板](<web/sw.template.js>) / [生成器](<tool/generate_sw.mjs>) | 资源完整性、离线、版本隔离 |
+| [发布脚本](<tool/build_web.sh>) | Flutter 构建与 SW 生成入口 |
+
+字体已随项目提交，不需要在线下载字体即可运行。中文使用 Noto Sans SC 的重命名裁剪版 ShikeSans，数字使用 Roboto Mono 的裁剪版；许可见 [Noto OFL](<assets/fonts/OFL-NotoSansSC.txt>) 和 [Roboto Mono OFL](<assets/fonts/OFL-RobotoMono.txt>)。新增中文文案后，应使用 [资源生成脚本](<tool/prepare_assets.py>) 更新字体覆盖；仅此维护步骤需要 Python、Pillow、fonttools 及首次源字体下载。
+
+## 文档与版本管理
+
+- [最初设计文档](<desk-clock-design.md>)：保留原始需求；其中 Vite/DOM 方案已由 Flutter Web 取代。
+- [第一版验收记录](<docs/verification-v1.md>)：已验证结果与待实机验收清单。
+- 提交 [.fvmrc](<.fvmrc>)、[pubspec.yaml](<pubspec.yaml>) 和 [pubspec.lock](<pubspec.lock>)；不提交 SDK、缓存、构建产物或敏感凭据。
+- 升级 Flutter 应更新固定版本并重新执行全部测试、构建和目标设备验收，不直接跟随浮动 stable 升级。

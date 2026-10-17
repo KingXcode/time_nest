@@ -1,7 +1,10 @@
-# Desk Clock：极简桌面时钟 Web 开发设计文档
+# 此刻：极简桌面时钟 Web 开发设计文档
 
-版本：v0.1 设计稿  
-状态：用于项目启动；尚未创建项目、编写业务代码或进行实机验证。
+版本：v0.1 原始需求设计（正文保留启动时方案）
+
+当前落地：应用名「此刻」，工程名 `time_nest`，采用 FVM 固定的 Flutter 3.47.5 Web；第一版功能已实现，iPhone 实机及长期展示验收尚待完成。
+
+> **技术方案变更说明**：用户已确认使用 Flutter Web，原文中“不创建 Flutter”、Vite + TypeScript、DOM/CSS、Vitest 等内容仅保留为最初方案记录，不再作为当前实现约束。Flutter Ticker 对应屏幕刷新调度，分字段 ValueNotifier/RepaintBoundary 对应局部刷新；浏览器 API 用独立 JS 桥接，发布脚本扫描构建资源生成 SW。当前运行方式见 [README](<README.md>)，实际验证状态见 [第一版验收记录](<docs/verification-v1.md>)。下文未勾选的实机验收项不代表已经通过。
 
 ## 1. 项目概述
 

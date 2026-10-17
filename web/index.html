@@ -1,46 +1,51 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A minimal desk clock built with Flutter Web.">
-
-  <!-- iOS meta tags & icons -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="此刻：极简桌面时钟。横放手机，让时间安静一点。">
+  <meta name="theme-color" content="#08090B">
+  <meta name="color-scheme" content="dark">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="time_nest">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-
-  <title>time_nest</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="此刻">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="manifest" href="manifest.json">
+  <title>此刻 · 极简桌面时钟</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #08090B; color: #E8E9EB; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+    #app {
+      position: fixed; top: env(safe-area-inset-top, 0px); left: env(safe-area-inset-left, 0px);
+      right: env(safe-area-inset-right, 0px);
+      height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+      height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+      overflow: hidden;
+    }
+    #loading { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; }
+    #loading h1 { font-size: 24px; letter-spacing: 8px; font-weight: 400; margin: 0 0 16px; }
+    #loading p { font-size: 13px; color: #989DA5; line-height: 1.8; }
+    #retry { color: #E8E9EB; background: #20232A; border: 0; border-radius: 8px; padding: 12px 20px; cursor: pointer; }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
-  <script src="flutter_bootstrap.js" async></script>
+  <div id="app"></div>
+  <div id="loading" role="status">
+    <h1>此刻</h1>
+    <p id="loading-message">让时间安静一点。<br>首次打开正在准备本地资源…</p>
+    <button id="retry" hidden onclick="location.reload()">重新加载</button>
+  </div>
+  <noscript>此刻需要 JavaScript 才能显示实时的设备时间，请启用后重新打开。</noscript>
+  <script>
+    window.shikeLoadError = function () {
+      document.getElementById('loading-message').textContent = '加载未完成，请检查网络后重试。离线使用需要先完成一次资源缓存。';
+      document.getElementById('retry').hidden = false;
+    };
+  </script>
+  <script src="platform.js"></script>
+  <script src="flutter_bootstrap.js" async onerror="shikeLoadError()"></script>
 </body>
 </html>

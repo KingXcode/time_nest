@@ -1,9 +1,15 @@
-
-# FVM Version Cache
-.fvm/
-# Local SDK, caches and build output
+# Local Flutter SDK, caches and build output
 .fvm/
 .dart_tool/
 build/
 .pub-cache/
+.flutter-plugins-dependencies
 .DS_Store
+
+# Local editor configuration
+.idea/
+*.iml
+
+# This is an application: keep the resolved dependency versions in Git.
+# Explicitly override developer-level global ignore rules.
+!/pubspec.lock
