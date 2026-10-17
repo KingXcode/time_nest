@@ -95,6 +95,8 @@ function browser(options = {}) {
   if (options.sw) nav.serviceWorker = sw;
   let reloads = 0;
   const context = {
+    shikeLoadingManaged: options.loadingManaged,
+    AudioContext: options.AudioContext,
     document, navigator: nav, localStorage, isSecureContext: options.secure !== false,
     location: { origin: 'https://clock.test', reload() { reloads += 1; } },
     URL, AbortController, MessageChannel: Channel,
@@ -126,11 +128,12 @@ test('public API and state are exact, string-based, and non-polling', async () =
   const b = browser();
   assert.deepEqual(Object.keys(b.api).sort(), [
     'readSettings', 'writeSettings', 'readIntroSeen', 'markIntroSeen', 'getState', 'subscribe',
+    'readTimer', 'writeTimer', 'armTimerSound', 'playTimerSound',
     'unsubscribe', 'setKeepAwake', 'startPresentation', 'toggleFullscreen', 'checkForUpdate', 'applyUpdate', 'dispose',
   ].sort());
   assert.deepEqual(Object.keys(b.state()).sort(), [
     'visible', 'resumeSerial', 'storageAvailable', 'wakeSupported', 'wakeStatus', 'fullscreenSupported',
-    'fullscreen', 'fullscreenError', 'standalone', 'offlineStatus', 'updateAvailable', 'updateError', 'secureContext',
+    'fullscreen', 'fullscreenError', 'standalone', 'offlineStatus', 'offlineCompleted', 'offlineTotal', 'updateAvailable', 'updateError', 'secureContext',
   ].sort());
   assert.equal(b.state().wakeStatus, 'off');
   assert.equal(b.state().offlineStatus, 'unavailable');
@@ -445,4 +448,46 @@ test('status timeout reports failure and pagehide/dispose cancel every pending c
   b.api.dispose();
   assert.equal(b.timers.size, 0);
   assert.equal(b.sw.count() + b.reg.count() + b.reg.active.count(), 0);
+});
+
+test('offline downloads wait for usable UI and accept only owned progress messages', async () => {
+  const b = browser({ sw: true, loadingManaged: true, noActive: true });
+  await settle();
+  assert.equal(b.calls.length, 0);
+  b.events.emit('pageshow'); await settle();
+  assert.equal(b.calls.length, 0);
+  b.document.emit('shike-app-ready'); await settle();
+  assert.equal(b.calls.filter(c => c[0] === 'register').length, 1);
+  b.sw.emit('message', { source: { scriptURL: 'https://other.test/sw.js' }, data: { type: 'SHIKE_PROGRESS', completed: 2, total: 5 } });
+  assert.equal(b.state().offlineTotal, 0);
+  b.sw.emit('message', { source: b.worker(), data: { type: 'SHIKE_PROGRESS', completed: 2, total: 5 } });
+  assert.equal(b.state().offlineCompleted, 2);
+  b.sw.emit('message', { source: b.worker(), data: { type: 'SHIKE_PROGRESS', completed: 9, total: 5 } });
+  assert.equal(b.state().offlineCompleted, 2);
+  b.api.dispose();
+});
+
+test('timer storage is independent and missing sound APIs never throw', () => {
+  const b = browser();
+  b.api.writeSettings('settings'); b.api.writeTimer('timer');
+  assert.equal(b.api.readSettings(), 'settings');
+  assert.equal(b.api.readTimer(), 'timer');
+  b.api.armTimerSound(); b.api.playTimerSound();
+  b.api.dispose();
+});
+
+test('completion sound requires a gesture-enabled context and a visible page', () => {
+  let starts = 0, closes = 0;
+  class Audio {
+    state = 'suspended'; currentTime = 0; destination = {};
+    resume() { this.state = 'running'; return Promise.resolve(); }
+    close() { closes++; return Promise.resolve(); }
+    createOscillator() { return { frequency: {}, connect() {}, disconnect() {}, start() { starts++; }, stop() {} }; }
+    createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {}, disconnect() {} }; }
+  }
+  const b = browser({ AudioContext: Audio });
+  b.api.playTimerSound(); assert.equal(starts, 0);
+  b.api.armTimerSound(); b.api.playTimerSound(); assert.equal(starts, 3);
+  b.hide(); b.api.playTimerSound(); assert.equal(starts, 3);
+  b.api.dispose(); assert.equal(closes, 1);
 });

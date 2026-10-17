@@ -423,6 +423,9 @@ void main() {
           'textIntensity': 0.25,
         },
         'keepAwake': false,
+        'showDate': true,
+        'tone': 'neutral',
+        'orientation': 'auto',
       });
       expect(jsonDecode(defaults.encode()), defaults.toJson());
     });

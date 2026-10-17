@@ -16,6 +16,8 @@ class BrowserState {
     this.fullscreenError = false,
     this.standalone = false,
     this.offlineStatus = 'unavailable',
+    this.offlineCompleted = 0,
+    this.offlineTotal = 0,
     this.updateAvailable = false,
     this.updateError = false,
     this.secureContext = false,
@@ -32,6 +34,8 @@ class BrowserState {
     fullscreenError: json['fullscreenError'] == true,
     standalone: json['standalone'] == true,
     offlineStatus: json['offlineStatus'] as String? ?? 'unavailable',
+    offlineCompleted: (json['offlineCompleted'] as num?)?.toInt() ?? 0,
+    offlineTotal: (json['offlineTotal'] as num?)?.toInt() ?? 0,
     updateAvailable: json['updateAvailable'] == true,
     updateError: json['updateError'] == true,
     secureContext: json['secureContext'] == true,
@@ -47,6 +51,8 @@ class BrowserState {
   final bool fullscreenError;
   final bool standalone;
   final String offlineStatus;
+  final int offlineCompleted;
+  final int offlineTotal;
   final bool updateAvailable;
   final bool updateError;
   final bool secureContext;
@@ -62,7 +68,10 @@ class BrowserState {
 
   String get offlineLabel => switch (offlineStatus) {
     'ready' => '离线资源已就绪',
-    'checking' => '正在准备离线资源',
+    'checking' =>
+      offlineTotal > 0
+          ? '正在准备离线资源 · $offlineCompleted/$offlineTotal 项'
+          : '正在准备离线资源',
     'failed' => '离线缓存失败，可联网重试',
     _ => '离线尚未就绪（需发布构建与 HTTPS）',
   };
@@ -72,6 +81,10 @@ abstract class BrowserClient extends ChangeNotifier {
   BrowserState get state;
   String? readSettings();
   bool writeSettings(String settings);
+  String? readTimer();
+  bool writeTimer(String value);
+  void armTimerSound();
+  void playTimerSound();
   bool readIntroSeen();
   bool markIntroSeen();
   void setKeepAwake(bool enabled);

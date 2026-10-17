@@ -27,6 +27,7 @@
     }
     #loading { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; padding: 24px; }
     #loading h1 { font-size: 24px; letter-spacing: 8px; font-weight: 400; margin: 0 0 16px; }
+    #loading-clock { font-size: clamp(36px, 12vw, 100px); font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; margin: 12px 0; }
     #loading p { font-size: 13px; color: #989DA5; line-height: 1.8; }
     #retry { color: #E8E9EB; background: #20232A; border: 0; border-radius: 8px; padding: 12px 20px; cursor: pointer; }
   </style>
@@ -35,16 +36,19 @@
   <div id="app"></div>
   <div id="loading" role="status">
     <h1>此刻</h1>
+    <div id="loading-clock" aria-hidden="true">--:--:--</div>
     <p id="loading-message">让时间安静一点。<br>首次打开正在准备本地资源…</p>
     <button id="retry" hidden onclick="location.reload()">重新加载</button>
   </div>
   <noscript>此刻需要 JavaScript 才能显示实时的设备时间，请启用后重新打开。</noscript>
   <script>
+    // Keep a retry path even if the optional lightweight loading script fails.
     window.shikeLoadError = function () {
-      document.getElementById('loading-message').textContent = '加载未完成，请检查网络后重试。离线使用需要先完成一次资源缓存。';
+      document.getElementById('loading-message').textContent = '加载未完成，请检查网络后重试。';
       document.getElementById('retry').hidden = false;
     };
   </script>
+  <script src="loading.js" onerror="shikeLoadError()"></script>
   <script src="platform.js"></script>
   <script src="flutter_bootstrap.js" async onerror="shikeLoadError()"></script>
 </body>

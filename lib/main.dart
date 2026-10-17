@@ -3,6 +3,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'platform/browser_client.dart';
 import 'ui/clock_face.dart';
+import 'ui/orientation_frame.dart';
+import 'clock/clock_settings.dart';
 import 'ui/clock_screen.dart';
 
 void main() {
@@ -10,11 +12,26 @@ void main() {
   runApp(const ShikeApp());
 }
 
-class ShikeApp extends StatelessWidget {
+class ShikeApp extends StatefulWidget {
   const ShikeApp({super.key, this.browser, this.now});
 
   final BrowserClient? browser;
   final DateTime Function()? now;
+
+  @override
+  State<ShikeApp> createState() => _ShikeAppState();
+}
+
+class _ShikeAppState extends State<ShikeApp> {
+  late final BrowserClient browser = widget.browser ?? createBrowserClient();
+  late String orientation = ClockSettings.decode(browser.readSettings())
+      .orientation;
+
+  @override
+  void dispose() {
+    if (widget.browser == null) browser.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -43,6 +60,14 @@ class ShikeApp extends StatelessWidget {
         style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
       ),
     ),
-    home: ClockScreen(browser: browser, now: now),
+    builder: (context, child) =>
+        OrientationFrame(orientation: orientation, child: child!),
+    home: ClockScreen(
+      browser: browser,
+      now: widget.now,
+      onOrientationChanged: (value) {
+        if (orientation != value) setState(() => orientation = value);
+      },
+    ),
   );
 }

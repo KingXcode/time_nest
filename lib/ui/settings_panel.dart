@@ -55,6 +55,26 @@ class SettingsPanel extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const _Section('展示预设'),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        for (final entry in const {
+                          'office': '办公',
+                          'bedside': '床头',
+                          'minimal': '极简',
+                        }.entries)
+                          ChoiceChip(
+                            label: Text(entry.value),
+                            selected: value.preset == entry.key,
+                            onSelected: (_) =>
+                                onChanged(value.applyPreset(entry.key)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const _Note('办公显示秒，床头使用暖色与夜间调暗，极简只显示时分。仍可继续调整下面的选项。'),
                     const _Section('时间格式'),
                     SegmentedButton<String>(
                       segments: const [
@@ -82,6 +102,21 @@ class SettingsPanel extends StatelessWidget {
                               value.copyWith(showMilliseconds: enabled),
                             )
                           : null,
+                    ),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('显示日期'),
+                      value: value.showDate,
+                      onChanged: (enabled) =>
+                          onChanged(value.copyWith(showDate: enabled)),
+                    ),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('暖色文字'),
+                      value: value.tone == 'warm',
+                      onChanged: (enabled) => onChanged(
+                        value.copyWith(tone: enabled ? 'warm' : 'neutral'),
+                      ),
                     ),
                     const _Section('文字亮度'),
                     _IntensitySlider(
@@ -161,7 +196,7 @@ class SettingsPanel extends StatelessWidget {
                     const _Section('主屏幕与离线'),
                     Text(state.standalone ? '已从主屏幕独立运行' : 'Safari：分享 → 添加到主屏幕'),
                     const SizedBox(height: 6),
-                    const _Note('横放手机，并手动关闭方向锁定。网页不能保证自动横屏或隐藏全部系统界面。'),
+                    const _Note('主界面的方向按钮支持自动、手动横屏与手动竖屏。手动切换只旋转页面，不改变系统方向锁定。'),
                     const SizedBox(height: 12),
                     Text(
                       state.offlineLabel,
@@ -191,7 +226,7 @@ class SettingsPanel extends StatelessWidget {
                     if (state.updateError)
                       const _Note('更新检查或加载失败，当前版本仍可使用。请联网后重试。'),
                     const _Section('关于此刻'),
-                    const Text('此刻 1.0.0', style: TextStyle(fontSize: 14)),
+                    const Text('此刻 1.1.0', style: TextStyle(fontSize: 14)),
                     const SizedBox(height: 6),
                     const _Note('使用设备系统时间与本地时区，不进行网络校时，也不保证毫秒级精度。'),
                     const _Note('长期展示注意散热和电池健康；发现鼓包或异常发热应停止充电使用。'),

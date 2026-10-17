@@ -29,7 +29,7 @@ class ClockFace extends StatelessWidget {
         builder: (context, intensity, _) {
           final color = Color.lerp(
             clockBackground,
-            clockForeground,
+            settings.tone == 'warm' ? const Color(0xFFFFC98B) : clockForeground,
             intensity,
           )!;
           final dateColor = Color.lerp(
@@ -44,32 +44,34 @@ class ClockFace extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(
-                      height: compact ? 22 : 30,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: ValueListenableBuilder<String>(
-                          valueListenable: clock.date,
-                          builder: (context, date, _) => Text(
-                            date,
-                            key: const Key('clock-date'),
-                            style: TextStyle(
-                              color: dateColor,
-                              fontSize: 18,
-                              letterSpacing: 1.6,
+                    if (settings.showDate)
+                      SizedBox(
+                        height: compact ? 22 : 30,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: ValueListenableBuilder<String>(
+                            valueListenable: clock.date,
+                            builder: (context, date, _) => Text(
+                              date,
+                              key: const Key('clock-date'),
+                              style: TextStyle(
+                                color: dateColor,
+                                fontSize: 18,
+                                letterSpacing: 1.6,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    SizedBox(height: compact ? 10 : 26),
+                    if (settings.showDate) SizedBox(height: compact ? 10 : 26),
                     SizedBox(
                       width: constraints.maxWidth,
                       height: math.max(
                         1,
                         math.min(
                           240,
-                          constraints.maxHeight - (compact ? 32 : 56),
+                          constraints.maxHeight -
+                              (settings.showDate ? (compact ? 32 : 56) : 0),
                         ),
                       ),
                       child: FittedBox(

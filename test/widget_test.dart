@@ -132,6 +132,7 @@ void main() {
     await tester.tap(find.text('12 小时'));
     await tester.pump();
     expect(ClockSettings.decode(browser.settings).hourCycle, 'h12');
+    await tester.ensureVisible(find.text('显示秒'));
     await tester.tap(find.text('显示秒'));
     await tester.pump();
     final settings = ClockSettings.decode(browser.settings);

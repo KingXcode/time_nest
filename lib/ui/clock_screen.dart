@@ -5,12 +5,20 @@ import 'package:flutter/services.dart';
 
 import '../clock/clock_controller.dart';
 import '../clock/clock_settings.dart';
+import '../clock/timer_controller.dart';
+import 'timer_face.dart';
 import '../platform/browser_client.dart';
 import 'clock_face.dart';
 import 'settings_panel.dart';
 
 class ClockScreen extends StatefulWidget {
-  const ClockScreen({super.key, this.browser, this.now});
+  const ClockScreen({
+    super.key,
+    this.browser,
+    this.now,
+    this.onOrientationChanged,
+  });
+  final ValueChanged<String>? onOrientationChanged;
   final BrowserClient? browser;
   final DateTime Function()? now;
 
@@ -23,6 +31,7 @@ class _ClockScreenState extends State<ClockScreen>
   late final BrowserClient _browser;
   late final ValueNotifier<ClockSettings> _settings;
   late final ClockController _clock;
+  late final TimerController _timer;
   final _sceneFocus = FocusNode(debugLabel: 'Clock scene');
   final _toolbarFocus = FocusNode(debugLabel: 'Clock toolbar');
   Timer? _hideTimer;
@@ -43,12 +52,29 @@ class _ClockScreenState extends State<ClockScreen>
       settings: _settings.value,
       now: widget.now,
     );
+    _timer = TimerController(
+      save: _browser.writeTimer,
+      now: widget.now,
+      raw: _browser.readTimer(),
+      onComplete: _browser.playTimerSound,
+    );
+    _timer.setVisible(_browser.state.visible);
+    _timer.addListener(_timerChanged);
+    if (_timer.mode != 'clock') {
+      _clock.updateSettings(
+        _settings.value.copyWith(showSeconds: false, showMilliseconds: false),
+      );
+    }
     _clock.setVisible(_browser.state.visible);
     _resumeSerial = _browser.state.resumeSerial;
     _browser.addListener(_browserChanged);
     WidgetsBinding.instance.addObserver(this);
     // This restores an explicit, previously persisted user preference.
     if (_settings.value.keepAwake) _browser.setKeepAwake(true);
+  }
+
+  void _timerChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -62,6 +88,7 @@ class _ClockScreenState extends State<ClockScreen>
       _lifecycleVisible && _browser.state.visible,
       resample: _lifecycleVisible,
     );
+    _timer.setVisible(_lifecycleVisible && _browser.state.visible);
   }
 
   void _browserChanged() {
@@ -71,6 +98,7 @@ class _ClockScreenState extends State<ClockScreen>
       _lifecycleVisible && state.visible,
       resample: state.resumeSerial != _resumeSerial,
     );
+    _timer.setVisible(_lifecycleVisible && state.visible);
     _resumeSerial = state.resumeSerial;
     setState(() {});
   }
@@ -79,8 +107,13 @@ class _ClockScreenState extends State<ClockScreen>
     final wasAwake = _settings.value.keepAwake;
     if (_settings.value == value) return;
     _settings.value = value;
-    _clock.updateSettings(value);
+    _clock.updateSettings(
+      _timer.mode == 'clock'
+          ? value
+          : value.copyWith(showSeconds: false, showMilliseconds: false),
+    );
     _browser.writeSettings(value.encode());
+    widget.onOrientationChanged?.call(value.orientation);
     if (wasAwake != value.keepAwake) {
       _browser.setKeepAwake(value.keepAwake);
     }
@@ -155,6 +188,8 @@ class _ClockScreenState extends State<ClockScreen>
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _browser.removeListener(_browserChanged);
+    _timer.removeListener(_timerChanged);
+    _timer.dispose();
     _clock.dispose();
     _settings.dispose();
     _sceneFocus.dispose();
@@ -192,19 +227,26 @@ class _ClockScreenState extends State<ClockScreen>
                       Expanded(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: ClockFace(
-                            clock: _clock,
-                            settings: _settings.value,
-                          ),
+                          child: _timer.mode == 'clock'
+                              ? ClockFace(
+                                  clock: _clock,
+                                  settings: _settings.value,
+                                )
+                              : TimerFace(
+                                  timer: _timer,
+                                  settings: _settings.value,
+                                  intensity: _clock.intensity,
+                                  armSound: _browser.armTimerSound,
+                                ),
                         ),
                       ),
-                      if (_introVisible)
+                      if (_introVisible && _timer.mode == 'clock')
                         _Intro(
                           onDismiss: _dismissIntro,
                           onStart: _startPresentation,
                         )
                       else
-                        const SizedBox(height: 52),
+                        SizedBox(height: _timer.mode == 'clock' ? 52 : 28),
                     ],
                   ),
                 ),
@@ -226,12 +268,56 @@ class _ClockScreenState extends State<ClockScreen>
                             onFocusChange: (_) => _reveal(),
                             child: Row(
                               children: [
-                                const Text(
-                                  '此刻',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    letterSpacing: 4,
-                                    color: Color(0xFFB5B9C1),
+                                PopupMenuButton<String>(
+                                  tooltip: '切换模式',
+                                  initialValue: _timer.mode,
+                                  onSelected: (value) {
+                                    _timer.selectMode(value);
+                                    _clock.updateSettings(
+                                      value == 'clock'
+                                          ? _settings.value
+                                          : _settings.value.copyWith(
+                                              showSeconds: false,
+                                              showMilliseconds: false,
+                                            ),
+                                    );
+                                    _reveal();
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'clock',
+                                      child: Text('时钟'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'countdown',
+                                      child: Text('倒计时'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'focus',
+                                      child: Text('番茄钟'),
+                                    ),
+                                  ],
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          switch (_timer.mode) {
+                                            'countdown' => '倒计时',
+                                            'focus' => '番茄钟',
+                                            _ => '此刻',
+                                          },
+                                          style: const TextStyle(fontSize: 16),
+                                        ),
+                                        const Icon(
+                                          Icons.expand_more_rounded,
+                                          size: 20,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                                 const Spacer(),
@@ -240,6 +326,33 @@ class _ClockScreenState extends State<ClockScreen>
                                     onPressed: _startPresentation,
                                     child: const Text('开始展示'),
                                   ),
+                                PopupMenuButton<String>(
+                                  tooltip: '横竖屏切换',
+                                  icon: const Icon(
+                                    Icons.screen_rotation_rounded,
+                                    size: 22,
+                                  ),
+                                  initialValue: _settings.value.orientation,
+                                  onSelected: (value) => _changeSettings(
+                                    _settings.value.copyWith(
+                                      orientation: value,
+                                    ),
+                                  ),
+                                  itemBuilder: (_) => [
+                                    for (final entry in const {
+                                      'auto': '自动方向',
+                                      'landscape': '手动横屏',
+                                      'portrait': '手动竖屏',
+                                    }.entries)
+                                      CheckedPopupMenuItem(
+                                        value: entry.key,
+                                        checked:
+                                            _settings.value.orientation ==
+                                            entry.key,
+                                        child: Text(entry.value),
+                                      ),
+                                  ],
+                                ),
                                 IconButton(
                                   tooltip: '展示设置',
                                   onPressed: _openSettings,

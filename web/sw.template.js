@@ -31,10 +31,21 @@ async function isComplete(version) {
   const keys = new Set((await cache.keys()).map((request) => request.url));
   return manifest.resources.every((resource) => keys.has(resourceURL(resource.path)));
 }
+async function reportProgress(completed) {
+  try {
+    for (const client of await self.clients.matchAll({ type: 'window', includeUncontrolled: true })) {
+      if (inScope(new URL(client.url))) client.postMessage({
+        type: 'SHIKE_PROGRESS', completed, total: BUILD.resources.length,
+      });
+    }
+  } catch (_) { /* Progress is optional; cache integrity is authoritative. */ }
+}
 async function installBuild() {
   if (await isComplete(BUILD.version)) return;
   const cache = await caches.open(CACHE);
   let next = 0;
+  let completed = 0;
+  await reportProgress(0);
   let failure = null;
   // Bounded concurrency, and drain all in-flight writes before deleting a failed
   // install. A successful marker is written only after EVERY resource is cached.
@@ -49,6 +60,7 @@ async function installBuild() {
           throw new Error(`Deployment changed during installation: ${resource.path}`);
         }
         await cache.put(url, response);
+        await reportProgress(++completed);
       } catch (error) { failure = error; }
     }
   }));

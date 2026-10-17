@@ -33,13 +33,14 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript',
   '.json': 'application/json', '.wasm': 'application/wasm', '.ttf': 'font/ttf', '.png': 'image/png' };
 const server = createServer((request, response) => {
   const url = new URL(request.url, 'http://localhost');
-  const base = url.pathname.startsWith('/time_nest/') ? '/time_nest/' : '/';
+  const base = url.pathname.startsWith('/time_nest/') ? '/time_nest/' : url.pathname.startsWith('/slow/') ? '/slow/' : url.pathname.startsWith('/no-loading/') ? '/no-loading/' : '/';
   const name = decodeURIComponent(url.pathname.slice(base.length)) || 'index.html';
-  const bytes = bundle(base, version).get(name);
+  const bytes = base === '/no-loading/' && name === 'loading.js' ? null : bundle(base, version).get(name);
   if (!bytes) { response.writeHead(404); response.end('Not found'); return; }
   response.writeHead(200, { 'Content-Type': types[path.extname(name)] || 'application/octet-stream',
     'Cache-Control': 'no-store' });
-  response.end(bytes);
+  if (base === '/slow/' && name === 'main.dart.js') setTimeout(() => response.end(bytes), 1800);
+  else response.end(bytes);
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
@@ -138,13 +139,37 @@ async function enableSemantics(p = page) {
 async function labels(p = page) {
   return p.evaluate(`(${deepQuery})('[aria-label]').map(e => ({role:e.getAttribute('role'), label:e.getAttribute('aria-label'), checked:e.getAttribute('aria-checked')}))`);
 }
+async function activate(label, p = page) {
+  const point = await p.evaluate(`(() => {
+    const nodes = (${deepQuery})('[role="button"], [role="menuitem"], [role="menuitemcheckbox"], [role="checkbox"]');
+    const element = nodes.find(e => (e.getAttribute('aria-label') || e.textContent).trim().split('\\n').includes(${JSON.stringify(label)}));
+    if (!element) throw new Error('Missing control: ' + ${JSON.stringify(label)} + ' available=' + nodes.map(e=>e.getAttribute('aria-label') || e.textContent).join('|'));
+    const box = element.getBoundingClientRect(); return {x: box.x + box.width/2, y: box.y + box.height/2};
+  })()`);
+  await click(point.x, point.y, p); await delay(350);
+}
+async function showToolbar(p = page) { await click(5, 5, p); await delay(250); }
 function passed(name) { checks.push(name); console.log(`PASS ${name}`); }
 try {
   port = await waitFor(async () => Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]), 'Chrome debugging endpoint');
+  const slow = await connect();
+  await slow.navigate(origin + '/slow/');
+  await waitFor(() => slow.evaluate('Boolean(document.getElementById("loading-clock")?.textContent.match(/^[0-9]{2}:[0-9]{2}:[0-9]{2}$/))'), 'lightweight startup clock');
+  assert.equal(await slow.evaluate('Boolean(document.querySelector("flutter-view"))'), false);
+  assert.equal(await slow.evaluate('navigator.serviceWorker.getRegistration(document.baseURI).then(r=>Boolean(r))'), false);
+  await slow.screenshot('00-loading.png');
+  await ready(slow); await offlineReady(slow);
+  passed('slow download shows a basic clock before Flutter and defers precache until ready');
+  const missingLoader = await connect();
+  await missingLoader.navigate(origin + '/no-loading/'); await ready(missingLoader);
+  passed('missing optional startup script does not block the complete app');
   page = await connect();
   await page.navigate(origin + '/');
   await ready(); await offlineReady();
   assert.match(await page.evaluate('document.title'), /此刻/);
+  const offlineProgress = await page.evaluate('JSON.parse(shike.getState())');
+  assert.ok(offlineProgress.offlineTotal > 0);
+  assert.equal(offlineProgress.offlineCompleted, offlineProgress.offlineTotal);
   const manifest = await page.evaluate('fetch("manifest.json").then(r=>r.json())');
   assert.equal(manifest.name, '此刻'); assert.equal(manifest.orientation, 'any');
   await page.screenshot('01-first-open.png');
@@ -170,6 +195,56 @@ try {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 414, height: 736, deviceScaleFactor: 1, mobile: false });
   await delay(500); await page.screenshot('05-portrait.png');
   passed('desktop, landscape, portrait and settings screenshots');
+  await showToolbar();
+  await activate('横竖屏切换'); await activate('手动横屏');
+  assert.equal(await page.evaluate('JSON.parse(shike.readSettings()).orientation'), 'landscape');
+  await showToolbar(); await activate('展示设置');
+  for (const [label, tone, showDate] of [['办公','neutral',true], ['床头','warm',true], ['极简','neutral',false]]) {
+    await activate(label);
+    const stored = await page.evaluate('JSON.parse(shike.readSettings())');
+    assert.equal(stored.tone, tone); assert.equal(stored.showDate, showDate);
+    await page.screenshot(`preset-${tone}-${showDate}.png`);
+  }
+  await activate('关闭设置');
+  await page.screenshot('07-manual-landscape.png');
+  await page.send('Page.reload'); await ready(); await enableSemantics();
+  assert.equal(await page.evaluate('JSON.parse(shike.readSettings()).orientation'), 'landscape');
+  await showToolbar(); await activate('横竖屏切换'); await activate('手动竖屏');
+  await page.screenshot('08-manual-portrait.png');
+  passed('all three presets and manual orientation persist; rotated controls remain clickable');
+  await showToolbar(); await activate('切换模式'); await activate('倒计时');
+  await activate('15 分钟'); await activate('开始');
+  await waitFor(() => page.evaluate('JSON.parse(shike.readTimer()).countdown.status === "running"'), 'countdown started');
+  await delay(1200); await activate('暂停');
+  let timerState = await page.evaluate('JSON.parse(shike.readTimer())');
+  assert.equal(timerState.countdown.status, 'paused');
+  assert.ok(timerState.countdown.remainingMs < 900000);
+  const pausedRemaining = timerState.countdown.remainingMs;
+  await page.send('Page.reload'); await ready(); await enableSemantics();
+  assert.equal(await page.evaluate('JSON.parse(shike.readTimer()).countdown.remainingMs'), pausedRemaining);
+  await page.screenshot('09-countdown.png');
+  await showToolbar(); await activate('切换模式'); await activate('番茄钟');
+  await activate('开始');
+  timerState = await page.evaluate('JSON.parse(shike.readTimer())');
+  assert.equal(timerState.focus.status, 'running');
+  assert.equal(timerState.countdown.status, 'paused');
+  // Move only the persisted deadline into the past to test a real cold restoration.
+  timerState.focus.deadline = Date.now() - 1000;
+  await page.evaluate(`shike.writeTimer(${JSON.stringify(JSON.stringify(timerState))})`);
+  await page.send('Page.reload'); await ready(); await enableSemantics();
+  assert.equal(await page.evaluate('JSON.parse(shike.readTimer()).todayFocus'), 1);
+  await activate('开始休息');
+  assert.equal(await page.evaluate('JSON.parse(shike.readTimer()).focus.phase'), 'shortBreak');
+  await page.screenshot('10-focus-rest.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 736, height: 320, deviceScaleFactor: 1, mobile: false });
+  await showToolbar(); await activate('横竖屏切换'); await activate('自动方向');
+  await activate('暂停');
+  assert.equal(await page.evaluate('JSON.parse(shike.readTimer()).focus.status'), 'paused');
+  await page.screenshot('11-short-landscape.png');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 414, height: 736, deviceScaleFactor: 1, mobile: false });
+  await delay(250);
+  await showToolbar(); await activate('切换模式'); await activate('时钟');
+  passed('countdown pauses and restores; focus completion counts once and starts rest by choice');
   const custom = { version: 1, hourCycle: 'h12', showSeconds: false, showMilliseconds: true,
     textIntensity: .7, nightMode: { enabled: true, start: '22:00', end: '07:00', textIntensity: .25 }, keepAwake: false };
   await page.evaluate(`shike.writeSettings(${JSON.stringify(JSON.stringify(custom))})`);

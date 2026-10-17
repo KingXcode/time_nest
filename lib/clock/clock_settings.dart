@@ -16,6 +16,9 @@ final class ClockSettings {
     this.nightEnd = '07:00',
     this.nightIntensity = 0.25,
     this.keepAwake = false,
+    this.showDate = true,
+    this.tone = 'neutral',
+    this.orientation = 'auto',
   });
 
   final String hourCycle;
@@ -27,6 +30,67 @@ final class ClockSettings {
   final String nightEnd;
   final double nightIntensity;
   final bool keepAwake;
+  final bool showDate;
+  final String tone;
+  final String orientation;
+
+  String get preset {
+    if (showDate &&
+        showSeconds &&
+        !showMilliseconds &&
+        tone == 'neutral' &&
+        !nightEnabled &&
+        textIntensity == 1) {
+      return 'office';
+    }
+    if (showDate &&
+        !showSeconds &&
+        !showMilliseconds &&
+        tone == 'warm' &&
+        nightEnabled &&
+        textIntensity == .65 &&
+        nightIntensity == .2) {
+      return 'bedside';
+    }
+    if (!showDate &&
+        !showSeconds &&
+        !showMilliseconds &&
+        tone == 'neutral' &&
+        !nightEnabled &&
+        textIntensity == 1) {
+      return 'minimal';
+    }
+    return 'custom';
+  }
+
+  ClockSettings applyPreset(String preset) => switch (preset) {
+    'office' => copyWith(
+      showDate: true,
+      showSeconds: true,
+      showMilliseconds: false,
+      tone: 'neutral',
+      textIntensity: 1,
+      nightEnabled: false,
+    ),
+    'bedside' => copyWith(
+      showDate: true,
+      showSeconds: false,
+      showMilliseconds: false,
+      tone: 'warm',
+      textIntensity: .65,
+      nightEnabled: true,
+      nightIntensity: .2,
+    ),
+    'minimal' => copyWith(
+      showDate: false,
+      showSeconds: false,
+      showMilliseconds: false,
+      tone: 'neutral',
+      textIntensity: 1,
+      nightEnabled: false,
+    ),
+    _ => this,
+  };
 
   /// Hiding seconds never destroys the user's millisecond preference.
   bool get effectiveMilliseconds => showSeconds && showMilliseconds;
@@ -66,6 +130,9 @@ final class ClockSettings {
     String? nightEnd,
     double? nightIntensity,
     bool? keepAwake,
+    bool? showDate,
+    String? tone,
+    String? orientation,
   }) {
     return ClockSettings(
       hourCycle: _readHourCycle(hourCycle ?? this.hourCycle),
@@ -80,6 +147,13 @@ final class ClockSettings {
         0.25,
       ),
       keepAwake: keepAwake ?? this.keepAwake,
+      showDate: showDate ?? this.showDate,
+      tone: _choice(tone ?? this.tone, ['neutral', 'warm'], 'neutral'),
+      orientation: _choice(orientation ?? this.orientation, [
+        'auto',
+        'landscape',
+        'portrait',
+      ], 'auto'),
     );
   }
 
@@ -99,6 +173,9 @@ final class ClockSettings {
         'textIntensity': _readIntensity(nightIntensity, 0.25),
       },
       'keepAwake': keepAwake,
+      'showDate': showDate,
+      'tone': tone,
+      'orientation': orientation,
     };
   }
 
@@ -125,6 +202,13 @@ final class ClockSettings {
       nightEnd: _readTime(night['end'], '07:00'),
       nightIntensity: _readIntensity(night['textIntensity'], 0.25),
       keepAwake: _readBool(value['keepAwake'], false),
+      showDate: _readBool(value['showDate'], true),
+      tone: _choice(value['tone'], ['neutral', 'warm'], 'neutral'),
+      orientation: _choice(value['orientation'], [
+        'auto',
+        'landscape',
+        'portrait',
+      ], 'auto'),
     );
   }
 
@@ -152,7 +236,10 @@ final class ClockSettings {
             nightStart == other.nightStart &&
             nightEnd == other.nightEnd &&
             nightIntensity == other.nightIntensity &&
-            keepAwake == other.keepAwake;
+            keepAwake == other.keepAwake &&
+            showDate == other.showDate &&
+            tone == other.tone &&
+            orientation == other.orientation;
   }
 
   @override
@@ -166,7 +253,13 @@ final class ClockSettings {
     nightEnd,
     nightIntensity,
     keepAwake,
+    showDate,
+    tone,
+    orientation,
   );
+
+  static String _choice(Object? value, List<String> values, String fallback) =>
+      value is String && values.contains(value) ? value : fallback;
 
   static bool _readBool(Object? value, bool fallback) {
     return value is bool ? value : fallback;

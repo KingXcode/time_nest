@@ -6,11 +6,13 @@ BrowserClient createBrowserClient() => MemoryBrowserClient();
 class MemoryBrowserClient extends BrowserClient {
   MemoryBrowserClient({
     this.settings,
+    this.timer,
     this.introSeen = false,
     this.persistent = true,
   });
 
   String? settings;
+  String? timer;
   bool introSeen;
   final bool persistent;
   @override
@@ -23,6 +25,18 @@ class MemoryBrowserClient extends BrowserClient {
     return true;
   }
 
+  @override
+  String? readTimer() => timer;
+  @override
+  bool writeTimer(String value) {
+    timer = value;
+    return persistent;
+  }
+
+  @override
+  void armTimerSound() {}
+  @override
+  void playTimerSound() {}
   @override
   bool readIntroSeen() => introSeen;
   @override

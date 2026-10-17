@@ -14,6 +14,14 @@ external void _unsubscribe();
 external JSString? _readSettings();
 @JS('shike.writeSettings')
 external JSBoolean _writeSettings(JSString settings);
+@JS('shike.readTimer')
+external JSString? _readTimer();
+@JS('shike.writeTimer')
+external JSBoolean _writeTimer(JSString value);
+@JS('shike.armTimerSound')
+external void _armTimerSound();
+@JS('shike.playTimerSound')
+external void _playTimerSound();
 @JS('shike.readIntroSeen')
 external JSBoolean _readIntroSeen();
 @JS('shike.markIntroSeen')
@@ -59,6 +67,14 @@ class WebBrowserClient extends BrowserClient {
   String? readSettings() => _readSettings()?.toDart;
   @override
   bool writeSettings(String settings) => _writeSettings(settings.toJS).toDart;
+  @override
+  String? readTimer() => _readTimer()?.toDart;
+  @override
+  bool writeTimer(String value) => _writeTimer(value.toJS).toDart;
+  @override
+  void armTimerSound() => _armTimerSound();
+  @override
+  void playTimerSound() => _playTimerSound();
   @override
   bool readIntroSeen() => _readIntroSeen().toDart;
   @override

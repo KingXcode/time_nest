@@ -6,6 +6,8 @@
   const nav = win.navigator;
   const settingsKey = 'shike.settings.v1';
   const introKey = 'shike.intro.v1';
+  const timerKey = 'shike.timer.v1';
+  let audioContext = null;
   const base = new URL('./', doc.baseURI);
   const workerURL = new URL('shike-sw.js', base);
   const media = typeof win.matchMedia === 'function'
@@ -26,11 +28,14 @@
     fullscreenError: false,
     standalone: Boolean(nav.standalone || media?.matches),
     offlineStatus: 'checking',
+    offlineCompleted: 0,
+    offlineTotal: 0,
     updateAvailable: false,
     updateError: false,
     secureContext: win.isSecureContext === true,
   };
   if (!state.wakeSupported) state.wakeStatus = 'unsupported';
+  let appReady = !win.shikeLoadingManaged;
   let disposed = false;
   let paused = false;
   let subscriber = null;
@@ -43,7 +48,7 @@
   let wakeReleaseListener = null;
   let registration = null;
   let activeUpdateAvailable = false;
-  let settingsStorageFailed = false;
+  const storageFailures = new Set();
   let setupPending = null;
   let swEpoch = 0;
   let updatePending = false;
@@ -73,10 +78,10 @@
   function storageRead(key) {
     try {
       const value = win.localStorage.getItem(key);
-      patch({ storageAvailable: !settingsStorageFailed });
+      patch({ storageAvailable: storageFailures.size === 0 });
       return value;
     } catch (_) {
-      if (key === settingsKey) settingsStorageFailed = true;
+      if (key === settingsKey || key === timerKey) storageFailures.add(key);
       patch({ storageAvailable: false });
       return null;
     }
@@ -85,11 +90,11 @@
     if (disposed) return false;
     try {
       win.localStorage.setItem(key, value);
-      if (key === settingsKey) settingsStorageFailed = false;
-      patch({ storageAvailable: !settingsStorageFailed });
+      storageFailures.delete(key);
+      patch({ storageAvailable: storageFailures.size === 0 });
       return true;
     } catch (_) {
-      if (key === settingsKey) settingsStorageFailed = true;
+      if (key === settingsKey || key === timerKey) storageFailures.add(key);
       patch({ storageAvailable: false });
       return false;
     }
@@ -239,7 +244,7 @@
     refreshRegistration();
   }
   function setupSW() {
-    if (disposed || paused) return Promise.resolve(false);
+    if (!appReady || disposed || paused) return Promise.resolve(false);
     if (setupPending) return setupPending;
     if (!state.secureContext || !sw || base.origin !== win.location.origin) {
       patch({ offlineStatus: 'unavailable' });
@@ -357,6 +362,7 @@
     keepAwake = false;
     stopWake();
     disposed = true;
+    if (audioContext) Promise.resolve(audioContext.close()).catch(() => {});
     swEpoch += 1;
     probeAbort?.abort();
     closeChannels();
@@ -371,10 +377,49 @@
   listen(doc, 'fullscreenerror', () => patch({ fullscreenError: true }));
   listen(doc, 'webkitfullscreenerror', () => patch({ fullscreenError: true }));
   if (media?.addEventListener) listen(media, 'change', () => patch({ standalone: Boolean(nav.standalone || media.matches) }));
-  if (sw?.addEventListener) listen(sw, 'controllerchange', controllerChanged);
+  listen(doc, 'shike-app-ready', () => { appReady = true; setupSW(); });
+  if (sw?.addEventListener) {
+    listen(sw, 'controllerchange', controllerChanged);
+    listen(sw, 'message', (event) => {
+      const data = event.data;
+      if (!ownsWorker(event.source) || data?.type !== 'SHIKE_PROGRESS'
+          || !Number.isInteger(data.completed) || !Number.isInteger(data.total)
+          || data.total <= 0 || data.completed < 0 || data.completed > data.total) return;
+      if (state.offlineStatus !== 'ready') patch({ offlineCompleted: data.completed,
+        offlineTotal: data.total, offlineStatus: 'checking' });
+    });
+  }
   win.shike = {
     readSettings: () => disposed ? null : storageRead(settingsKey),
     writeSettings: (value) => typeof value === 'string' && storageWrite(settingsKey, value),
+    readTimer: () => disposed ? null : storageRead(timerKey),
+    writeTimer: (value) => typeof value === 'string' && storageWrite(timerKey, value),
+    armTimerSound: () => {
+      if (disposed) return;
+      try {
+        const AudioContext = win.AudioContext || win.webkitAudioContext;
+        if (!AudioContext) return;
+        audioContext ||= new AudioContext();
+        Promise.resolve(audioContext.resume()).catch(() => {});
+      } catch (_) { /* Visual completion always remains available. */ }
+    },
+    playTimerSound: () => {
+      if (disposed || !state.visible || audioContext?.state !== 'running') return;
+      try {
+        for (let i = 0; i < 3; i++) {
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          const start = audioContext.currentTime + i * .32;
+          oscillator.frequency.value = 660;
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(.12, start + .02);
+          gain.gain.exponentialRampToValueAtTime(.001, start + .24);
+          oscillator.connect(gain); gain.connect(audioContext.destination);
+          oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+          oscillator.start(start); oscillator.stop(start + .25);
+        }
+      } catch (_) { /* Unsupported audio must not affect the timer. */ }
+    },
     readIntroSeen: () => !disposed && storageRead(introKey) === '1',
     markIntroSeen: () => storageWrite(introKey, '1'),
     getState: () => JSON.stringify(state),
