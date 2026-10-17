@@ -12,7 +12,8 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   cupertino_icons: ^1.0.8
-
+  qr: ^4.0.0
+  zxing_lib: ^1.1.4
 dev_dependencies:
   flutter_test:
     sdk: flutter

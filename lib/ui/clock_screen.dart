@@ -10,6 +10,7 @@ import 'timer_face.dart';
 import '../platform/browser_client.dart';
 import 'clock_face.dart';
 import 'settings_panel.dart';
+import '../tools/toolbox_screen.dart';
 
 class ClockScreen extends StatefulWidget {
   const ClockScreen({
@@ -182,6 +183,14 @@ class _ClockScreenState extends State<ClockScreen>
     _reveal();
   }
 
+  Future<void> _openToolbox() async {
+    _hideTimer?.cancel();
+    FocusScope.of(context).unfocus();
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const ToolboxScreen()));
+    if (mounted) _reveal();
+  }
+
   Widget _workspace(BoxConstraints box) {
     // OrientationFrame supplies the effective page orientation, including
     // manual rotation. Keep one Flex so rotating preserves the panel's scroll.
@@ -320,6 +329,10 @@ class _ClockScreenState extends State<ClockScreen>
                                   tooltip: '切换模式',
                                   initialValue: _timer.mode,
                                   onSelected: (value) {
+                                    if (value == 'tools') {
+                                      _openToolbox();
+                                      return;
+                                    }
                                     _timer.selectMode(value);
                                     _clock.updateSettings(
                                       value == 'clock'
@@ -343,6 +356,11 @@ class _ClockScreenState extends State<ClockScreen>
                                     PopupMenuItem(
                                       value: 'focus',
                                       child: Text('番茄钟'),
+                                    ),
+                                    PopupMenuDivider(),
+                                    PopupMenuItem(
+                                      value: 'tools',
+                                      child: Text('工具箱'),
                                     ),
                                   ],
                                   child: Padding(
@@ -370,10 +388,27 @@ class _ClockScreenState extends State<ClockScreen>
                                 ),
                                 const Spacer(),
                                 if (!_introVisible || _panelOpen)
-                                  TextButton(
-                                    onPressed: _startPresentation,
-                                    child: const Text('开始展示'),
+                                  if (MediaQuery.sizeOf(context).width < 380)
+                                    IconButton(
+                                      tooltip: '开始展示',
+                                      onPressed: _startPresentation,
+                                      icon: const Icon(
+                                        Icons.play_arrow_rounded,
+                                      ),
+                                    )
+                                  else
+                                    TextButton(
+                                      onPressed: _startPresentation,
+                                      child: const Text('开始展示'),
+                                    ),
+                                IconButton(
+                                  tooltip: '工具箱',
+                                  onPressed: _openToolbox,
+                                  icon: const Icon(
+                                    Icons.grid_view_rounded,
+                                    size: 22,
                                   ),
+                                ),
                                 PopupMenuButton<String>(
                                   tooltip: '横竖屏切换',
                                   icon: const Icon(

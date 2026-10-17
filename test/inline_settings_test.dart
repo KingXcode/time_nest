@@ -109,8 +109,9 @@ void main() {
     tester,
   ) async {
     await launch(tester, introSeen: false);
-    expect(find.text('开始展示'), findsOneWidget);
-    await tester.tap(find.text('开始展示'));
+    // Compact toolbars expose the same action as an accessible play button.
+    expect(find.byTooltip('开始展示'), findsOneWidget);
+    await tester.tap(find.byTooltip('开始展示'));
     await tester.pump();
     expect(find.byType(SettingsPanel), findsNothing);
     expect(find.text('知道了'), findsNothing);
