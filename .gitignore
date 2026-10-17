@@ -13,3 +13,4 @@ build/
 # This is an application: keep the resolved dependency versions in Git.
 # Explicitly override developer-level global ignore rules.
 !/pubspec.lock
+!/.fvmrc

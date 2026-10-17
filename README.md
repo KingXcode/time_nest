@@ -4,6 +4,8 @@
 
 「此刻」是一款基于 Flutter Web 的极简桌面时钟，面向闲置手机的长时间横屏展示，首要目标设备为 iPhone 8 Plus。应用显示名为「此刻」，工程及仓库名称保持 `time_nest`。
 
+在线使用：[打开此刻](https://kingxcode.github.io/time_nest/) · 源码：[KingXcode/time_nest](https://github.com/KingXcode/time_nest)
+
 > 第一版功能已实现。自动化验证与实机验收是两回事：iPhone 的具体 iOS 版本、Safari / 主屏幕模式、电源管理和长时间发热仍需实测。详见 [第一版验收记录](<docs/verification-v1.md>)。
 
 ## 第一版功能
@@ -37,10 +39,10 @@
 
 ## 开发运行
 
-安装 Git、[FVM](https://fvm.app/documentation/getting-started/installation) 和 Chrome。克隆需要内网访问与仓库权限；已有项目可跳过克隆。
+安装 Git、[FVM](https://fvm.app/documentation/getting-started/installation) 和 Chrome；已有项目可跳过克隆。
 
 ```bash
-git clone http://192.168.12.175/git/niesiyang/time_nest.git
+git clone https://github.com/KingXcode/time_nest.git
 cd time_nest
 fvm install
 fvm flutter --version
@@ -117,6 +119,14 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory build/web
 - 部署应一次性发布完整构建目录，不要只替换脚本；建议入口、bootstrap 和 SW 使用可重新校验的缓存头（如 `Cache-Control: no-cache`）。资源安装时的内容哈希检查可发现部署中途新旧混用。
 
 CanvasKit 的完整离线资源比普通 DOM 时钟大，首次缓存需等待；不能据桌面测试推断老设备内存、功耗或帧率。
+
+### GitHub Pages 自动发布
+
+[发布工作流](<.github/workflows/deploy-pages.yml>) 在推送 `main` 后自动执行，也可在 GitHub Actions 页面手动运行。它读取 `.fvmrc` 固定 Flutter 版本，执行格式检查、静态分析、Flutter 测试和 Node 测试，再构建 `/time_nest/` 子路径的完整离线资源并发布到 GitHub Pages。
+
+仓库 Settings → Pages 的发布来源使用 **GitHub Actions**。工作流使用 GitHub 自动提供的短期凭据，无需在源码中填写个人 Token。构建和部署结果可在 [Actions](https://github.com/KingXcode/time_nest/actions/workflows/deploy-pages.yml) 查看；全部成功后访问上方在线地址。
+
+CI 通过 `FLUTTER_BIN=flutter` 调用已经安装的固定版本 SDK；本地继续使用 `bash tool/build_web.sh` 和 FVM。首次访问需下载资源，显示“离线资源已就绪”后才具备离线打开条件。发布新版本后，已打开的页面仍需用户确认更新。
 
 ## 检查与测试
 

@@ -26,5 +26,11 @@ done
 # pwa-strategy (deprecated, supports none); runner/flutter_command.dart defines
 # the negatable web-resources-cdn flag. Remove pwa-strategy if upgrading to a
 # future SDK that removes it; do not invoke Flutter merely to probe flags.
-fvm flutter build web --release --no-web-resources-cdn --pwa-strategy=none "$@"
+# CI installs the exact .fvmrc SDK on PATH; local development continues using FVM.
+if [[ -n "${FLUTTER_BIN:-}" ]]; then
+  flutter_command=("${FLUTTER_BIN}")
+else
+  flutter_command=(fvm flutter)
+fi
+"${flutter_command[@]}" build web --release --no-web-resources-cdn --pwa-strategy=none "$@"
 node tool/generate_sw.mjs build/web
