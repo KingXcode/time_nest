@@ -40,7 +40,7 @@ function browser(options = {}) {
   const media = new Events();
   media.matches = false;
   document.baseURI = options.base || 'https://clock.test/clock/';
-  document.visibilityState = 'visible';
+  document.visibilityState = options.hidden ? 'hidden' : 'visible';
   document.fullscreenEnabled = true;
   document.fullscreenElement = null;
   const calls = [];
@@ -55,8 +55,11 @@ function browser(options = {}) {
     setItem(key, value) { if (options.writeFails || (options.settingsWriteFails && key === 'shike.settings.v1')) throw new Error('quota'); storage.set(key, value); },
   };
   const timers = new Map();
+  const deadlines = new Map();
+  let now = 0;
   let timerId = 0;
   const nav = {
+    onLine: options.online !== false,
     wakeLock: options.noWake ? undefined : { request(type) {
       assert.equal(type, 'screen');
       calls.push('wake');
@@ -104,11 +107,14 @@ function browser(options = {}) {
     document, navigator: nav, localStorage, isSecureContext: options.secure !== false,
     location: { origin: 'https://clock.test', reload() { reloads += 1; } },
     URL, AbortController, MessageChannel: Channel,
+    Date: class extends Date { static now() { return now; } },
     addEventListener: events.addEventListener.bind(events),
     removeEventListener: events.removeEventListener.bind(events),
     matchMedia: () => media,
-    setTimeout: (callback) => { timers.set(++timerId, callback); return timerId; },
-    clearTimeout: (id) => timers.delete(id),
+    setTimeout: (callback, delay) => {
+      timers.set(++timerId, callback); deadlines.set(timerId, now + delay); return timerId;
+    },
+    clearTimeout: (id) => { timers.delete(id); deadlines.delete(id); },
     async fetch(url, init) {
       calls.push(['fetch', url, init]);
       if (options.fetchRequest) return options.fetchRequest(url, init);
@@ -123,12 +129,26 @@ function browser(options = {}) {
   return {
     api: context.shike, state: () => JSON.parse(context.shike.getState()), calls, storage, document,
     nav, events, media, timers, sw, reg, worker, reloads: () => reloads,
+    async advance(milliseconds) {
+      const target = now + milliseconds;
+      while (true) {
+        const next = [...deadlines.entries()].filter(([, at]) => at <= target).sort((a, b) => a[1] - b[1])[0];
+        if (!next) break;
+        const [id, at] = next;
+        now = at;
+        const callback = timers.get(id);
+        timers.delete(id); deadlines.delete(id);
+        callback();
+        await settle();
+      }
+      now = target;
+    },
     hide() { document.visibilityState = 'hidden'; document.emit('visibilitychange'); },
     show() { document.visibilityState = 'visible'; document.emit('visibilitychange'); },
   };
 }
 
-test('public API and state are exact, string-based, and non-polling', async () => {
+test('public API and state are exact and unsupported browsers never schedule checks', async () => {
   const b = browser();
   assert.deepEqual(Object.keys(b.api).sort(), [
     'readSettings', 'writeSettings', 'readIntroSeen', 'markIntroSeen', 'getState', 'subscribe',
@@ -365,7 +385,7 @@ test('release worker uses document base directory and must confirm complete cach
   assert.equal(registration[2].scope, 'https://clock.test/deep/clock/');
   assert.equal(registration[2].updateViaCache, 'none');
   assert.equal(b.state().offlineStatus, 'ready');
-  assert.equal(b.timers.size, 0);
+  assert.equal(b.timers.size, 1, 'one scheduled update check');
   assert.equal(b.reg.active.messages[0].type, 'SHIKE_STATUS');
   b.api.dispose();
   const incomplete = browser({ sw: true, ready: false });
@@ -415,7 +435,7 @@ test('only explicit applyUpdate sends skipWaiting and reloads accepting tab once
   b.api.dispose();
 });
 
-test('update check is explicitly requested, deduplicated and failures reported without polling', async () => {
+test('manual update check is immediate, deduplicated and reports failures', async () => {
   const b = browser({ sw: true, updateFails: true });
   await settle();
   assert.equal(b.calls.includes('update'), false);
@@ -426,6 +446,118 @@ test('update check is explicitly requested, deduplicated and failures reported w
   assert.equal(b.state().updateError, true);
   assert.equal(b.state().offlineStatus, 'ready');
   b.api.dispose();
+});
+
+test('a visible page discovers updates every five minutes and waits for user acceptance', async () => {
+  const options = { sw: true };
+  const b = browser(options);
+  await settle();
+  const next = b.worker('installing');
+  options.updateRequest = () => { b.reg.installing = next; b.reg.emit('updatefound'); };
+  await b.advance(299999);
+  assert.equal(b.calls.includes('update'), false);
+  await b.advance(1);
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  assert.equal(b.state().updateAvailable, false, 'incomplete downloads are not offered');
+  b.reg.installing = null; b.reg.waiting = next;
+  next.state = 'installed'; next.emit('statechange');
+  assert.equal(b.state().updateAvailable, true);
+  assert.equal(b.reloads(), 0);
+  assert.equal(next.messages.some(m => m.type === 'SKIP_WAITING'), false);
+  options.updateRequest = undefined;
+  await b.advance(300000);
+  assert.equal(b.calls.filter(c => c === 'update').length, 2);
+  assert.equal(b.reloads(), 0);
+  b.api.refreshPage(); await settle();
+  assert.equal(next.messages.filter(m => m.type === 'SKIP_WAITING').length, 1);
+  b.sw.controller = next; b.sw.emit('controllerchange');
+  assert.equal(b.reloads(), 1);
+  assert.equal(b.timers.size, 0);
+  b.api.dispose();
+});
+
+test('hidden/offline pages pause checks and coalesce foreground, online and pageshow events', async () => {
+  const b = browser({ sw: true });
+  await settle();
+  b.hide();
+  assert.equal(b.timers.size, 0);
+  await b.advance(900000);
+  assert.equal(b.calls.includes('update'), false);
+  b.show(); b.events.emit('pageshow'); b.events.emit('online');
+  await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  b.hide(); b.show(); await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  b.nav.onLine = false; b.events.emit('offline');
+  assert.equal(b.timers.size, 0);
+  await b.advance(300000);
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  b.nav.onLine = true; b.events.emit('online'); await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 2);
+  b.events.emit('pagehide');
+  assert.equal(b.timers.size, 0);
+  await b.advance(300000);
+  b.events.emit('pageshow'); await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 3);
+  assert.equal(b.timers.size, 1);
+  b.api.dispose();
+  assert.equal(b.timers.size, 0);
+  await b.advance(300000);
+  assert.equal(b.calls.filter(c => c === 'update').length, 3);
+});
+
+test('automatic check failures are quiet and recover on the next scheduled check', async () => {
+  const options = { sw: true, updateFails: true };
+  const b = browser(options);
+  await settle();
+  await b.advance(300000);
+  assert.equal(b.state().updateError, false);
+  assert.equal(b.state().offlineStatus, 'ready');
+  assert.equal(b.reloads(), 0);
+  options.updateFails = false;
+  options.updateRequest = () => { b.reg.waiting = b.worker('installed'); b.reg.emit('updatefound'); };
+  await b.advance(300000);
+  assert.equal(b.state().updateAvailable, true);
+  assert.equal(b.reloads(), 0);
+  b.api.dispose();
+});
+
+test('manual refresh joins an in-flight automatic check and retries a failed check explicitly', async () => {
+  const delayed = deferred();
+  const options = { sw: true, updateRequest: () => delayed.promise };
+  const b = browser(options);
+  await settle();
+  await b.advance(300000);
+  b.api.refreshPage();
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  delayed.reject(new Error('offline')); await settle();
+  assert.equal(b.state().updateError, true);
+  assert.equal(b.state().refreshing, false);
+  assert.equal(b.reloads(), 0);
+  options.updateRequest = undefined;
+  b.api.refreshPage(); await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 2);
+  assert.equal(b.reloads(), 1);
+  b.api.dispose();
+});
+
+test('scheduled checks wait for usable UI and do not run on debug or insecure pages', async () => {
+  const managed = browser({ sw: true, loadingManaged: true });
+  await managed.advance(300000);
+  managed.events.emit('online'); await settle();
+  assert.equal(managed.calls.length, 0);
+  managed.document.emit('shike-app-ready'); await settle();
+  assert.equal(managed.calls.filter(c => c[0] === 'register').length, 1);
+  await managed.advance(300000);
+  assert.equal(managed.calls.filter(c => c === 'update').length, 1);
+  managed.api.dispose();
+  for (const options of [{ sw: true, noActive: true, status: 404 }, { sw: true, secure: false }, { sw: true, hidden: true }]) {
+    const b = browser(options); await settle();
+    await b.advance(600000);
+    assert.equal(b.calls.includes('update'), false);
+    assert.equal(b.timers.size, 0);
+    b.api.dispose();
+  }
 });
 
 test('existing complete installation remains ready offline; failed fresh install does not', async () => {
@@ -544,7 +676,7 @@ test('refresh timeout fences a late check and permits a new request', async () =
   const b = browser(options);
   await settle();
   b.api.refreshPage(); await settle();
-  for (const callback of [...b.timers.values()]) callback();
+  await b.advance(90000);
   assert.equal(b.state().refreshing, false);
   assert.equal(b.state().updateError, true);
   delayed.resolve(); await settle();
@@ -561,7 +693,7 @@ test('timed-out or hidden refresh does not reload on a late controller change', 
     await settle();
     const next = b.worker('installed'); b.reg.waiting = next;
     b.api.refreshPage(); await settle();
-    if (cancel === 'timeout') for (const callback of [...b.timers.values()]) callback();
+    if (cancel === 'timeout') await b.advance(90000);
     if (cancel === 'pagehide') b.events.emit('pagehide');
     if (cancel === 'dispose') b.api.dispose();
     b.reg.waiting = null; b.reg.active = next; next.state = 'activated';
@@ -596,11 +728,11 @@ test('status timeout reports failure and pagehide/dispose cancel every pending c
   const b = browser({ sw: true, noStatusReply: true });
   await settle();
   assert.equal(b.state().offlineStatus, 'checking');
-  for (const callback of [...b.timers.values()]) callback();
+  await b.advance(4000);
   assert.equal(b.state().offlineStatus, 'failed');
-  assert.equal(b.timers.size, 0);
+  assert.equal(b.timers.size, 1, 'only the scheduled update check remains');
   b.sw.emit('controllerchange');
-  assert.equal(b.timers.size, 1);
+  assert.equal(b.timers.size, 2);
   b.events.emit('pagehide');
   assert.equal(b.timers.size, 0);
   b.events.emit('pageshow');

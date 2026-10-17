@@ -59,6 +59,10 @@
   let reloading = false;
   let refreshTimer = null;
   let refreshWorker = null;
+  const updateCheckInterval = 5 * 60 * 1000;
+  const resumeCheckInterval = 60 * 1000;
+  let updateCheckTimer = null;
+  let lastUpdateCheckAt = -Infinity;
   let readySerial = 0;
   const observedWorkers = new WeakSet();
   const observedRegistrations = new WeakSet();
@@ -217,7 +221,7 @@
     if (disposed || paused || !registration) return;
     patch({ updateAvailable: activeUpdateAvailable || Boolean(registration.waiting && ownsWorker(registration.waiting)) });
     if (registration.installing) {
-      if (updatePending || state.refreshing) explicitlyCheckedWorkers.add(registration.installing);
+      if (updatePending?.explicit || state.refreshing) explicitlyCheckedWorkers.add(registration.installing);
       observeWorker(registration.installing);
     }
     if (registration.waiting) observeWorker(registration.waiting);
@@ -267,6 +271,7 @@
       } catch (_) { /* a fresh registration may still work */ }
       if (cancelled()) return false;
       probeAbort = typeof win.AbortController === 'function' ? new win.AbortController() : null;
+      lastUpdateCheckAt = Date.now();
       try {
         const response = await win.fetch(workerURL.href, {
           cache: 'no-store', credentials: 'same-origin', signal: probeAbort?.signal,
@@ -290,17 +295,49 @@
       // BFCache can restore before an aborted probe settles. Resume once for
       // that lifecycle epoch, never retry ordinary network/install failures.
       if (!disposed && !paused && epoch !== swEpoch) setupSW();
+      else if (!updatePending) scheduleUpdateCheck();
     });
     setupPending = task;
     return task;
   }
-  function checkForUpdate() {
-    if (disposed || paused || updatePending) return;
-    const operation = {};
+  function stopUpdateChecks() {
+    if (updateCheckTimer !== null) win.clearTimeout(updateCheckTimer);
+    updateCheckTimer = null;
+  }
+  function canCheckAutomatically() {
+    return appReady && !disposed && !paused && !reloading && state.visible
+      && state.secureContext && sw && nav.onLine !== false
+      && state.offlineStatus !== 'unavailable';
+  }
+  function scheduleUpdateCheck() {
+    stopUpdateChecks();
+    if (!canCheckAutomatically()) return;
+    updateCheckTimer = win.setTimeout(() => {
+      updateCheckTimer = null;
+      checkForUpdate(true);
+    }, updateCheckInterval);
+  }
+  function resumeUpdateChecks() {
+    if (!canCheckAutomatically()) { stopUpdateChecks(); return; }
+    // Visibility/pageshow/online often arrive together. Limit those checks to
+    // once a minute; manual actions always remain available immediately.
+    if (!setupPending && Date.now() - lastUpdateCheckAt >= resumeCheckInterval) checkForUpdate(true);
+    else scheduleUpdateCheck();
+  }
+  function checkForUpdate(automatic = false) {
+    if (disposed || paused || !appReady || reloading) return;
+    if (automatic && !canCheckAutomatically()) return;
+    if (updatePending || acceptedWorker || (state.refreshing && automatic)) {
+      if (automatic) scheduleUpdateCheck();
+      return;
+    }
+    stopUpdateChecks();
+    lastUpdateCheckAt = Date.now();
+    const operation = { explicit: !automatic };
     updatePending = operation;
     const epoch = swEpoch;
     const cancelled = () => disposed || paused || epoch !== swEpoch || updatePending !== operation;
-    patch({ updateError: false });
+    if (!automatic) patch({ updateError: false });
     (async () => {
       if (!registration || ![registration.active, registration.waiting, registration.installing].some(ownsWorker)) {
         registration = null;
@@ -310,25 +347,29 @@
       await registration.update();
       if (!cancelled()) refreshRegistration();
     })().catch(() => {
-      if (!cancelled()) patch({ updateError: true });
+      if (!cancelled() && (!automatic || state.refreshing)) patch({ updateError: true });
     }).finally(() => {
       if (updatePending !== operation) return;
       updatePending = null;
       continueRefresh();
+      scheduleUpdateCheck();
     });
   }
   function finishRefresh(failed = false) {
+    const wasRefreshing = state.refreshing;
     if (state.refreshing) updatePending = null;
     if (refreshTimer !== null) win.clearTimeout(refreshTimer);
     refreshTimer = null;
     if (refreshWorker && acceptedWorker === refreshWorker) acceptedWorker = null;
     refreshWorker = null;
     patch({ refreshing: false, ...(failed ? { updateError: true } : {}) });
+    if (wasRefreshing) scheduleUpdateCheck();
   }
   function reloadPage() {
     if (disposed || paused || reloading) return;
     finishRefresh();
     reloading = true;
+    stopUpdateChecks();
     win.location.reload();
   }
   function continueRefresh() {
@@ -389,12 +430,14 @@
     const visible = !paused && doc.visibilityState !== 'hidden';
     const resumed = visible && !state.visible;
     patch({ visible, ...(resumed ? { resumeSerial: state.resumeSerial + 1 } : {}) });
-    if (!visible) stopWake(); else if (resumed) requestWake();
+    if (!visible) { stopWake(); stopUpdateChecks(); }
+    else if (resumed) { requestWake(); resumeUpdateChecks(); }
   }
   function pageHide() {
     if (disposed) return;
     finishRefresh();
     paused = true;
+    stopUpdateChecks();
     updatePending = null;
     swEpoch += 1;
     patch({ visible: false });
@@ -409,6 +452,7 @@
     requestWake();
     if (registration) refreshRegistration(); else setupSW();
     controllerChanged();
+    resumeUpdateChecks();
   }
   function dispose() {
     if (disposed) return;
@@ -417,6 +461,7 @@
     keepAwake = false;
     stopWake();
     disposed = true;
+    stopUpdateChecks();
     if (audioContext) Promise.resolve(audioContext.close()).catch(() => {});
     swEpoch += 1;
     probeAbort?.abort();
@@ -427,6 +472,8 @@
   listen(doc, 'visibilitychange', visibilityChanged);
   listen(win, 'pagehide', pageHide);
   listen(win, 'pageshow', pageShow);
+  listen(win, 'online', resumeUpdateChecks);
+  listen(win, 'offline', stopUpdateChecks);
   listen(doc, 'fullscreenchange', () => patch({ fullscreen: Boolean(fullscreenElement()), fullscreenError: false }));
   listen(doc, 'webkitfullscreenchange', () => patch({ fullscreen: Boolean(fullscreenElement()), fullscreenError: false }));
   listen(doc, 'fullscreenerror', () => patch({ fullscreenError: true }));

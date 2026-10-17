@@ -38,9 +38,20 @@ class _ClockScreenState extends State<ClockScreen>
   Timer? _hideTimer;
   bool _toolbarVisible = false;
   bool _panelOpen = false;
+  bool _updateRequested = false;
   bool _lifecycleVisible = true;
   late bool _introVisible;
   int _resumeSerial = 0;
+
+  bool get _showUpdateNotice =>
+      _browser.state.updateAvailable ||
+      (_updateRequested &&
+          (_browser.state.refreshing || _browser.state.updateError));
+
+  void _updateFromNotice() {
+    setState(() => _updateRequested = true);
+    _browser.refreshPage();
+  }
 
   @override
   void initState() {
@@ -101,6 +112,9 @@ class _ClockScreenState extends State<ClockScreen>
     );
     _timer.setVisible(_lifecycleVisible && state.visible);
     _resumeSerial = state.resumeSerial;
+    if (!state.updateAvailable && !state.refreshing && !state.updateError) {
+      _updateRequested = false;
+    }
     setState(() {});
   }
 
@@ -269,7 +283,20 @@ class _ClockScreenState extends State<ClockScreen>
               children: [
                 Positioned.fill(
                   top: 52,
-                  child: LayoutBuilder(builder: (_, box) => _workspace(box)),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (_, box) => _workspace(box),
+                        ),
+                      ),
+                      if (_showUpdateNotice)
+                        _UpdateNotice(
+                          state: _browser.state,
+                          onUpdate: _updateFromNotice,
+                        ),
+                    ],
+                  ),
                 ),
                 Align(
                   alignment: Alignment.topCenter,
@@ -396,15 +423,16 @@ class _ClockScreenState extends State<ClockScreen>
                     ),
                   ),
                 ),
-                if (!_introVisible && _toolbarVisible && !_panelOpen)
+                if (!_introVisible &&
+                    _toolbarVisible &&
+                    !_panelOpen &&
+                    !_showUpdateNotice)
                   Align(
                     alignment: Alignment.bottomCenter,
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Text(
-                        _browser.state.updateAvailable
-                            ? '新版本已就绪 · 打开设置确认更新'
-                            : '${_browser.state.wakeLabel} · 轻点屏幕唤出操作',
+                        '${_browser.state.wakeLabel} · 轻点屏幕唤出操作',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Color(0xFF989DA5),
@@ -416,6 +444,50 @@ class _ClockScreenState extends State<ClockScreen>
               ],
             ),
           ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _UpdateNotice extends StatelessWidget {
+  const _UpdateNotice({required this.state, required this.onUpdate});
+  final BrowserState state;
+  final VoidCallback onUpdate;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 520),
+        padding: const EdgeInsets.only(left: 14, right: 6, top: 4, bottom: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF17191E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF343840)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                state.updateError ? '更新失败，请重试' : '新版本已就绪',
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: state.refreshing ? null : onUpdate,
+              child: Text(
+                state.refreshing
+                    ? '正在更新…'
+                    : state.updateError
+                    ? '重试更新'
+                    : '立即更新',
+              ),
+            ),
+          ],
         ),
       ),
     ),

@@ -195,6 +195,49 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  for (final size in [
+    const Size(320, 568),
+    const Size(736, 320),
+    const Size(1280, 720),
+  ]) {
+    testWidgets('update notice stays visible with hidden toolbar at $size', (
+      tester,
+    ) async {
+      final browser = TestBrowser();
+      await launch(tester, browser, size: size);
+      expect(find.text('立即更新'), findsNothing);
+      browser.update(const BrowserState(updateAvailable: true));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.text('新版本已就绪'), findsOneWidget);
+      expect(find.text('立即更新').hitTestable(), findsOneWidget);
+      expect(browser.refreshes, 0);
+      await tester.tap(find.text('立即更新'));
+      expect(browser.refreshes, 1);
+      browser.update(
+        const BrowserState(updateAvailable: true, refreshing: true),
+      );
+      await tester.pump();
+      await tester.tap(find.text('正在更新…'));
+      expect(browser.refreshes, 1);
+      // A failed activation may remove the waiting worker. Keep the retry
+      // action visible even when updateAvailable becomes false.
+      browser.update(const BrowserState(updateError: true));
+      await tester.pump();
+      expect(find.text('更新失败，请重试'), findsOneWidget);
+      await tester.tap(find.text('重试更新'));
+      expect(browser.refreshes, 2);
+      await openSettings(tester);
+      expect(find.text('重试更新').hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      browser.update(const BrowserState());
+      await tester.pump();
+      expect(find.text('新版本已就绪'), findsNothing);
+      expect(find.text('重试更新'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   testWidgets(
     'visible inactive window keeps ticking while another window has focus',
     (tester) async {
