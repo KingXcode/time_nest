@@ -5,6 +5,7 @@ Sources are downloaded only when absent; generated assets are committed, so norm
 Flutter development and builds do not require Python or external font requests.
 """
 from pathlib import Path
+import os
 import urllib.request
 
 from fontTools import subset
@@ -33,11 +34,16 @@ for name, (folder, filename) in FONTS.items():
 
 # Include source text plus Chinese Material accessibility/dialog strings.
 corpus = ''.join(path.read_text() for path in (ROOT / 'lib').rglob('*.dart'))
-localization = ROOT / '.fvm/flutter_sdk/packages/flutter_localizations/lib/src/l10n/generated_material_localizations.dart'
+sdk = Path(os.environ.get('FLUTTER_ROOT', str(ROOT / '.fvm/flutter_sdk')))
+localization = sdk / 'packages/flutter_localizations/lib/src/l10n/generated_material_localizations.dart'
 if localization.exists():
     source = localization.read_text()
     corpus += source.split('class MaterialLocalizationZh extends', 1)[1].split(
         'class MaterialLocalizationZhHans extends', 1)[0]
+# City, holiday, and public release names arrive at runtime. Bundle common CJK
+# rather than requiring a remote fallback font for everyday Chinese content.
+corpus += ''.join(chr(code) for code in range(0x4E00, 0xA000))
+corpus += ''.join(chr(code) for code in range(0x3000, 0x3040))
 corpus += ''.join(chr(code) for code in range(32, 127)) + '\u00a0\u2026\u2192\u00b7'
 
 

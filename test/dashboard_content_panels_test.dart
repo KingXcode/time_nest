@@ -1,0 +1,255 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:time_nest/dashboard/dashboard_client.dart';
+import 'package:time_nest/dashboard/fx_panel.dart';
+import 'package:time_nest/dashboard/news_panel.dart';
+import 'package:time_nest/dashboard/releases_panel.dart';
+
+class _FakeClient implements DashboardClient {
+  final opened = <String>[];
+  final requests = <Map<String, dynamic>>[];
+  bool emptyRelease = false;
+  bool emptyNews = false;
+
+  @override
+  String? readPreferences() => null;
+
+  @override
+  bool writePreferences(String raw) => true;
+
+  @override
+  void openUrl(String url) => opened.add(url);
+
+  @override
+  Future<DashboardData> load(
+    String module,
+    Map<String, dynamic> args, {
+    bool refresh = false,
+  }) async {
+    requests.add({'module': module, ...args, 'refresh': refresh});
+    return DashboardData(
+      fetchedAt: DateTime(2026, 10, 18, 9),
+      data: switch (module) {
+        'releases' => {
+          'repo': args['repo'],
+          'noReleases': emptyRelease,
+          'releases': emptyRelease
+              ? []
+              : [
+                  {
+                    'name': 'A long release name that wraps safely in a narrow card',
+                    'tag': 'v3.47.5',
+                    'publishedAt': '2026-10-17T10:00:00Z',
+                    'url': 'https://github.com/flutter/flutter/releases/tag/v3.47.5',
+                    'body': '## Highlights\nA useful update with [release details](https://flutter.dev).',
+                  },
+                ],
+        },
+        'fx' => {
+          'base': args['base'],
+          'quote': args['quote'],
+          'rate': args['base'] == 'USD' ? 7.1 : 1 / 7.1,
+          'date': '2026-10-16',
+          'history': [
+            {'date': '2026-09-18', 'rate': 7.05},
+            {'date': '2026-10-01', 'rate': 7.12},
+            {'date': '2026-10-16', 'rate': 7.1},
+          ],
+        },
+        'news' => {
+          'feed': args['feed'],
+          'stories': emptyNews
+              ? []
+              : [
+                  for (var i = 1; i <= 10; i++)
+                    {
+                      'id': i,
+                      'title':
+                          'Story $i: An English headline that wraps on a small screen',
+                      'score': 100 + i,
+                      'comments': i,
+                      'url': 'https://example.com/story/$i',
+                      'discussion': 'https://news.ycombinator.com/item?id=$i',
+                      'time': 1792278000,
+                      'by': 'reader$i',
+                    },
+                ],
+        },
+        _ => <String, dynamic>{},
+      },
+    );
+  }
+}
+
+Future<void> _pumpPanel(WidgetTester tester, Widget child) async {
+  tester.view.physicalSize = const Size(320, 900);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: ThemeData.dark(useMaterial3: true),
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: Padding(padding: const EdgeInsets.all(16), child: child),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  testWidgets(
+    'release controls validate, add, remove and open source at 320px',
+    (tester) async {
+      final client = _FakeClient();
+      var repos = <String>[];
+      await _pumpPanel(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) => ReleasesPanel(
+            client: client,
+            repos: repos,
+            onReposChanged: (value) => setState(() => repos = value),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), 'not a repo');
+      await tester.tap(find.byTooltip('添加仓库'));
+      await tester.pumpAndSettle();
+      expect(find.text('请输入 owner/repo，例如 flutter/flutter。'), findsOneWidget);
+      await tester.enterText(
+        find.byType(TextField),
+        'https://github.com/flutter/flutter.git',
+      );
+      await tester.tap(find.byTooltip('添加仓库'));
+      await tester.pumpAndSettle();
+      expect(repos, ['flutter/flutter']);
+      expect(find.text('v3.47.5'), findsOneWidget);
+      expect(find.textContaining('Highlights A useful update'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('完整发布说明'));
+      expect(
+        client.opened.last,
+        'https://github.com/flutter/flutter/releases/tag/v3.47.5',
+      );
+      await tester.enterText(find.byType(TextField), 'Flutter/Flutter');
+      await tester.ensureVisible(find.byTooltip('添加仓库'));
+      await tester.tap(find.byTooltip('添加仓库'));
+      await tester.pumpAndSettle();
+      expect(find.text('这个仓库已经在列表中。'), findsOneWidget);
+      await tester.ensureVisible(find.byTooltip('移除 flutter/flutter'));
+      await tester.tap(find.byTooltip('移除 flutter/flutter'));
+      await tester.pumpAndSettle();
+      expect(repos, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('release with no published items is explicit', (tester) async {
+    final client = _FakeClient()..emptyRelease = true;
+    await _pumpPanel(
+      tester,
+      ReleasesPanel(
+        client: client,
+        repos: const ['owner/repo'],
+        onReposChanged: (_) {},
+      ),
+    );
+    expect(find.text('此仓库尚无 Release。'), findsOneWidget);
+    expect(find.text('查看仓库'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'FX validates and persists amount, swaps currencies without overflow',
+    (tester) async {
+      final client = _FakeClient();
+      var base = 'USD';
+      var quote = 'CNY';
+      var amount = 100.0;
+      await _pumpPanel(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) => FxPanel(
+            client: client,
+            base: base,
+            quote: quote,
+            amount: amount,
+            onChanged: (b, q, a) => setState(() {
+              base = b;
+              quote = q;
+              amount = a;
+            }),
+          ),
+        ),
+      );
+      expect(find.text('710.00 CNY'), findsOneWidget);
+      expect(find.text('近 30 天'), findsOneWidget);
+      expect(find.text('汇率日期 2026-10-16'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '200');
+      await tester.pumpAndSettle();
+      expect(amount, 200);
+      expect(find.text('1,420.00 CNY'), findsOneWidget);
+      expect(client.requests, hasLength(1));
+      await tester.enterText(find.byType(TextField), '1000000001');
+      await tester.pumpAndSettle();
+      expect(amount, 200);
+      expect(find.text('请输入有效金额'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '100');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('交换货币'));
+      await tester.pumpAndSettle();
+      expect(base, 'CNY');
+      expect(quote, 'USD');
+      expect(client.requests.last['base'], 'CNY');
+      expect(find.text('14.08 USD'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('news renders six stories, opens links and switches feeds', (
+    tester,
+  ) async {
+    final client = _FakeClient();
+    var feed = 'top';
+    await _pumpPanel(
+      tester,
+      StatefulBuilder(
+        builder: (context, setState) => NewsPanel(
+          client: client,
+          feed: feed,
+          onFeedChanged: (value) => setState(() => feed = value),
+        ),
+      ),
+    );
+    expect(find.textContaining('Story 6:'), findsOneWidget);
+    expect(find.textContaining('Story 7:'), findsNothing);
+    await tester.tap(find.textContaining('Story 1:'));
+    expect(client.opened.last, 'https://example.com/story/1');
+    await tester.tap(find.text('1 条评论 · HN'));
+    expect(client.opened.last, 'https://news.ycombinator.com/item?id=1');
+    await tester.ensureVisible(find.text('展开全部 10 条'));
+    await tester.tap(find.text('展开全部 10 条'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Story 10:'), findsOneWidget);
+    await tester.ensureVisible(find.text('最新'));
+    await tester.tap(find.text('最新'));
+    await tester.pumpAndSettle();
+    expect(feed, 'new');
+    expect(client.requests.last['feed'], 'new');
+    expect(find.textContaining('Story 7:'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('empty news feed is explicit', (tester) async {
+    final client = _FakeClient()..emptyNews = true;
+    await _pumpPanel(
+      tester,
+      NewsPanel(client: client, feed: 'show', onFeedChanged: (_) {}),
+    );
+    expect(find.text('当前列表暂无可显示的文章，请稍后刷新。'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}

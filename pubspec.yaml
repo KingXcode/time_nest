@@ -1,7 +1,7 @@
 name: time_nest
 description: "此刻：极简桌面时钟，让时间安静一点。"
 publish_to: 'none'
-version: 1.1.0+2
+version: 2.0.0+3
 
 environment:
   sdk: ^3.13.4
@@ -12,8 +12,6 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  qr: ^4.0.0
-  zxing_lib: ^1.1.4
 dev_dependencies:
   flutter_test:
     sdk: flutter
