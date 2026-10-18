@@ -6,21 +6,25 @@ import { readFile } from 'node:fs/promises';
 const js = await readFile(new URL('../web/market_chart.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../web/market_chart.html', import.meta.url), 'utf8');
 function run(search = '', options = {}) {
-  const source = { firstElementChild: {} }, status = {}, children = [];
-  const chart = { appendChild: child => children.push(child) };
+  const source = { firstElementChild: {} }, fallback = {}, status = {}, children = [];
+  const stages = [];
+  Object.defineProperty(status, 'textContent', {get: () => stages.at(-1), set: value => stages.push(value)});
+  const chart = { appendChild: child => { if (options.appendFails) throw new Error('append failed'); children.push(child); } };
   let timeout, pagehide, cleared = false;
   const context = {
-    URL, URLSearchParams, location: {search}, origin: options.origin ?? 'null',
+    URL, URLSearchParams: options.noQueryParser ? undefined : URLSearchParams, location: {search}, origin: options.origin ?? 'null',
     document: {
-      getElementById: id => ({source, status, widget:chart})[id],
-      createElement: tag => { assert.equal(tag, 'iframe'); return {setAttribute(name, value){this[name] = value;}}; },
+      getElementById: id => ({source, fallback, status, widget:chart})[id],
+      createElement: tag => { assert.equal(tag, 'iframe'); if (options.createFails) throw new Error('element failed'); return {setAttribute(name, value){this[name] = value;}}; },
     },
     setTimeout: callback => { timeout = callback; return 1; },
     clearTimeout: () => { cleared = true; },
     window: { top: options.top ?? {}, self: options.self ?? {}, addEventListener: (event, callback) => { assert.equal(event, 'pagehide'); pagehide = callback; } },
   };
-  vm.runInNewContext(js, context);
-  return {source, status, script:children[0], config:children[0] ? JSON.parse(decodeURIComponent(new URL(children[0].src).hash.slice(1))) : null, timeout, pagehide, get cleared(){return cleared;}};
+  vm.createContext(context);
+  if (options.noHasOwn) vm.runInContext('Object.hasOwn = undefined;', context);
+  vm.runInContext(js, context);
+  return {source, fallback, status, stages, script:children[0], config:children[0] ? JSON.parse(decodeURIComponent(new URL(children[0].src).hash.slice(1))) : null, timeout, pagehide, get cleared(){return cleared;}};
 }
 for (const [id, symbol] of Object.entries({shanghai:'SSE:000001', shenzhen:'SZSE:399001', csi300:'SSE:000300', chinext:'SZSE:399006', star50:'SSE:000688', allshare:'SSE:000985'})) {
   test(`official fixed symbol ${id}`, () => {
@@ -34,6 +38,8 @@ for (const [id, symbol] of Object.entries({shanghai:'SSE:000001', shenzhen:'SZSE
     assert.equal(r.script.sandbox, 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox');
     assert.equal(r.source.href, `https://www.tradingview.com/symbols/${symbol.replace(':','-')}/`);
     assert.match(r.source.firstElementChild.textContent, /图表$/);
+    assert.equal(r.fallback.href, r.source.href);
+    assert.match(r.fallback.textContent, /官方来源$/);
   });
 }
 test('invalid symbols, prototype names, scripts and intraday values fall back', () => {
@@ -50,9 +56,10 @@ test('no success claimed from iframe or script events; error stays actionable', 
   assert.equal(r.script.onmessage, undefined);
   r.timeout();
   assert.match(r.status.textContent, /未显示图表/);
-  r.script.onerror();
-  assert.match(r.status.textContent, /暂不可用/);
-  assert.equal(r.cleared, true);
+  const failed = run();
+  failed.script.onerror();
+  assert.match(failed.status.textContent, /连接失败/);
+  assert.equal(failed.cleared, true);
   r.pagehide();
 });
 test('static wrapper preserves provider attribution and restrictive CSP', () => {
@@ -100,4 +107,41 @@ test('untrusted kind can never select another endpoint or arbitrary URL', () => 
     const r = run(`?kind=${encodeURIComponent(kind)}`);
     assert.equal(new URL(r.script.src).pathname, '/embed-widget/advanced-chart/');
   }
+});
+
+
+test('legacy browsers without Object.hasOwn still initialize whitelisted widgets', () => {
+  const r = run('?index=shenzhen&kind=technical', {noHasOwn:true});
+  assert.equal(r.config.symbol, 'SZSE:399001');
+  assert.equal(r.config.interval, '1D');
+  assert.equal(r.stages[0], '正在启动内嵌图表…');
+  assert.match(r.status.textContent, /^已请求 TradingView 内容/);
+  assert.equal(r.script.onload, undefined, 'requesting a frame never proves data rendered');
+});
+test('early parsing and iframe startup failures remain actionable and cancel their timer', () => {
+  for (const options of [{noQueryParser:true}, {createFails:true}, {appendFails:true}]) {
+    const r = run('', options);
+    assert.equal(r.script, undefined);
+    assert.equal(r.config, null);
+    assert.equal(r.stages[0], '正在启动内嵌图表…');
+    assert.match(r.status.textContent, /未能启动.*官方来源/);
+    assert.equal(typeof r.timeout, 'function', 'timer must exist before risky startup work');
+    assert.equal(r.cleared, true);
+    r.pagehide();
+  }
+});
+test('static fallback remains useful even if no script runs, with no misleading default index', () => {
+  const staticHtml = html.split('<script>')[0];
+  assert.match(staticHtml, /id="help"[^>]*>图表空白或无法加载/);
+  assert.match(staticHtml, /id="fallback" href="https:\/\/www.tradingview.com\/"/);
+  assert.match(staticHtml, /内嵌图表尚未启动/);
+  assert.match(staticHtml, /<noscript>/);
+  assert.doesNotMatch(staticHtml, /上证指数|SSE-000001/);
+  assert.ok(staticHtml.indexOf('id="help"') < staticHtml.indexOf('id="chart"'));
+});
+test('pagehide clears pending hints and unavailable ratings never retain a timer', () => {
+  const r = run();
+  r.pagehide();
+  assert.equal(r.cleared, true);
+  assert.equal(run('?kind=technical&index=star50').cleared, true);
 });
