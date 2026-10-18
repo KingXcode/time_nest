@@ -23,7 +23,7 @@
 - 常亮与全屏能力检测、真实状态提示及失败降级；不保证所有 iPhone 模式都支持。
 - 主屏幕图标、安装指引和独立展示配置。
 - 发布构建自动生成完整离线缓存；自动检查新版，主页面提示“立即更新”，点击后加载并保留设置和计时。
-- 每日看板首页仅作入口：普通天气、GitHub 项目更新、每日参考汇率、中文科技资讯各有独立页面；支持收藏、排序和本地保存。
+- 每日看板首页仅作入口：普通天气、GitHub 项目更新、每日参考汇率、中文科技资讯、A 股行情各有独立页面；支持收藏、排序和本地保存。
 
 不包含后端、账号、网络校时、私人日程、原生安装包或后台常驻服务。
 
@@ -114,6 +114,18 @@ Safari 添加到主屏幕：分享菜单 → 添加到主屏幕 → 从图标重
 - 状态只保存在当前站点、当前浏览器中，不跨设备同步；存储禁用时仍可计时，但刷新恢复不保证有效。设备系统时间改变会影响基于结束时间的剩余时长。
 
 常亮不可用时，可以在设备策略允许的前提下，把系统“显示与亮度 → 自动锁定”设为“永不”；这是系统级设置，离开展示后建议恢复。长期展示注意散热和电池健康，异常发热或鼓包时停止充电使用。
+
+### A 股行情（免费官方嵌入）
+
+所选指数还可查看 TradingView 官方日线技术评级，并附中文含义与局限说明。科创50 评级当前无数据，会明确提示；评级不等于整个市场好坏，未标注日期时不视为今日分析。
+
+A 股行情是第五个独立页面，只在进入时加载 TradingView 官方 Advanced Chart。支持上证指数、深证成指、沪深300、创业板指、科创50、中证全指，及日线/周线/月线。指数和周期选择保存在本机。页面以收盘趋势观察为主，不保证实时；实际日期、延迟、市场状态以图表自身标记为准。指数不能代表所有个股，不提供买卖建议或自制市场强弱分数。
+
+- 无 API key、无付费订阅、无行情后端，也不读取/抓取/导出组件数据。
+- 完整保留 TradingView 署名和来源链接；可重新加载或打开官方来源。
+- 组件运行在 TradingView 跨域 iframe 内，第三方代码不在本应用源下执行，不能读取本应用设置；固定白名单限制品种与周期，CSP 只允许固定哈希的本地启动代码及指定图表域名。
+- 按 TradingView 官方 FAQ，组件会接收页面 URL、组件类型、显示品种和访问 IP，组件不设置 Cookie。外部服务仍需联网，离线时只有本应用页面可用，不缓存行情。
+- [TradingView 组件文档](https://www.tradingview.com/widget-docs/widgets/charts/advanced-chart/) · [亚洲数据覆盖](https://www.tradingview.com/widget-docs/markets/asia-pacific/) · [数据限制](https://www.tradingview.com/widget-docs/faq/data/) · [隐私说明](https://www.tradingview.com/widget-docs/faq/general/)
 
 ### 每日看板
 
@@ -217,13 +229,14 @@ node tool/browser_smoke.mjs
 | [设置面板](<lib/ui/settings_panel.dart>) | 设置交互、状态与更新提示 |
 | [浏览器桥接](<web/platform.js>) | 本地存储、常亮、全屏、安装模式与 SW 注册 |
 | [SW 模板](<web/sw.template.js>) / [生成器](<tool/generate_sw.mjs>) | 资源完整性、离线、版本隔离 |
-| [每日看板](<lib/dashboard/dashboard_screen.dart>) / [数据桥接](<web/dashboard.js>) | 四个独立功能页、偏好、缓存、错误与来源 |
+| [每日看板](<lib/dashboard/dashboard_screen.dart>) / [数据桥接](<web/dashboard.js>) | 五个独立功能页、偏好、缓存、错误与来源 |
 | [发布脚本](<tool/build_web.sh>) | Flutter 构建与 SW 生成入口 |
 
 字体已随项目提交，不需要在线下载字体即可运行。中文使用 Noto Sans SC 的重命名裁剪版 ShikeSans，数字使用 Roboto Mono 的裁剪版；许可见 [Noto OFL](<assets/fonts/OFL-NotoSansSC.txt>) 和 [Roboto Mono OFL](<assets/fonts/OFL-RobotoMono.txt>)。新增中文文案后，应使用 [资源生成脚本](<tool/prepare_assets.py>) 更新字体覆盖；仅此维护步骤需要 Python、Pillow、fonttools 及首次源字体下载。
 
 ## 文档与版本管理
 
+- [2.3 A 股行情验收](<docs/verification-v2.3.md>)：六个官方嵌入指数、日周月线、隔离、手机窄宽与回归。
 - [2.2 独立功能页与普通天气验收](<docs/verification-v2.2.md>)：首页零模块请求、独立页面、普通天气和移除拼假。
 - [2.1 热门项目与中文资讯验收](<docs/verification-v2.1.md>)：24 个默认项目与少数派官方 RSS。
 - [2.0 每日看板验收记录](<docs/verification-v2.md>)：五个 API 模块、布局、缓存及已知验证边界。

@@ -1,16 +1,19 @@
 {{flutter_js}}
 {{flutter_build_config}}
 
+// Custom startup callbacks must explicitly forward the engine configuration.
+const engineConfig = {
+  renderer: 'canvaskit',
+  canvasKitBaseUrl: new URL('canvaskit/', document.baseURI).href,
+  hostElement: document.getElementById('app'),
+};
+
 _flutter.loader.load({
-  config: {
-    renderer: 'canvaskit',
-    canvasKitBaseUrl: new URL('canvaskit/', document.baseURI).href,
-    hostElement: document.getElementById('app'),
-  },
+  config: engineConfig,
   onEntrypointLoaded: async function (engineInitializer) {
     try {
       window.shikeLoader?.stage('正在初始化显示引擎');
-      const runner = await engineInitializer.initializeEngine();
+      const runner = await engineInitializer.initializeEngine(engineConfig);
       window.shikeLoader?.stage('正在打开完整界面');
       await runner.runApp();
       if (window.shikeLoader) window.shikeLoader.ready();

@@ -4,6 +4,7 @@ import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
 import 'fx_panel.dart';
+import 'market_panel.dart';
 import 'news_panel.dart';
 import 'releases_panel.dart';
 import 'weather_panel.dart';
@@ -13,18 +14,21 @@ const _titles = {
   'releases': '项目更新',
   'fx': '汇率换算',
   'news': '科技资讯',
+  'market': 'A股行情',
 };
 const _subtitles = {
   'weather': '查看城市天气与逐小时预报',
   'releases': '关注热门开源项目的最新发布',
   'fx': '每日参考汇率与近 30 天变化',
   'news': '中文科技资讯，也可切换 HN 英文',
+  'market': '免费收盘参考，查看 A 股指数与历史走势',
 };
 const _icons = {
   'weather': Icons.wb_sunny_outlined,
   'releases': Icons.code_rounded,
   'fx': Icons.currency_exchange_rounded,
   'news': Icons.auto_awesome_outlined,
+  'market': Icons.show_chart_rounded,
 };
 const _storageWarning = '浏览器存储不可用。当前选择仍可使用，刷新后可能丢失。';
 
@@ -443,6 +447,15 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
           preferences.base = base;
           preferences.quote = quote;
           preferences.amount = amount;
+        }),
+      ),
+      'market' => MarketPanel(
+        client: widget.client,
+        indexId: preferences.marketIndex,
+        interval: preferences.marketInterval,
+        onChanged: (index, interval) => _save(() {
+          preferences.marketIndex = index;
+          preferences.marketInterval = interval;
         }),
       ),
       _ => NewsPanel(

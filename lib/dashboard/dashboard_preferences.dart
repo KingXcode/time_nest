@@ -1,6 +1,8 @@
 import 'dart:convert';
 
-const dashboardModules = ['weather', 'releases', 'fx', 'news'];
+import 'market_config.dart';
+
+const dashboardModules = ['weather', 'releases', 'fx', 'news', 'market'];
 
 // Curated popular projects, not a live star ranking. No authentication required.
 const defaultDashboardRepos = [
@@ -40,6 +42,8 @@ class DashboardPreferences {
     this.quote = 'CNY',
     this.amount = 100,
     this.feed = 'sspai',
+    this.marketIndex = 'shanghai',
+    this.marketInterval = 'D',
     this.order = dashboardModules,
     this.favorites = const ['weather'],
   });
@@ -50,6 +54,8 @@ class DashboardPreferences {
   String quote;
   double amount;
   String feed;
+  String marketIndex;
+  String marketInterval;
   List<String> order;
   List<String> favorites;
 
@@ -119,6 +125,12 @@ class DashboardPreferences {
       if (json['version'] == null && json['feed'] == 'top') {
         prefs.feed = 'sspai';
       }
+      prefs.marketIndex = marketIndexFor(
+        json['marketIndex'] is String ? json['marketIndex'] as String : '',
+      ).id;
+      if (marketIntervals.containsKey(json['marketInterval'])) {
+        prefs.marketInterval = json['marketInterval'] as String;
+      }
       if (json['order'] is List) {
         prefs.order = <String>{
           ...(json['order'] as List).whereType<String>().where(
@@ -141,13 +153,15 @@ class DashboardPreferences {
   }
 
   String encode() => jsonEncode({
-    'version': 3,
+    'version': 4,
     'city': city,
     'repos': repos,
     'base': base,
     'quote': quote,
     'amount': amount,
     'feed': feed,
+    'marketIndex': marketIndex,
+    'marketInterval': marketInterval,
     'order': order,
     'favorites': favorites,
   });

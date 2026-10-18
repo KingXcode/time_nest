@@ -7,6 +7,7 @@ import 'package:time_nest/dashboard/dashboard_client.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/dashboard_screen.dart';
 import 'package:time_nest/dashboard/fx_panel.dart';
+import 'package:time_nest/dashboard/market_panel.dart';
 import 'package:time_nest/dashboard/news_panel.dart';
 import 'package:time_nest/dashboard/releases_panel.dart';
 import 'package:time_nest/dashboard/weather_panel.dart';
@@ -137,6 +138,7 @@ const titles = {
   'releases': '项目更新',
   'fx': '汇率换算',
   'news': '科技资讯',
+  'market': 'A股行情',
 };
 final testNow = DateTime.utc(2026, 10, 18, 1);
 
@@ -221,8 +223,19 @@ void main() {
       for (final id in dashboardModules) {
         client.calls.clear();
         await openModule(tester, id);
-        expect(client.calls.toSet(), {id});
-        expect(client.calls.length, id == 'releases' ? 4 : 1);
+        expect(client.calls.toSet(), id == 'market' ? <String>{} : {id});
+        expect(
+          client.calls.length,
+          id == 'market'
+              ? 0
+              : id == 'releases'
+              ? 4
+              : 1,
+        );
+        expect(
+          find.byType(MarketPanel),
+          id == 'market' ? findsOneWidget : findsNothing,
+        );
         expect(find.text('今天的事，一眼有数。'), findsNothing);
         expect(
           find.byType(WeatherPanel),

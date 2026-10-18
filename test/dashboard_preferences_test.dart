@@ -15,7 +15,7 @@ void main() {
     expect(read.repos, defaultDashboardRepos);
     expect(read.repos, hasLength(24));
     expect(read.feed, 'sspai');
-    expect(read.order, ['weather', 'releases', 'fx', 'news']);
+    expect(read.order, ['weather', 'releases', 'fx', 'news', 'market']);
     expect(read.favorites, ['weather']);
   });
 
@@ -81,7 +81,7 @@ void main() {
     expect(read.base, 'JPY');
     expect(read.amount, 13500);
     expect(read.feed, 'show');
-    expect(read.order, ['news', 'fx', 'weather', 'releases']);
+    expect(read.order, ['news', 'fx', 'weather', 'releases', 'market']);
     expect(read.favorites, ['news']);
   });
 
@@ -100,7 +100,7 @@ void main() {
         'favorites': ['holidays', 'news', 'weather'],
       }),
     );
-    expect(read.order, ['news', 'weather', 'fx', 'releases']);
+    expect(read.order, ['news', 'weather', 'fx', 'releases', 'market']);
     expect(read.favorites, ['news', 'weather']);
     expect(read.city?['name'], '上海');
     expect(read.repos, ['owner/project']);
@@ -109,7 +109,7 @@ void main() {
     expect(read.amount, 42);
     expect(read.feed, 'top');
     final encoded = jsonDecode(read.encode()) as Map<String, dynamic>;
-    expect(encoded['version'], 3);
+    expect(encoded['version'], 4);
     expect(encoded.containsKey('leaveDays'), isFalse);
     expect(read.encode(), isNot(contains('holidays')));
     expect(DashboardPreferences.decode(read.encode()).order, read.order);
