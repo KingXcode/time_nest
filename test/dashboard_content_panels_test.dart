@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_client.dart';
 import 'package:time_nest/dashboard/fx_panel.dart';
+import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/news_panel.dart';
 import 'package:time_nest/dashboard/releases_panel.dart';
 
@@ -64,8 +65,9 @@ class _FakeClient implements DashboardClient {
                   for (var i = 1; i <= 10; i++)
                     {
                       'id': i,
-                      'title':
-                          'Story $i: An English headline that wraps on a small screen',
+                      'title': args['feed'] == 'sspai'
+                          ? '中文资讯 $i：科技、数码与效率生活'
+                          : 'Story $i: An English headline that wraps on a small screen',
                       'score': 100 + i,
                       'comments': i,
                       'url': 'https://example.com/story/$i',
@@ -143,6 +145,104 @@ void main() {
       await tester.tap(find.byTooltip('移除 flutter/flutter'));
       await tester.pumpAndSettle();
       expect(repos, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('popular repositories paginate without fetching hidden pages', (
+    tester,
+  ) async {
+    final client = _FakeClient();
+    var repos = List<String>.of(defaultDashboardRepos);
+    await _pumpPanel(
+      tester,
+      StatefulBuilder(
+        builder: (context, setState) => ReleasesPanel(
+          client: client,
+          repos: repos,
+          onReposChanged: (value) => setState(() => repos = value),
+        ),
+      ),
+    );
+    expect(client.requests, hasLength(4));
+    expect(find.text('已关注 24 个项目'), findsOneWidget);
+    expect(find.text('open-webui/open-webui'), findsNothing);
+    await tester.tap(find.text('下一页'));
+    await tester.pumpAndSettle();
+    expect(client.requests, hasLength(8));
+    expect(find.text('open-webui/open-webui'), findsOneWidget);
+    expect(find.text('flutter/flutter'), findsNothing);
+    expect(find.text('正在显示第 5–8 个，共 24 个'), findsOneWidget);
+    await tester.tap(find.byTooltip('移除 open-webui/open-webui'));
+    await tester.pumpAndSettle();
+    expect(repos, hasLength(23));
+    expect(repos, isNot(contains('open-webui/open-webui')));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'removing the last repository on a page returns to a valid page',
+    (tester) async {
+      final client = _FakeClient();
+      var repos = List<String>.of(defaultDashboardRepos.take(5));
+      await _pumpPanel(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) => ReleasesPanel(
+            client: client,
+            repos: repos,
+            onReposChanged: (value) => setState(() => repos = value),
+          ),
+        ),
+      );
+      await tester.tap(find.text('下一页'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('移除 open-webui/open-webui'));
+      await tester.pumpAndSettle();
+      expect(repos, hasLength(4));
+      expect(find.text('flutter/flutter'), findsOneWidget);
+      expect(find.text('下一页'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'popular list can be explicitly restored from an empty selection',
+    (tester) async {
+      final client = _FakeClient();
+      var repos = <String>[];
+      await _pumpPanel(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) => ReleasesPanel(
+            client: client,
+            repos: repos,
+            onReposChanged: (value) => setState(() => repos = value),
+          ),
+        ),
+      );
+      expect(client.requests, isEmpty);
+      await tester.tap(find.text('补齐热门项目'));
+      await tester.pumpAndSettle();
+      expect(repos, defaultDashboardRepos);
+      expect(client.requests, hasLength(4));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Chinese feed shows original headlines without fabricated HN metrics',
+    (tester) async {
+      final client = _FakeClient();
+      await _pumpPanel(
+        tester,
+        NewsPanel(client: client, feed: 'sspai', onFeedChanged: (_) {}),
+      );
+      expect(client.requests.single['feed'], 'sspai');
+      expect(find.textContaining('中文资讯 1'), findsOneWidget);
+      expect(find.text('少数派 · 官方 RSS ↗'), findsOneWidget);
+      expect(find.textContaining('条评论 · HN'), findsNothing);
+      expect(find.text('101 分'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -234,8 +334,8 @@ void main() {
     await tester.tap(find.text('展开全部 10 条'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Story 10:'), findsOneWidget);
-    await tester.ensureVisible(find.text('最新'));
-    await tester.tap(find.text('最新'));
+    await tester.ensureVisible(find.text('HN 最新'));
+    await tester.tap(find.text('HN 最新'));
     await tester.pumpAndSettle();
     expect(feed, 'new');
     expect(client.requests.last['feed'], 'new');

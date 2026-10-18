@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'dashboard_client.dart';
+import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
 
 const _releaseAccent = Color(0xFF67D8C2);
@@ -24,6 +25,28 @@ class ReleasesPanel extends StatefulWidget {
 class _ReleasesPanelState extends State<ReleasesPanel> {
   final _repoController = TextEditingController();
   String? _error;
+  int _page = 0;
+  static const _pageSize = 4;
+
+  @override
+  void didUpdateWidget(covariant ReleasesPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _page = _page.clamp(
+      0,
+      ((widget.repos.length - 1) ~/ _pageSize).clamp(0, 100),
+    );
+  }
+
+  void _addPopular() {
+    final known = widget.repos.map((repo) => repo.toLowerCase()).toSet();
+    final expanded = [
+      ...widget.repos,
+      ...defaultDashboardRepos.where(
+        (repo) => !known.contains(repo.toLowerCase()),
+      ),
+    ].take(maxDashboardRepos).toList();
+    widget.onReposChanged(expanded);
+  }
 
   @override
   void dispose() {
@@ -41,8 +64,8 @@ class _ReleasesPanelState extends State<ReleasesPanel> {
         .replaceFirst(RegExp(r'/$'), '')
         .replaceFirst(RegExp(r'\.git$'), '');
     String? error;
-    if (widget.repos.length >= 4) {
-      error = '最多关注 4 个仓库，请先移除一个。';
+    if (widget.repos.length >= maxDashboardRepos) {
+      error = '最多关注 $maxDashboardRepos 个仓库，请先移除一个。';
     } else if (repo.length > 140 ||
         !RegExp(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$').hasMatch(repo)) {
       error = '请输入 owner/repo，例如 flutter/flutter。';
@@ -51,72 +74,143 @@ class _ReleasesPanelState extends State<ReleasesPanel> {
     }
     setState(() => _error = error);
     if (error != null) return;
+    setState(() => _page = widget.repos.length ~/ _pageSize);
     widget.onReposChanged([...widget.repos, repo]);
     _repoController.clear();
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (widget.repos.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 18),
-          child: Text('添加你关注的 GitHub 仓库，查看最新发布。'),
+  Widget build(BuildContext context) {
+    final start = _page * _pageSize;
+    final visible = widget.repos.skip(start).take(_pageSize).toList();
+    final pages = (widget.repos.length / _pageSize).ceil();
+    final followed = widget.repos.map((repo) => repo.toLowerCase()).toSet();
+    final hasMissingPopular = defaultDashboardRepos.any(
+      (repo) => !followed.contains(repo.toLowerCase()),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '已关注 ${widget.repos.length} 个项目',
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
         ),
-      for (var i = 0; i < widget.repos.length; i++) ...[
-        if (i > 0) const Divider(height: 32, color: Color(0xFF30363A)),
-        _RepositoryRelease(
-          key: ValueKey(widget.repos[i]),
-          client: widget.client,
-          repo: widget.repos[i],
-          onRemove: () => widget.onReposChanged([
-            for (final repo in widget.repos)
-              if (repo != widget.repos[i]) repo,
-          ]),
+        const SizedBox(height: 8),
+        const Text(
+          '精选热门 AI、开发工具、前端与移动端项目。每页 4 个，翻页时按需加载，结果缓存 1 小时。',
+          style: TextStyle(color: Color(0xFFA8B5BB), fontSize: 12, height: 1.5),
         ),
-      ],
-      const SizedBox(height: 20),
-      if (widget.repos.length < 4) ...[
-        TextField(
-          controller: _repoController,
-          maxLength: 180,
-          autocorrect: false,
-          enableSuggestions: false,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _addRepo(),
-          onChanged: (_) {
-            if (_error != null) setState(() => _error = null);
-          },
-          decoration: InputDecoration(
-            labelText: '关注仓库',
-            hintText: 'owner/repo',
-            helperText: '支持仓库名称或 GitHub 仓库链接',
-            helperMaxLines: 2,
-            errorText: _error,
-            errorMaxLines: 2,
-            counterText: '',
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              tooltip: '添加仓库',
-              onPressed: _addRepo,
-              icon: const Icon(Icons.add_rounded, color: _releaseAccent),
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        if (pages > 1) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              TextButton.icon(
+                onPressed: _page > 0 ? () => setState(() => _page--) : null,
+                icon: const Icon(Icons.chevron_left_rounded),
+                label: const Text('上一页'),
+              ),
+              DropdownButton<int>(
+                value: _page,
+                items: [
+                  for (var i = 0; i < pages; i++)
+                    DropdownMenuItem(
+                      value: i,
+                      child: Text(
+                        '${i + 1} / $pages',
+                        semanticsLabel: '第 ${i + 1} 页，共 $pages 页',
+                      ),
+                    ),
+                ],
+                onChanged: (page) {
+                  if (page != null) setState(() => _page = page);
+                },
+              ),
+              TextButton.icon(
+                onPressed: _page + 1 < pages
+                    ? () => setState(() => _page++)
+                    : null,
+                icon: const Icon(Icons.chevron_right_rounded),
+                label: const Text('下一页'),
+              ),
+            ],
+          ),
+          Text(
+            '正在显示第 ${start + 1}–${start + visible.length} 个，共 ${widget.repos.length} 个',
+            style: const TextStyle(color: Color(0xFFA8B5BB), fontSize: 12),
+          ),
+        ],
+        if (widget.repos.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: Text('添加你关注的 GitHub 仓库，查看最新发布。'),
+          ),
+        for (var i = 0; i < visible.length; i++) ...[
+          if (i > 0) const Divider(height: 32, color: Color(0xFF30363A)),
+          _RepositoryRelease(
+            key: ValueKey(visible[i]),
+            client: widget.client,
+            repo: visible[i],
+            onRemove: () => widget.onReposChanged([
+              for (final repo in widget.repos)
+                if (repo != visible[i]) repo,
+            ]),
+          ),
+        ],
+        const SizedBox(height: 12),
+        const Text(
+          'Release 是仓库发布记录，可能包含预发布或子组件，不一定是软件当前稳定版。',
+          style: TextStyle(color: Color(0xFFA8B5BB), fontSize: 12, height: 1.5),
+        ),
+        const SizedBox(height: 20),
+        if (widget.repos.length < maxDashboardRepos) ...[
+          TextField(
+            controller: _repoController,
+            maxLength: 180,
+            autocorrect: false,
+            enableSuggestions: false,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _addRepo(),
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
+            decoration: InputDecoration(
+              labelText: '关注仓库',
+              hintText: 'owner/repo',
+              helperText: '支持仓库名称或 GitHub 仓库链接',
+              helperMaxLines: 2,
+              errorText: _error,
+              errorMaxLines: 2,
+              counterText: '',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                tooltip: '添加仓库',
+                onPressed: _addRepo,
+                icon: const Icon(Icons.add_rounded, color: _releaseAccent),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              ),
             ),
           ),
+          if (hasMissingPopular)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _addPopular,
+                icon: const Icon(Icons.playlist_add_rounded),
+                label: const Text('补齐热门项目'),
+              ),
+            ),
+          const SizedBox(height: 12),
+        ],
+        const Text(
+          '最多关注 $maxDashboardRepos 个。GitHub 匿名 API 通常限每个 IP 每小时 60 次请求；共享网络共用额度。',
+          style: TextStyle(color: Color(0xFFA8B5BB), fontSize: 12, height: 1.5),
         ),
-        const SizedBox(height: 12),
       ],
-      Text(
-        '已关注 ${widget.repos.length}/4 · GitHub 匿名 API 通常限每个 IP 每小时 60 次请求。共享网络也会共享额度。',
-        style: const TextStyle(
-          color: Color(0xFFA8B5BB),
-          fontSize: 12,
-          height: 1.5,
-        ),
-      ),
-    ],
-  );
+    );
+  }
 }
 
 class _RepositoryRelease extends StatelessWidget {
@@ -204,6 +298,17 @@ class _RepositoryRelease extends StatelessWidget {
                   height: 1.3,
                 ),
               ),
+              if (release['prerelease'] == true)
+                const Text(
+                  '预发布版本',
+                  style: TextStyle(color: Color(0xFFE9C48B), fontSize: 12),
+                ),
+              if (repo.toLowerCase() == 'flutter/flutter')
+                TextButton(
+                  onPressed: () =>
+                      client.openUrl('https://github.com/flutter/flutter/tags'),
+                  child: const Text('Flutter 的 Release 记录可能滞后，查看版本标签'),
+                ),
               if (name.isNotEmpty && name != tag) ...[
                 const SizedBox(height: 4),
                 Text(name, style: const TextStyle(fontSize: 15, height: 1.4)),

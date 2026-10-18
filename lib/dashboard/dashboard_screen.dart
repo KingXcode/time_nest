@@ -48,7 +48,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     'holidays': '中国大陆节假日与调休',
     'releases': '公开仓库 · 最新 Release',
     'fx': '每日参考汇率与近 30 天变化',
-    'news': 'Hacker News · 英文原文',
+    'news': '中文科技资讯 · 也可切换 HN 英文',
   };
   static const _icons = {
     'weather': Icons.wb_sunny_outlined,

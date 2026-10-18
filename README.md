@@ -23,7 +23,7 @@
 - 常亮与全屏能力检测、真实状态提示及失败降级；不保证所有 iPhone 模式都支持。
 - 主屏幕图标、安装指引和独立展示配置。
 - 发布构建自动生成完整离线缓存；自动检查新版，主页面提示“立即更新”，点击后加载并保留设置和计时。
-- 每日看板：出门天气窗口、中国大陆调休拼假、GitHub 项目更新、每日参考汇率、Hacker News 热门 / 最新 / Show HN；支持收藏、排序和本地保存。
+- 每日看板：出门天气窗口、中国大陆调休拼假、GitHub 项目更新、每日参考汇率、中文少数派资讯及 Hacker News 热门 / 最新 / Show HN；支持收藏、排序和本地保存。
 
 不包含后端、账号、网络校时、私人日程、原生安装包或后台常驻服务。
 
@@ -129,9 +129,13 @@ Safari 添加到主屏幕：分享菜单 → 添加到主屏幕 → 从图标重
 | --- | --- |
 | 什么时候出门 | [Open-Meteo](https://open-meteo.com/en/docs)：先手动搜索城市，展示当地小时降雨概率、体感温度、风速及简单出门窗口。预报不是实况，也不是健康建议。免费托管 API **仅限非商用**，有调用配额及服务限制；商用前需替换方案或购买服务。 |
 | 下个假期怎么拼 | [holiday-cn](https://github.com/NateScarlet/holiday-cn)：社区依据国务院公告整理，非政府官方 API。合并普通周末，明确应用 isOffDay=false 的补班；请假方案限已知年份，未知安排显示待公布，不猜测。 |
-| 关注的项目更新了 | [GitHub Releases](https://docs.github.com/en/rest/releases/releases)：最多关注 4 个公开仓库，无 Release 的项目明确显示无正式发布。匿名共享 IP 限额通常 60 次/小时，显示限流提示，无个人 Token。 |
+| 关注的项目更新了 | [GitHub Releases](https://docs.github.com/en/rest/releases/releases)：默认关注 24 个热门 AI、开发工具、前端与移动端项目，最多 50 个。每页 4 个，翻页按需请求并缓存 1 小时；每个仓库仅取最新一条 Release。无 Release 的项目明确显示无正式发布。Release 可能包含预发布或子组件，不等同当前稳定版；Flutter 的 Release 可能滞后，可查看版本标签。匿名共享 IP 限额通常 60 次/小时，显示限流提示，无个人 Token。 |
 | 这笔花费值多少 | [Frankfurter](https://frankfurter.dev/)：每日参考汇率、数据日期和近 30 天趋势；不是实时成交报价，不含手续费，周末或节假日可能延用最近交易日。默认混合数据，免费免 Key。 |
-| 科技圈正在聊什么 | [Hacker News 官方 API](https://github.com/HackerNews/API)：热门、最新、Show HN，保留英文标题与原文/讨论链接，不含翻译服务。 |
+| 科技圈正在聊什么 | 默认 [少数派官方 RSS](https://sspai.com/feed)：中文科技、数码与效率生活文章，仅展示原始标题、文章链接与发布时间，不转载正文或图片。直接从浏览器读取，缓存 10 分钟，失败时标示旧缓存；并非实时快讯。也可切换 [Hacker News 官方 API](https://github.com/HackerNews/API) 的英文热门、最新、Show HN。 |
+
+默认项目为人工精选，不是实时 GitHub 星标排行榜：Flutter、Ollama、Dify、VS Code、Open WebUI、n8n、Transformers、LangChain、llama.cpp、ComfyUI、React、Vue、Next.js、Svelte、Vite、Tailwind CSS、TypeScript、Node.js、Deno、Bun、Rust、uv、Kubernetes、React Native。可逐个取消、添加自己的仓库，或点“补齐热门项目”。
+
+升级时，旧版仅有 flutter/flutter 的默认列表会扩充；已有自定义或空列表保留。新版记住取消关注，不会在刷新后自动加回。新闻旧默认热门频道切为中文，已主动选择最新或 Show HN 的偏好保留。
 
 旧八类工具及其文件/图片桥接、二维码依赖和专属测试已移除。旧浏览器中若已有常用颜色偏好，该历史键不再读写；无需清除整个站点数据，时钟设置仍保留。
 

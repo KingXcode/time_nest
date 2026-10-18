@@ -10,6 +10,58 @@ void main() {
     expect(DashboardPreferences.decode('[]').city, isNull);
   });
 
+  test('popular defaults and Chinese news are provided on first launch', () {
+    final read = DashboardPreferences.decode(null);
+    expect(read.repos, defaultDashboardRepos);
+    expect(read.repos, hasLength(24));
+    expect(read.feed, 'sspai');
+  });
+
+  test(
+    'old untouched defaults migrate, custom lists and chosen feeds survive',
+    () {
+      final old = DashboardPreferences.decode(
+        '{"repos":["flutter/flutter"],"feed":"top"}',
+      );
+      expect(old.repos, defaultDashboardRepos);
+      expect(old.feed, 'sspai');
+      final custom = DashboardPreferences.decode(
+        '{"repos":["owner/project"],"feed":"show"}',
+      );
+      expect(custom.repos, ['owner/project']);
+      expect(custom.feed, 'show');
+      expect(DashboardPreferences.decode('{"repos":[]}').repos, isEmpty);
+    },
+  );
+
+  test('removed defaults and intentional single-repo lists stay removed', () {
+    final saved = DashboardPreferences(repos: ['flutter/flutter'], feed: 'top');
+    expect(DashboardPreferences.decode(saved.encode()).repos, [
+      'flutter/flutter',
+    ]);
+    expect(DashboardPreferences.decode(saved.encode()).feed, 'top');
+    saved.repos = [];
+    expect(DashboardPreferences.decode(saved.encode()).repos, isEmpty);
+  });
+
+  test(
+    'saved repositories are deduplicated case-insensitively up to capacity',
+    () {
+      final saved = DashboardPreferences.decode(
+        jsonEncode({
+          'version': 2,
+          'repos': [
+            'Owner/Project',
+            'owner/project',
+            for (var i = 0; i < 60; i++) 'owner/repo$i',
+          ],
+        }),
+      );
+      expect(saved.repos, hasLength(maxDashboardRepos));
+      expect(saved.repos.first, 'owner/project');
+    },
+  );
+
   test('all selections round trip and missing modules are restored', () {
     final settings = DashboardPreferences(
       city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
@@ -51,7 +103,7 @@ void main() {
     expect(read.repos, ['flutter/flutter']);
     expect(read.base, 'USD');
     expect(read.amount, 100);
-    expect(read.feed, 'top');
+    expect(read.feed, 'sspai');
     expect(read.leaveDays, 2);
     expect(read.order.toSet(), dashboardModules.toSet());
     expect(read.favorites, isEmpty);

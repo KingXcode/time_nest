@@ -31,6 +31,7 @@ function harness(fetcher, options = {}) {
   }
   const context = {
     URL, URLSearchParams, AbortController, Date: TestDate, localStorage,
+    DOMParser: options.DOMParser,
     setTimeout: options.setTimeout ?? setTimeout,
     clearTimeout: options.clearTimeout ?? clearTimeout,
     open: (...args) => opened.push(args),
@@ -353,11 +354,11 @@ test('preferences only accept bounded JSON objects and external links require sa
 test('cache retention is bounded and malformed cache entries are ignored', async () => {
   const shared = storage({ [CACHE_KEY]: '{"weather:broken":{"at":1,"data":{}}}' });
   const h = harness(() => response({}), { storage: shared });
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 100; i++) {
     await h.request('searchCities', { query: `City ${i}` }); h.advance(1);
   }
   const stored = JSON.parse(shared.getItem(CACHE_KEY));
-  assert.ok(Object.keys(stored).length <= 48);
+  assert.ok(Object.keys(stored).length <= 80);
   assert.ok(shared.getItem(CACHE_KEY).length <= 900000);
   assert.equal(Object.hasOwn(stored, 'weather:broken'), false);
 });
@@ -376,4 +377,85 @@ test('same-currency FX pair uses provider-confirmed identity rates and actual ob
   ]);
   assert.equal(h.calls.length, 2);
   assert.ok(h.calls.some(call => call.url.endsWith('/rate/USD/USD')));
+});
+
+
+// The DOM implementation belongs to the browser. These parsed-document fixtures
+// exercise the adapter contract; actual XML parsing is also checked in Chromium.
+function rssParser(items, { broken = false, channel = true } = {}) {
+  return class {
+    parseFromString(raw, mime) {
+      assert.equal(mime, 'application/xml');
+      assert.match(raw, /rss/);
+      return {
+        querySelector: selector => selector === 'parsererror' ? broken : channel,
+        querySelectorAll: () => items.map(item => ({
+          querySelector: key => Object.hasOwn(item, key) ? { textContent: item[key] } : null,
+        })),
+      };
+    }
+  };
+}
+const rssItem = (id, extra = {}) => ({ title: `中文资讯 ${id} & 科技`, link: `https://sspai.com/post/${id}`, pubDate: 'Sat, 17 Oct 2026 14:58:04 +0800', description: '<script>unsafe()</script>', ...extra });
+const xmlResponse = (xml = '<rss/>') => response(xml, 200, { 'content-type': 'application/xml; charset=UTF-8' });
+
+test('Chinese RSS uses direct official feed, keeps title/link/time only, deduplicates and bounds items', async () => {
+  const items = [rssItem(1), rssItem(1), ...Array.from({ length: 20 }, (_, i) => rssItem(i + 2))];
+  const h = harness(() => xmlResponse(), { DOMParser: rssParser(items) });
+  const result = await h.request('news', { feed: 'sspai' });
+  assert.equal(h.calls[0].url, 'https://sspai.com/feed');
+  assert.equal(h.calls[0].init.credentials, 'omit');
+  assert.equal(result.data.stories.length, 10);
+  assert.deepEqual(result.data.stories[0], { title: '中文资讯 1 & 科技', url: 'https://sspai.com/post/1', time: 1792220284, source: '少数派' });
+  assert.equal('score' in result.data.stories[0], false);
+  assert.equal('description' in result.data.stories[0], false);
+  await h.request('news', { feed: 'sspai' });
+  assert.equal(h.calls.length, 1);
+});
+
+test('Chinese RSS rejects unsafe/off-site links, invalid dates and missing titles without fabricating stories', async () => {
+  const items = [rssItem(1), rssItem(2, { link: 'javascript:alert(1)' }), rssItem(3, { link: 'https://evil.test/post/3' }), rssItem(4, { pubDate: 'not a date' }), rssItem(5, { title: ' ' }), rssItem(6, { link: 'https://sspai.com:1234/post/6' })];
+  const h = harness(() => xmlResponse(), { DOMParser: rssParser(items) });
+  const result = await h.request('news', { feed: 'sspai' });
+  assert.equal(result.data.stories.length, 1);
+  assert.match(result.warning, /5 条/);
+});
+
+test('RSS failures preserve stale cache and original fetched timestamp', async () => {
+  let fail = false;
+  const h = harness(() => fail ? response('unavailable', 502) : xmlResponse(), { DOMParser: rssParser([rssItem(1)]) });
+  const first = await h.request('news', { feed: 'sspai' });
+  h.advance(11 * minute); fail = true;
+  const stale = await h.request('news', { feed: 'sspai' });
+  assert.equal(stale.stale, true);
+  assert.equal(stale.fetchedAt, first.fetchedAt);
+  assert.equal(stale.data.stories[0].title, first.data.stories[0].title);
+  assert.match(stale.warning, /上次保存/);
+});
+
+test('RSS rejects malformed XML, HTML, DOCTYPE and all-invalid items; empty channel remains explicit', async () => {
+  for (const options of [{ broken: true }, { channel: false }]) {
+    const h = harness(() => xmlResponse(), { DOMParser: rssParser([], options) });
+    await assert.rejects(h.request('news', { feed: 'sspai' }), /RSS 格式/);
+  }
+  const doctype = harness(() => xmlResponse('<!DOCTYPE rss><rss/>'));
+  await assert.rejects(doctype.request('news', { feed: 'sspai' }), /XML 格式/);
+  const html = harness(() => response('<html/>', 200, { 'content-type': 'text/html' }));
+  await assert.rejects(html.request('news', { feed: 'sspai' }), /有效 RSS/);
+  const invalid = harness(() => xmlResponse(), { DOMParser: rssParser([rssItem(1, { link: 'data:bad' })]) });
+  await assert.rejects(invalid.request('news', { feed: 'sspai' }), /无法读取/);
+  const empty = harness(() => xmlResponse(), { DOMParser: rssParser([]) });
+  assert.deepEqual((await empty.request('news', { feed: 'sspai' })).data.stories, []);
+});
+
+
+test('corrupted Chinese cache cannot serve future dates or a mismatched English feed', async () => {
+  const story = { title: '缓存中文', url: 'https://sspai.com/post/1', time: 1792220284, source: '少数派' };
+  for (const data of [{ feed: 'sspai', stories: [{ ...story, time: 16725225600 }] }, { feed: 'top', stories: [] }]) {
+    const seed = { [CACHE_KEY]: JSON.stringify({ 'news:{"feed":"sspai"}': { at: START, data } }) };
+    const h = harness(() => xmlResponse(), { storage: storage(seed), DOMParser: rssParser([rssItem(2)]) });
+    const result = await h.request('news', { feed: 'sspai' });
+    assert.equal(result.cached, false);
+    assert.equal(result.data.stories[0].url, 'https://sspai.com/post/2');
+  }
 });

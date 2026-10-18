@@ -1,21 +1,21 @@
 // Public read-only APIs. No credentials, location permission or tracking.
 // Provider documentation: open-meteo.com/en/docs, frankfurter.dev,
 // github.com/NateScarlet/holiday-cn, github.com/HackerNews/API,
-// docs.github.com/en/rest/releases/releases.
+// docs.github.com/en/rest/releases/releases, sspai.com/post/24194 (official RSS).
 (() => {
   'use strict';
   const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
   const CACHE_KEY = 'shike.dashboard.cache.v1';
   const LIMIT_KEY = 'shike.dashboard.limits.v1';
   const PREF_KEY = 'shike.dashboard.preferences.v1';
-  const MAX_CACHE_ENTRIES = 48, MAX_CACHE_BYTES = 900_000;
+  const MAX_CACHE_ENTRIES = 80, MAX_CACHE_BYTES = 900_000;
   const settings = {
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
     holidays: { ttl: DAY, retain: 400 * DAY, gap: 10_000, label: '节假日' },
     releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
     fx: { ttl: 6 * HOUR, retain: 14 * DAY, gap: 10_000, label: '汇率' },
-    news: { ttl: 10 * MINUTE, retain: 2 * DAY, gap: 10_000, label: 'Hacker News' },
+    news: { ttl: 10 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '科技资讯' },
   };
   const inflight = new Map(), attempts = new Map(), itemCache = new Map();
   let cache = readObject(CACHE_KEY), limits = readObject(LIMIT_KEY);
@@ -48,6 +48,12 @@
       return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : '';
     } catch (_) { return ''; }
   }
+  function sspaiUrl(value) {
+    const safe = safeUrl(value);
+    if (!safe) return '';
+    const url = new URL(safe);
+    return url.protocol === 'https:' && url.hostname === 'sspai.com' && !url.port && /^\/post\/\d+\/?$/.test(url.pathname) && !url.search && !url.hash ? url.href : '';
+  }
   function normalizeArgs(module, args) {
     requireValue(Object.hasOwn(settings, module), '不支持的看板模块。');
     requireValue(object(args), '看板参数格式不正确。');
@@ -74,7 +80,7 @@
         return { base, quote };
       }
       case 'news':
-        requireValue(['top', 'new', 'show'].includes(args.feed), '请选择 Top、New 或 Show 资讯分类。');
+        requireValue(['sspai', 'top', 'new', 'show'].includes(args.feed), '请选择中文或 HN 资讯分类。');
         return { feed: args.feed };
     }
   }
@@ -86,7 +92,9 @@
       case 'holidays': return Number.isInteger(data.year) && typeof data.known === 'boolean' && Array.isArray(data.papers) && data.papers.every(p => !!safeUrl(p)) && Array.isArray(data.days) && data.days.length <= 400 && data.days.every(d => object(d) && validDate(d.date) && typeof d.name === 'string' && typeof d.isOffDay === 'boolean') && (data.known || data.days.length === 0);
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
       case 'fx': return /^[A-Z]{3}$/.test(data.base) && /^[A-Z]{3}$/.test(data.quote) && finite(data.rate) && data.rate > 0 && validDate(data.date) && Array.isArray(data.history) && data.history.length > 0 && data.history.length <= 40 && data.history.every(d => object(d) && validDate(d.date) && finite(d.rate) && d.rate > 0);
-      case 'news': return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
+      case 'news':
+        if (data.feed === 'sspai') return Array.isArray(data.stories) && data.stories.length <= 10 && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && s.source === '少数派' && finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY && !!sspaiUrl(s.url));
+        return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
       default: return false;
     }
   }
@@ -94,7 +102,7 @@
     const now = Date.now();
     const entries = Object.entries(cache).filter(([key, entry]) => {
       const module = key.split(':', 1)[0], config = settings[module];
-      return config && object(entry) && finite(entry.at) && entry.at <= now + 5 * MINUTE && now - entry.at <= config.retain && validData(module, entry.data);
+      return config && object(entry) && finite(entry.at) && entry.at <= now + 5 * MINUTE && now - entry.at <= config.retain && validData(module, entry.data) && (module !== 'news' || key === `news:${JSON.stringify({ feed: entry.data.feed })}`);
     }).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_CACHE_ENTRIES);
     cache = Object.fromEntries(entries);
     while (JSON.stringify(cache).length > MAX_CACHE_BYTES && entries.length) {
@@ -119,7 +127,7 @@
   }
   function cleanLimits() {
     const now = Date.now();
-    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'api.frankfurter.dev', 'raw.githubusercontent.com', 'hacker-news.firebaseio.com'].includes(key) && finite(value) && value > now && value <= now + 2 * DAY));
+    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'api.frankfurter.dev', 'raw.githubusercontent.com', 'hacker-news.firebaseio.com', 'sspai.com'].includes(key) && finite(value) && value > now && value <= now + 2 * DAY));
     saveObject(LIMIT_KEY, limits);
   }
   function blockedMessage(host, until) {
@@ -159,7 +167,7 @@
     try { localStorage.setItem(key, JSON.stringify(githubBudget)); } catch (_) { /* still protected in memory */ }
   }
   let githubBudget = [];
-  async function jsonFetch(url, { allow404 = false, plainJson = false } = {}) {
+  async function jsonFetch(url, { allow404 = false, plainJson = false, xml = false } = {}) {
     const host = new URL(url).host;
     const persisted = readObject(LIMIT_KEY);
     if (finite(persisted[host])) limits[host] = Math.max(limits[host] || 0, persisted[host]);
@@ -169,7 +177,7 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
-      const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', headers: { Accept: host === 'api.github.com' ? 'application/vnd.github+json' : 'application/json' } });
+      const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', headers: { Accept: host === 'api.github.com' ? 'application/vnd.github+json' : xml ? 'application/rss+xml, application/xml, text/xml' : 'application/json' } });
       if (response.status === 429 || (host === 'api.github.com' && response.status === 403)) throw blockHost(host, response);
       if (allow404 && response.status === 404) return null;
       if (!response.ok) {
@@ -179,9 +187,13 @@
       }
       if (host === 'api.github.com' && response.headers.get('x-ratelimit-remaining') === '0') blockHost(host, response);
       const type = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
-      requireValue(type === 'application/json' || type.endsWith('+json') || (plainJson && type === 'text/plain'), '数据服务没有返回 JSON，请检查网络后重试。');
+      requireValue(xml
+        ? ['application/rss+xml', 'application/xml', 'text/xml'].includes(type)
+        : type === 'application/json' || type.endsWith('+json') || (plainJson && type === 'text/plain'),
+      xml ? '资讯源没有返回有效 RSS，请稍后重试。' : '数据服务没有返回 JSON，请检查网络后重试。');
       const raw = await response.text();
       requireValue(raw.length <= 1_000_000, '数据响应过大，请稍后重试。');
+      if (xml) return raw;
       try { return JSON.parse(raw); } catch (_) { throw new Error('数据服务返回了无效 JSON，请稍后重试。'); }
     } catch (error) {
       if (error?.name === 'AbortError') throw new Error('连接数据服务超时，请检查网络后重试。');
@@ -248,11 +260,11 @@
           ...(!boundaryKnown ? { warning: boundaryFailed ? '下一年度公告暂时无法读取，12 月跨年调休可能不完整。' : '数据源暂无下一年度公告，12 月跨年调休仍待核实。' } : {}) };
       }
       case 'releases': {
-        const raw = await jsonFetch(`https://api.github.com/repos/${args.repo}/releases?per_page=5`);
+        const raw = await jsonFetch(`https://api.github.com/repos/${args.repo}/releases?per_page=1`);
         requireValue(Array.isArray(raw));
-        const releases = raw.slice(0, 5).map(r => {
+        const releases = raw.slice(0, 1).map(r => {
           requireValue(object(r) && typeof r.tag_name === 'string' && typeof r.published_at === 'string' && Number.isFinite(Date.parse(r.published_at)) && !!safeUrl(r.html_url));
-          return { name: text(r.name, 240) || text(r.tag_name, 240), tag: text(r.tag_name, 240), publishedAt: r.published_at, url: safeUrl(r.html_url), body: text(r.body, 6000) };
+          return { name: text(r.name, 240) || text(r.tag_name, 240), tag: text(r.tag_name, 240), publishedAt: r.published_at, url: safeUrl(r.html_url), body: text(r.body, 6000), ...(r.prerelease === true ? { prerelease: true } : {}) };
         });
         return { data: { repo: args.repo, releases, noReleases: releases.length === 0 } };
       }
@@ -272,6 +284,28 @@
         return { data: { base: args.base, quote: args.quote, rate: latest.rate, date: latest.date, history } };
       }
       case 'news': {
+        if (args.feed === 'sspai') {
+          const xml = await jsonFetch('https://sspai.com/feed', { xml: true });
+          requireValue(!/<!DOCTYPE|<!ENTITY/i.test(xml), '资讯源 XML 格式不受支持。');
+          const document = new DOMParser().parseFromString(xml, 'application/xml');
+          requireValue(!document.querySelector('parsererror') && !!document.querySelector('rss > channel'), '资讯源 RSS 格式异常，请稍后重试。');
+          const items = [...document.querySelectorAll('channel > item')].slice(0, 30);
+          const seen = new Set(), stories = [];
+          let failures = 0;
+          for (const item of items) {
+            const field = name => item.querySelector(name)?.textContent?.trim() || '';
+            const title = text(field('title'), 500).replace(/\s+/g, ' ');
+            const url = sspaiUrl(field('link'));
+            const time = Date.parse(field('pubDate')) / 1000;
+            if (!title || !url || !finite(time) || time <= 0 || time * 1000 > Date.now() + DAY) { failures++; continue; }
+            if (seen.has(url)) continue;
+            seen.add(url);
+            stories.push({ title, url, time, source: '少数派' });
+            if (stories.length === 10) break;
+          }
+          requireValue(items.length === 0 || stories.length > 0, '少数派内容暂时无法读取，请稍后重试。');
+          return { data: { feed: args.feed, stories }, ...(failures ? { warning: `${failures} 条资讯格式异常，当前显示已验证内容。` } : {}) };
+        }
         const root = 'https://hacker-news.firebaseio.com/v0';
         const ids = await jsonFetch(`${root}/${args.feed}stories.json`);
         requireValue(Array.isArray(ids) && ids.every(id => Number.isSafeInteger(id) && id > 0));

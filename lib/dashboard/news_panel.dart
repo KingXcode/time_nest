@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'dashboard_client.dart';
+import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
 
 const _newsAccent = Color(0xFF67D8C2);
@@ -32,9 +33,8 @@ class _NewsPanelState extends State<NewsPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final feed = ['top', 'new', 'show'].contains(widget.feed)
-        ? widget.feed
-        : 'top';
+    final feed = dashboardFeeds.contains(widget.feed) ? widget.feed : 'sspai';
+    final chinese = feed == 'sspai';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -43,8 +43,9 @@ class _NewsPanelState extends State<NewsPanel> {
           runSpacing: 6,
           children: [
             for (final option in const [
-              ('top', '热门'),
-              ('new', '最新'),
+              ('sspai', '中文 · 少数派'),
+              ('top', 'HN 热门'),
+              ('new', 'HN 最新'),
               ('show', 'Show HN'),
             ])
               ChoiceChip(
@@ -59,13 +60,26 @@ class _NewsPanelState extends State<NewsPanel> {
               ),
           ],
         ),
+        const SizedBox(height: 8),
+        Text(
+          chinese
+              ? '少数派官方 RSS · 科技、数码与效率生活，标题为中文原文。'
+              : 'Hacker News 英文原文，保留文章与讨论链接。',
+          style: const TextStyle(
+            color: Color(0xFFA8B5BB),
+            fontSize: 12,
+            height: 1.5,
+          ),
+        ),
         const SizedBox(height: 12),
         ApiSection(
           client: widget.client,
           module: 'news',
           args: {'feed': feed},
-          sourceLabel: 'Hacker News · 官方 API',
-          sourceUrl: 'https://github.com/HackerNews/API',
+          sourceLabel: chinese ? '少数派 · 官方 RSS' : 'Hacker News · 官方 API',
+          sourceUrl: chinese
+              ? 'https://sspai.com/feed'
+              : 'https://github.com/HackerNews/API',
           builder: (context, result) {
             final raw = result.data['stories'];
             final stories = raw is List
@@ -90,6 +104,7 @@ class _NewsPanelState extends State<NewsPanel> {
                     client: widget.client,
                     story: stories[i],
                     rank: i + 1,
+                    chinese: chinese,
                   ),
                 ],
                 if (stories.length > 6)
@@ -120,21 +135,23 @@ class _NewsStory extends StatelessWidget {
     required this.client,
     required this.story,
     required this.rank,
+    required this.chinese,
   });
   final DashboardClient client;
   final Map story;
   final int rank;
+  final bool chinese;
 
   @override
   Widget build(BuildContext context) {
-    final title = story['title'] is String
-        ? story['title'] as String
-        : 'Untitled';
+    final title = story['title'] is String ? story['title'] as String : '未命名文章';
     final id = story['id'];
     final discussion =
         story['discussion'] is String &&
             (story['discussion'] as String).isNotEmpty
         ? story['discussion'] as String
+        : chinese
+        ? ''
         : 'https://news.ycombinator.com/item?id=$id';
     final url = story['url'] is String && (story['url'] as String).isNotEmpty
         ? story['url'] as String
@@ -186,10 +203,11 @@ class _NewsStory extends StatelessWidget {
                 spacing: 9,
                 runSpacing: 4,
                 children: [
-                  Text(
-                    '$score 分',
-                    style: const TextStyle(color: _newsAccent, fontSize: 12),
-                  ),
+                  if (!chinese)
+                    Text(
+                      '$score 分',
+                      style: const TextStyle(color: _newsAccent, fontSize: 12),
+                    ),
                   if (domain.isNotEmpty)
                     Text(
                       domain,
@@ -208,35 +226,36 @@ class _NewsStory extends StatelessWidget {
                     ),
                 ],
               ),
-              Wrap(
-                spacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  TextButton.icon(
-                    onPressed: () => client.openUrl(discussion),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 0),
-                      minimumSize: const Size(0, 48),
-                    ),
-                    icon: const Icon(
-                      Icons.chat_bubble_outline_rounded,
-                      size: 14,
-                    ),
-                    label: Text(
-                      '$comments 条评论 · HN',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                  if (by.isNotEmpty)
-                    Text(
-                      'by $by',
-                      style: const TextStyle(
-                        color: Color(0xFF8FA0A6),
-                        fontSize: 11,
+              if (!chinese)
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => client.openUrl(discussion),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 0),
+                        minimumSize: const Size(0, 48),
+                      ),
+                      icon: const Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        size: 14,
+                      ),
+                      label: Text(
+                        '$comments 条评论 · HN',
+                        style: const TextStyle(fontSize: 12),
                       ),
                     ),
-                ],
-              ),
+                    if (by.isNotEmpty)
+                      Text(
+                        'by $by',
+                        style: const TextStyle(
+                          color: Color(0xFF8FA0A6),
+                          fontSize: 11,
+                        ),
+                      ),
+                  ],
+                ),
             ],
           ),
         ),

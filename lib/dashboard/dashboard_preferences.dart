@@ -2,14 +2,44 @@ import 'dart:convert';
 
 const dashboardModules = ['weather', 'holidays', 'releases', 'fx', 'news'];
 
+// Curated popular projects, not a live star ranking. No authentication required.
+const defaultDashboardRepos = [
+  'flutter/flutter',
+  'ollama/ollama',
+  'langgenius/dify',
+  'microsoft/vscode',
+  'open-webui/open-webui',
+  'n8n-io/n8n',
+  'huggingface/transformers',
+  'langchain-ai/langchain',
+  'ggml-org/llama.cpp',
+  'Comfy-Org/ComfyUI',
+  'react/react',
+  'vuejs/core',
+  'vercel/next.js',
+  'sveltejs/svelte',
+  'vitejs/vite',
+  'tailwindlabs/tailwindcss',
+  'microsoft/TypeScript',
+  'nodejs/node',
+  'denoland/deno',
+  'oven-sh/bun',
+  'rust-lang/rust',
+  'astral-sh/uv',
+  'kubernetes/kubernetes',
+  'react/react-native',
+];
+const maxDashboardRepos = 50;
+const dashboardFeeds = ['sspai', 'top', 'new', 'show'];
+
 class DashboardPreferences {
   DashboardPreferences({
     this.city,
-    this.repos = const ['flutter/flutter'],
+    this.repos = defaultDashboardRepos,
     this.base = 'USD',
     this.quote = 'CNY',
     this.amount = 100,
-    this.feed = 'top',
+    this.feed = 'sspai',
     this.leaveDays = 2,
     this.order = dashboardModules,
     this.favorites = const ['weather', 'holidays'],
@@ -45,9 +75,18 @@ class DashboardPreferences {
               (repo) =>
                   RegExp(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$').hasMatch(repo),
             )
+            .map((repo) => repo.toLowerCase())
             .toSet()
-            .take(4)
+            .take(maxDashboardRepos)
             .toList();
+      }
+      // Upgrade only the exact old shipped default. Custom and empty lists stay
+      // intact; versioned preferences never silently re-follow removed projects.
+      if (json['version'] == null &&
+          json['repos'] is List &&
+          (json['repos'] as List).length == 1 &&
+          (json['repos'] as List).first == 'flutter/flutter') {
+        prefs.repos = List.of(defaultDashboardRepos);
       }
       const currencies = [
         'CNY',
@@ -76,8 +115,11 @@ class DashboardPreferences {
           amount <= 1000000000) {
         prefs.amount = amount.toDouble();
       }
-      if (['top', 'new', 'show'].contains(json['feed'])) {
+      if (dashboardFeeds.contains(json['feed'])) {
         prefs.feed = json['feed'] as String;
+      }
+      if (json['version'] == null && json['feed'] == 'top') {
+        prefs.feed = 'sspai';
       }
       final days = json['leaveDays'];
       if (days is int && days >= 0 && days <= 5) prefs.leaveDays = days;
@@ -103,6 +145,7 @@ class DashboardPreferences {
   }
 
   String encode() => jsonEncode({
+    'version': 2,
     'city': city,
     'repos': repos,
     'base': base,
