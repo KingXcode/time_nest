@@ -40,7 +40,7 @@ if localization.exists():
     source = localization.read_text()
     corpus += source.split('class MaterialLocalizationZh extends', 1)[1].split(
         'class MaterialLocalizationZhHans extends', 1)[0]
-# City, holiday, and public release names arrive at runtime. Bundle common CJK
+# City, news, and public release names arrive at runtime. Bundle common CJK
 # rather than requiring a remote fallback font for everyday Chinese content.
 corpus += ''.join(chr(code) for code in range(0x4E00, 0xA000))
 corpus += ''.join(chr(code) for code in range(0x3000, 0x3040))

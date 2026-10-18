@@ -1,6 +1,6 @@
 // Public read-only APIs. No credentials, location permission or tracking.
 // Provider documentation: open-meteo.com/en/docs, frankfurter.dev,
-// github.com/NateScarlet/holiday-cn, github.com/HackerNews/API,
+// github.com/HackerNews/API,
 // docs.github.com/en/rest/releases/releases, sspai.com/post/24194 (official RSS).
 (() => {
   'use strict';
@@ -12,7 +12,6 @@
   const settings = {
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
-    holidays: { ttl: DAY, retain: 400 * DAY, gap: 10_000, label: '节假日' },
     releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
     fx: { ttl: 6 * HOUR, retain: 14 * DAY, gap: 10_000, label: '汇率' },
     news: { ttl: 10 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '科技资讯' },
@@ -66,9 +65,6 @@
       case 'weather':
         requireValue(finite(args.latitude) && Math.abs(args.latitude) <= 90 && finite(args.longitude) && Math.abs(args.longitude) <= 180, '城市坐标无效，请重新选择城市。');
         return { latitude: Math.round(args.latitude * 10000) / 10000, longitude: Math.round(args.longitude * 10000) / 10000 };
-      case 'holidays':
-        requireValue(Number.isInteger(args.year) && args.year >= 2007 && args.year <= 2100, '请选择 2007～2100 年。');
-        return { year: args.year };
       case 'releases': {
         const repo = text(args.repo, 201).trim();
         requireValue(/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?\/[a-zA-Z0-9_.-]{1,100}$/.test(repo) && !['.', '..'].includes(repo.split('/')[1]), '仓库格式应为 owner/repo，例如 flutter/flutter。');
@@ -88,8 +84,7 @@
     if (!object(data)) return false;
     switch (module) {
       case 'searchCities': return Array.isArray(data.cities) && data.cities.length <= 10 && data.cities.every(c => object(c) && typeof c.name === 'string' && finite(c.latitude) && Math.abs(c.latitude) <= 90 && finite(c.longitude) && Math.abs(c.longitude) <= 180);
-      case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
-      case 'holidays': return Number.isInteger(data.year) && typeof data.known === 'boolean' && Array.isArray(data.papers) && data.papers.every(p => !!safeUrl(p)) && Array.isArray(data.days) && data.days.length <= 400 && data.days.every(d => object(d) && validDate(d.date) && typeof d.name === 'string' && typeof d.isOffDay === 'boolean') && (data.known || data.days.length === 0);
+      case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
       case 'fx': return /^[A-Z]{3}$/.test(data.base) && /^[A-Z]{3}$/.test(data.quote) && finite(data.rate) && data.rate > 0 && validDate(data.date) && Array.isArray(data.history) && data.history.length > 0 && data.history.length <= 40 && data.history.every(d => object(d) && validDate(d.date) && finite(d.rate) && d.rate > 0);
       case 'news':
@@ -121,13 +116,12 @@
     return { data: entry.data, fetchedAt: new Date(entry.at).toISOString(), cached, stale, ...(warning || entry.warning ? { warning: warning || entry.warning } : {}) };
   }
   function ttl(module, entry) {
-    if (module === 'holidays' && !entry.data.known) return 6 * HOUR;
     if (module === 'news' && entry.warning) return MINUTE;
     return settings[module].ttl;
   }
   function cleanLimits() {
     const now = Date.now();
-    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'api.frankfurter.dev', 'raw.githubusercontent.com', 'hacker-news.firebaseio.com', 'sspai.com'].includes(key) && finite(value) && value > now && value <= now + 2 * DAY));
+    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'api.frankfurter.dev', 'hacker-news.firebaseio.com', 'sspai.com'].includes(key) && finite(value) && value > now && value <= now + 2 * DAY));
     saveObject(LIMIT_KEY, limits);
   }
   function blockedMessage(host, until) {
@@ -167,7 +161,7 @@
     try { localStorage.setItem(key, JSON.stringify(githubBudget)); } catch (_) { /* still protected in memory */ }
   }
   let githubBudget = [];
-  async function jsonFetch(url, { allow404 = false, plainJson = false, xml = false } = {}) {
+  async function jsonFetch(url, { xml = false } = {}) {
     const host = new URL(url).host;
     const persisted = readObject(LIMIT_KEY);
     if (finite(persisted[host])) limits[host] = Math.max(limits[host] || 0, persisted[host]);
@@ -179,7 +173,6 @@
     try {
       const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', headers: { Accept: host === 'api.github.com' ? 'application/vnd.github+json' : xml ? 'application/rss+xml, application/xml, text/xml' : 'application/json' } });
       if (response.status === 429 || (host === 'api.github.com' && response.status === 403)) throw blockHost(host, response);
-      if (allow404 && response.status === 404) return null;
       if (!response.ok) {
         if (host === 'api.github.com' && response.status === 404) throw new Error('找不到公开仓库，请检查 owner/repo；私有仓库不受支持。');
         if (host === 'api.frankfurter.dev' && [400, 404, 422].includes(response.status)) throw new Error('暂不支持该货币或货币对，请换一组货币。');
@@ -189,7 +182,7 @@
       const type = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
       requireValue(xml
         ? ['application/rss+xml', 'application/xml', 'text/xml'].includes(type)
-        : type === 'application/json' || type.endsWith('+json') || (plainJson && type === 'text/plain'),
+        : type === 'application/json' || type.endsWith('+json'),
       xml ? '资讯源没有返回有效 RSS，请稍后重试。' : '数据服务没有返回 JSON，请检查网络后重试。');
       const raw = await response.text();
       requireValue(raw.length <= 1_000_000, '数据响应过大，请稍后重试。');
@@ -224,40 +217,14 @@
       }
       case 'weather': {
         const url = new URL('https://api.open-meteo.com/v1/forecast');
-        url.search = new URLSearchParams({ latitude: String(args.latitude), longitude: String(args.longitude), hourly: 'apparent_temperature,precipitation_probability,wind_speed_10m,weather_code', timezone: 'auto', forecast_hours: '24', temperature_unit: 'celsius', wind_speed_unit: 'kmh' });
+        url.search = new URLSearchParams({ latitude: String(args.latitude), longitude: String(args.longitude), hourly: 'temperature_2m,apparent_temperature,precipitation_probability,wind_speed_10m,weather_code', timezone: 'auto', forecast_hours: '24', temperature_unit: 'celsius', wind_speed_unit: 'kmh' });
         const raw = await jsonFetch(url.href), h = raw?.hourly;
         requireValue(object(raw) && object(h) && Array.isArray(h.time) && h.time.length > 0 && h.time.length <= 48);
-        const columns = ['apparent_temperature', 'precipitation_probability', 'wind_speed_10m', 'weather_code'];
+        const columns = ['temperature_2m', 'apparent_temperature', 'precipitation_probability', 'wind_speed_10m', 'weather_code'];
         requireValue(columns.every(k => Array.isArray(h[k]) && h[k].length === h.time.length));
-        const hours = h.time.map((time, i) => ({ time, feels: h.apparent_temperature[i], rain: h.precipitation_probability[i], wind: h.wind_speed_10m[i], code: h.weather_code[i] }));
+        const hours = h.time.map((time, i) => ({ time, temperature: h.temperature_2m[i], feels: h.apparent_temperature[i], rain: h.precipitation_probability[i], wind: h.wind_speed_10m[i], code: h.weather_code[i] }));
         requireValue(hours.some(row => finite(row.feels)), '天气服务暂未提供有效预报，请稍后重试。');
         return { data: { hours, timezone: raw.timezone, utcOffsetSeconds: raw.utc_offset_seconds } };
-      }
-      case 'holidays': {
-        const readYear = async year => {
-          const raw = await jsonFetch(`https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/${year}.json`, { allow404: true, plainJson: true });
-          if (raw === null) return null;
-          requireValue(object(raw) && raw.year === year && Array.isArray(raw.days) && Array.isArray(raw.papers));
-          const days = raw.days.map(day => {
-            requireValue(object(day) && validDate(day.date) && typeof day.name === 'string' && typeof day.isOffDay === 'boolean');
-            return { date: day.date, name: text(day.name, 100), isOffDay: day.isOffDay };
-          });
-          const papers = raw.papers.map(url => { requireValue(!!safeUrl(url)); return safeUrl(url); });
-          return { days, papers };
-        };
-        const current = await readYear(args.year);
-        if (current === null) return { data: { year: args.year, known: false, boundaryKnown: false, days: [], papers: [] } };
-        let following = null, boundaryFailed = false;
-        try { following = await readYear(args.year + 1); } catch (_) { boundaryFailed = true; }
-        // Notices are grouped by notice year. The following notice can adjust
-        // preceding December. Later notices win; do not invent missing dates.
-        const daysByDate = new Map([...current.days, ...(following?.days || [])]
-          .filter(day => day.date.startsWith(`${args.year}-`)).map(day => [day.date, day]));
-        const days = [...daysByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-        const papers = [...new Set([...current.papers, ...(following?.papers || [])])];
-        const boundaryKnown = following !== null;
-        return { data: { year: args.year, known: true, boundaryKnown, days, papers },
-          ...(!boundaryKnown ? { warning: boundaryFailed ? '下一年度公告暂时无法读取，12 月跨年调休可能不完整。' : '数据源暂无下一年度公告，12 月跨年调休仍待核实。' } : {}) };
       }
       case 'releases': {
         const raw = await jsonFetch(`https://api.github.com/repos/${args.repo}/releases?per_page=1`);

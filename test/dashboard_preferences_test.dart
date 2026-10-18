@@ -15,6 +15,8 @@ void main() {
     expect(read.repos, defaultDashboardRepos);
     expect(read.repos, hasLength(24));
     expect(read.feed, 'sspai');
+    expect(read.order, ['weather', 'releases', 'fx', 'news']);
+    expect(read.favorites, ['weather']);
   });
 
   test(
@@ -70,7 +72,6 @@ void main() {
       quote: 'CNY',
       amount: 13500,
       feed: 'show',
-      leaveDays: 3,
       order: ['news', 'fx'],
       favorites: ['news'],
     );
@@ -80,9 +81,42 @@ void main() {
     expect(read.base, 'JPY');
     expect(read.amount, 13500);
     expect(read.feed, 'show');
-    expect(read.leaveDays, 3);
-    expect(read.order, ['news', 'fx', 'weather', 'holidays', 'releases']);
+    expect(read.order, ['news', 'fx', 'weather', 'releases']);
     expect(read.favorites, ['news']);
+  });
+
+  test('old holiday preferences are removed without losing active choices', () {
+    final read = DashboardPreferences.decode(
+      jsonEncode({
+        'version': 2,
+        'city': {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
+        'repos': ['owner/project'],
+        'base': 'EUR',
+        'quote': 'JPY',
+        'amount': 42,
+        'feed': 'top',
+        'leaveDays': 5,
+        'order': ['holidays', 'news', 'weather', 'fx', 'releases'],
+        'favorites': ['holidays', 'news', 'weather'],
+      }),
+    );
+    expect(read.order, ['news', 'weather', 'fx', 'releases']);
+    expect(read.favorites, ['news', 'weather']);
+    expect(read.city?['name'], '上海');
+    expect(read.repos, ['owner/project']);
+    expect(read.base, 'EUR');
+    expect(read.quote, 'JPY');
+    expect(read.amount, 42);
+    expect(read.feed, 'top');
+    final encoded = jsonDecode(read.encode()) as Map<String, dynamic>;
+    expect(encoded['version'], 3);
+    expect(encoded.containsKey('leaveDays'), isFalse);
+    expect(read.encode(), isNot(contains('holidays')));
+    expect(DashboardPreferences.decode(read.encode()).order, read.order);
+    expect(
+      DashboardPreferences.decode('{"favorites":["holidays"]}').favorites,
+      isEmpty,
+    );
   });
 
   test('invalid saved values cannot make unsupported API requests', () {
@@ -94,7 +128,6 @@ void main() {
         'quote': 'x',
         'amount': -1,
         'feed': 'wrong',
-        'leaveDays': 50,
         'order': ['news', 'bogus', 'news'],
         'favorites': ['bogus'],
       }),
@@ -104,7 +137,6 @@ void main() {
     expect(read.base, 'USD');
     expect(read.amount, 100);
     expect(read.feed, 'sspai');
-    expect(read.leaveDays, 2);
     expect(read.order.toSet(), dashboardModules.toSet());
     expect(read.favorites, isEmpty);
   });

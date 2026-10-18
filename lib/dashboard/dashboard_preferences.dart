@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-const dashboardModules = ['weather', 'holidays', 'releases', 'fx', 'news'];
+const dashboardModules = ['weather', 'releases', 'fx', 'news'];
 
 // Curated popular projects, not a live star ranking. No authentication required.
 const defaultDashboardRepos = [
@@ -40,9 +40,8 @@ class DashboardPreferences {
     this.quote = 'CNY',
     this.amount = 100,
     this.feed = 'sspai',
-    this.leaveDays = 2,
     this.order = dashboardModules,
-    this.favorites = const ['weather', 'holidays'],
+    this.favorites = const ['weather'],
   });
 
   Map<String, dynamic>? city;
@@ -51,7 +50,6 @@ class DashboardPreferences {
   String quote;
   double amount;
   String feed;
-  int leaveDays;
   List<String> order;
   List<String> favorites;
 
@@ -121,8 +119,6 @@ class DashboardPreferences {
       if (json['version'] == null && json['feed'] == 'top') {
         prefs.feed = 'sspai';
       }
-      final days = json['leaveDays'];
-      if (days is int && days >= 0 && days <= 5) prefs.leaveDays = days;
       if (json['order'] is List) {
         prefs.order = <String>{
           ...(json['order'] as List).whereType<String>().where(
@@ -145,14 +141,13 @@ class DashboardPreferences {
   }
 
   String encode() => jsonEncode({
-    'version': 2,
+    'version': 3,
     'city': city,
     'repos': repos,
     'base': base,
     'quote': quote,
     'amount': amount,
     'feed': feed,
-    'leaveDays': leaveDays,
     'order': order,
     'favorites': favorites,
   });

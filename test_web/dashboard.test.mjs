@@ -44,81 +44,26 @@ function harness(fetcher, options = {}) {
     request: async (module, args, refresh = false) => JSON.parse(await context.timeNestDashboard.request(module, JSON.stringify(args), refresh)),
   };
 }
-const holiday = (year = 2026, days = []) => ({ year, papers: [`https://www.gov.cn/holiday-${year}`], days });
 const weather = () => ({
   timezone: 'Asia/Shanghai', utc_offset_seconds: 28800,
   hourly: {
     time: ['2026-10-18T08:00', '2026-10-18T09:00'],
-    apparent_temperature: [22.1, 23], precipitation_probability: [0, 40],
+    temperature_2m: [20, 21], apparent_temperature: [22.1, 23], precipitation_probability: [0, 40],
     wind_speed_10m: [10, 12], weather_code: [0, 3],
   },
 });
 const release = (tag = 'v1.0') => ({ tag_name: tag, name: 'Release', published_at: '2026-10-17T10:00:00Z', html_url: `https://github.com/flutter/flutter/releases/tag/${tag}`, body: 'Release notes' });
 
-test('holiday normalization preserves false adjusted workdays, official papers and next-notice overrides', async () => {
-  const h = harness(url => url.endsWith('/2026.json')
-    ? response(holiday(2026, [
-      { date: '2026-10-10', name: '国庆节', isOffDay: false },
-      { date: '2026-10-01', name: '国庆节', isOffDay: true },
-      { date: '2026-12-31', name: '元旦', isOffDay: true },
-    ]), 200, { 'content-type': 'text/plain; charset=utf-8' })
-    : response(holiday(2027, [
-      { date: '2026-12-31', name: '元旦', isOffDay: false },
-      { date: '2027-01-01', name: '元旦', isOffDay: true },
-    ])));
-  const result = await h.request('holidays', { year: 2026 });
-  assert.equal(result.data.known, true);
-  assert.equal(result.data.boundaryKnown, true);
-  assert.deepEqual(result.data.days.map(d => [d.date, d.isOffDay]), [
-    ['2026-10-01', true], ['2026-10-10', false], ['2026-12-31', false],
-  ]);
-  assert.equal(result.data.papers.length, 2);
-  assert.equal(result.fetchedAt, new Date(START).toISOString());
-  assert.equal(result.cached, false);
-  assert.equal(result.stale, false);
-});
-
-test('a missing holiday year is unknown, negatively cached per year without guessing', async () => {
-  const h = harness(() => response('404: Not Found', 404, { 'content-type': 'text/plain' }));
-  const first = await h.request('holidays', { year: 2099 });
-  assert.deepEqual(first.data, { year: 2099, known: false, boundaryKnown: false, days: [], papers: [] });
-  const second = await h.request('holidays', { year: 2099 });
-  assert.equal(second.cached, true);
-  assert.equal(h.calls.length, 1);
-  await h.request('holidays', { year: 2098 });
-  assert.equal(h.calls.length, 2);
-  h.advance(6 * hour + 1);
-  await h.request('holidays', { year: 2099 });
-  assert.equal(h.calls.length, 3);
-});
-
-test('missing following-year notice warns without inventing December adjustments', async () => {
-  const h = harness(url => url.endsWith('/2026.json') ? response(holiday(2026)) : response('', 404));
-  const result = await h.request('holidays', { year: 2026 });
-  assert.equal(result.data.known, true);
-  assert.equal(result.data.boundaryKnown, false);
-  assert.match(result.warning, /12 月/);
-  h.advance(2 * hour);
-  assert.equal((await h.request('holidays', { year: 2026 })).cached, true);
-  assert.equal(h.calls.length, 2);
-});
-
-test('holiday boolean strings and mismatched years are rejected', async () => {
-  const h = harness(() => response(holiday(2026, [{ date: '2026-10-10', name: '国庆节', isOffDay: 'false' }])));
-  await assert.rejects(h.request('holidays', { year: 2026 }), /格式异常/);
-  const other = harness(() => response(holiday(2025)));
-  await assert.rejects(other.request('holidays', { year: 2026 }), /格式异常/);
-});
-
 test('weather requests 24 city-local hours and normalizes probability, km/h and timezone', async () => {
   const h = harness(() => response(weather()));
   const result = await h.request('weather', { latitude: 31.222222, longitude: 121.45806 });
   assert.deepEqual(result.data, { hours: [
-    { time: '2026-10-18T08:00', feels: 22.1, rain: 0, wind: 10, code: 0 },
-    { time: '2026-10-18T09:00', feels: 23, rain: 40, wind: 12, code: 3 },
+    { time: '2026-10-18T08:00', temperature: 20, feels: 22.1, rain: 0, wind: 10, code: 0 },
+    { time: '2026-10-18T09:00', temperature: 21, feels: 23, rain: 40, wind: 12, code: 3 },
   ], timezone: 'Asia/Shanghai', utcOffsetSeconds: 28800 });
   const url = new URL(h.calls[0].url);
   assert.equal(url.searchParams.get('forecast_hours'), '24');
+  assert.match(url.searchParams.get('hourly'), /temperature_2m/);
   assert.equal(url.searchParams.get('timezone'), 'auto');
   assert.equal(url.searchParams.get('wind_speed_unit'), 'kmh');
   assert.equal(url.searchParams.get('latitude'), '31.2222');
@@ -307,7 +252,7 @@ test('input validation rejects arbitrary requests before reaching the network', 
     ['__proto__', {}], ['constructor', {}], ['weather', { latitude: 91, longitude: 1 }],
     ['weather', { latitude: '31', longitude: 1 }], ['releases', { repo: 'a/../../b' }],
     ['releases', { repo: 'https://github.com/a/b' }], ['releases', { repo: 'a/..' }],
-    ['holidays', { year: 2026.5 }], ['searchCities', { query: 'a' }],
+    ['holidays', { year: 2026 }], ['searchCities', { query: 'a' }],
     ['searchCities', { query: 'a\nb' }], ['fx', { base: 'USD&x=', quote: 'CNY' }],
   ]) await assert.rejects(h.request(module, args));
   await assert.rejects(h.api.request('news', '{broken', false), /有效 JSON/);
@@ -458,4 +403,28 @@ test('corrupted Chinese cache cannot serve future dates or a mismatched English 
     assert.equal(result.cached, false);
     assert.equal(result.data.stories[0].url, 'https://sspai.com/post/2');
   }
+});
+
+
+test('removed holiday module is rejected and old holiday cache cannot remain active', async () => {
+  const seed = { [CACHE_KEY]: JSON.stringify({ 'holidays:{"year":2026}': { at: START, data: { year: 2026, known: true, papers: [], days: [] } } }) };
+  const h = harness(() => response({}), { storage: storage(seed) });
+  await assert.rejects(h.request('holidays', { year: 2026 }), /不支持/);
+  assert.equal(h.calls.length, 0);
+  await h.request('searchCities', { query: 'NoSuchCity' });
+  assert.equal(Object.keys(JSON.parse(h.storage.getItem(CACHE_KEY))).some(key => key.startsWith('holidays:')), false);
+});
+
+test('older weather cache remains honest without invented actual temperature', async () => {
+  const shared = storage();
+  const h = harness(() => response(weather()), { storage: shared });
+  await h.request('weather', { latitude: 1, longitude: 2 });
+  const saved = JSON.parse(shared.getItem(CACHE_KEY));
+  for (const row of Object.values(saved)[0].data.hours) delete row.temperature;
+  shared.setItem(CACHE_KEY, JSON.stringify(saved));
+  const reload = harness(() => { throw new Error('must use cache'); }, { storage: shared });
+  const result = await reload.request('weather', { latitude: 1, longitude: 2 });
+  assert.equal(result.cached, true);
+  assert.equal(result.data.hours[0].temperature, undefined);
+  assert.equal(result.data.hours[0].feels, 22.1);
 });

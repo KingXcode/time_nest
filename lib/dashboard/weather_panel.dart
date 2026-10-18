@@ -117,7 +117,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
         if (!hasCity || _changing) ...[
           if (!hasCity) ...[
             const Text(
-              '先选一座城市，看看什么时候适合出门。',
+              '先选一座城市，查看天气和逐小时预报。',
               style: TextStyle(fontSize: 17, height: 1.5),
             ),
             const SizedBox(height: 6),
@@ -292,30 +292,9 @@ class _WeatherPanelState extends State<WeatherPanel> {
       );
     }
     final current = hours.first;
-    List<_ForecastHour>? outing;
-    for (var i = 0; i + 2 < hours.length; i++) {
-      final candidate = hours.sublist(i, i + 3);
-      if (candidate.first.time.isBefore(localNow) ||
-          candidate.first.time.isAfter(
-            localNow.add(const Duration(hours: 48)),
-          )) {
-        continue;
-      }
-      if (!candidate.every(
-        (hour) => hour.time.hour >= 7 && hour.time.hour <= 20,
-      )) {
-        continue;
-      }
-      if (candidate.every((hour) => hour.rain < 35 && hour.wind < 25) &&
-          candidate.last.time.difference(candidate.first.time).inHours == 2 &&
-          candidate[1].time.difference(candidate.first.time).inHours == 1) {
-        outing = candidate;
-        break;
-      }
-    }
-    final currentLabel = current.time == currentHour
-        ? '当前小时体感'
-        : '${_timeLabel(current.time)} 体感';
+    final forecastLabel = current.time == currentHour
+        ? '当前小时预报'
+        : '${_timeLabel(current.time)} 预报';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -328,12 +307,12 @@ class _WeatherPanelState extends State<WeatherPanel> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  currentLabel,
+                  '$forecastLabel · ${current.temperature == null ? '体感温度' : '气温'}',
                   style: const TextStyle(fontSize: 12, color: _secondary),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  '${current.feels.round()}°',
+                  '${(current.temperature ?? current.feels).round()}°',
                   style: const TextStyle(
                     fontSize: 48,
                     height: 1.15,
@@ -353,7 +332,15 @@ class _WeatherPanelState extends State<WeatherPanel> {
                   style: const TextStyle(fontSize: 15),
                 ),
                 Text(
-                  '降雨 ${current.rain.round()}% · 风 ${current.wind.round()} km/h',
+                  '体感 ${current.feels.round()}°',
+                  style: const TextStyle(
+                    color: _secondary,
+                    fontSize: 12,
+                    height: 1.6,
+                  ),
+                ),
+                Text(
+                  '降雨概率 ${current.rain.round()}% · 风速 ${current.wind.round()} km/h',
                   style: const TextStyle(
                     color: _secondary,
                     fontSize: 12,
@@ -364,54 +351,8 @@ class _WeatherPanelState extends State<WeatherPanel> {
             ),
           ],
         ),
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _accent.withValues(alpha: .07),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _accent.withValues(alpha: .2)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '出门时间参考',
-                style: TextStyle(color: _secondary, fontSize: 12),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                outing == null
-                    ? '可用预报中，暂无符合条件的连续 3 小时'
-                    : '${_timeLabel(outing.first.time)}–${_hour(outing.last.time.add(const Duration(hours: 1)))}',
-                style: const TextStyle(
-                  fontSize: 19,
-                  color: _accent,
-                  fontWeight: FontWeight.w600,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                outing == null
-                    ? '可按下方逐小时预报，灵活调整行程。'
-                    : '这段时间雨的可能性较低、风较小。${_clothing(outing)}',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 12,
-                  height: 1.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        const Text(
-          '筛选规则：当地 7–21 时，每小时降雨概率 < 35%、风速 < 25 km/h，连续 3 小时。仅为简易参考，请同时留意当地预警。',
-          style: TextStyle(fontSize: 11, height: 1.5, color: _secondary),
-        ),
         const SizedBox(height: 18),
-        const Text('接下来 8 小时', style: TextStyle(fontWeight: FontWeight.w600)),
+        const Text('逐小时预报', style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 10),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -425,7 +366,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
         ),
         const SizedBox(height: 9),
         Text(
-          '时间均为所选城市当地时间 · ${data['timezone'] ?? '当地时区'}\n降雨为概率，风速单位为 km/h。',
+          '时间均为所选城市当地时间 · ${data['timezone'] ?? '当地时区'}\n温度单位为 °C，降雨为概率，风速单位为 km/h。',
           style: const TextStyle(color: _secondary, fontSize: 11, height: 1.5),
         ),
       ],
@@ -434,8 +375,16 @@ class _WeatherPanelState extends State<WeatherPanel> {
 }
 
 class _ForecastHour {
-  const _ForecastHour(this.time, this.feels, this.rain, this.wind, this.code);
+  const _ForecastHour(
+    this.time,
+    this.temperature,
+    this.feels,
+    this.rain,
+    this.wind,
+    this.code,
+  );
   final DateTime time;
+  final double? temperature;
   final double feels, rain, wind;
   final int code;
   static _ForecastHour? parse(Map value) {
@@ -454,8 +403,12 @@ class _ForecastHour {
     if (!feels.isFinite || !rain.isFinite || !wind.isFinite) return null;
     final parts = [for (var i = 1; i <= 5; i++) int.parse(match.group(i)!)];
     final time = DateTime.utc(parts[0], parts[1], parts[2], parts[3], parts[4]);
+    final temperature = value['temperature'];
     return _ForecastHour(
       time,
+      temperature is num && temperature.isFinite
+          ? temperature.toDouble()
+          : null,
       feels,
       rain,
       wind,
@@ -471,10 +424,12 @@ class _HourCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
     label:
-        '${_timeLabel(hour.time)}，${_weatherName(hour.code)}，体感 ${hour.feels.round()} 度，降雨概率 ${hour.rain.round()}%，风速 ${hour.wind.round()} 千米每小时',
+        '${_timeLabel(hour.time)} 小时预报，${_weatherName(hour.code)}，'
+        '${hour.temperature == null ? '' : '气温 ${hour.temperature!.round()} 度，'}'
+        '体感 ${hour.feels.round()} 度，降雨概率 ${hour.rain.round()}%，风速 ${hour.wind.round()} 千米每小时',
     excludeSemantics: true,
     child: Container(
-      width: 102,
+      width: 132,
       margin: const EdgeInsets.only(right: 8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
@@ -494,7 +449,19 @@ class _HourCard extends StatelessWidget {
           const SizedBox(height: 10),
           Icon(_weatherIcon(hour.code), size: 22, color: _accent),
           const SizedBox(height: 8),
-          Text('${hour.feels.round()}°', style: const TextStyle(fontSize: 24)),
+          Text(
+            _weatherName(hour.code),
+            style: const TextStyle(fontSize: 12, color: _secondary),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${(hour.temperature ?? hour.feels).round()}°',
+            style: const TextStyle(fontSize: 24),
+          ),
+          Text(
+            hour.temperature == null ? '体感温度' : '体感 ${hour.feels.round()}°',
+            style: const TextStyle(fontSize: 11, color: _secondary),
+          ),
           const SizedBox(height: 7),
           Text(
             '雨 ${hour.rain.round()}%',
@@ -502,7 +469,7 @@ class _HourCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '风 ${hour.wind.round()}',
+            '风 ${hour.wind.round()} km/h',
             style: const TextStyle(fontSize: 11, color: _secondary),
           ),
         ],
@@ -513,14 +480,6 @@ class _HourCard extends StatelessWidget {
 
 String _hour(DateTime date) => '${date.hour.toString().padLeft(2, '0')}:00';
 String _timeLabel(DateTime date) => '${date.month}/${date.day} ${_hour(date)}';
-String _clothing(List<_ForecastHour> hours) {
-  final lowest = hours.map((h) => h.feels).reduce((a, b) => a < b ? a : b);
-  final highest = hours.map((h) => h.feels).reduce((a, b) => a > b ? a : b);
-  if (lowest < 12) return '体感偏凉，记得带件外套。';
-  if (highest >= 29) return '体感偏热，可以选阴凉路线。';
-  return '体感 ${lowest.round()}–${highest.round()}°。';
-}
-
 String _weatherName(int code) {
   if (code == 0) return '晴';
   if (code <= 3 && code > 0) return '多云';
