@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_client.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/dashboard_screen.dart';
-import 'package:time_nest/dashboard/fx_panel.dart';
 import 'package:time_nest/dashboard/market_panel.dart';
 import 'package:time_nest/dashboard/news_panel.dart';
 import 'package:time_nest/dashboard/releases_panel.dart';
@@ -77,16 +76,6 @@ class FixtureDashboardClient implements DashboardClient {
           },
         ],
       },
-      'fx' => {
-        'base': args['base'],
-        'quote': args['quote'],
-        'rate': 7.12,
-        'date': '2026-10-16',
-        'history': [
-          {'date': '2026-09-16', 'rate': 7.05},
-          {'date': '2026-10-16', 'rate': 7.12},
-        ],
-      },
       'news' => {
         'feed': args['feed'],
         'stories': [
@@ -136,7 +125,6 @@ Widget app(Widget child, {double scale = 1}) => MaterialApp(
 const titles = {
   'weather': '天气',
   'releases': '项目更新',
-  'fx': '汇率换算',
   'news': '科技资讯',
   'market': 'A股行情',
 };
@@ -184,7 +172,6 @@ void main() {
       }
       expect(find.byType(WeatherPanel), findsNothing);
       expect(find.byType(ReleasesPanel), findsNothing);
-      expect(find.byType(FxPanel), findsNothing);
       expect(find.byType(NewsPanel), findsNothing);
       expect(find.textContaining('假期'), findsNothing);
       expect(client.calls, isEmpty);
@@ -244,10 +231,6 @@ void main() {
         expect(
           find.byType(ReleasesPanel),
           id == 'releases' ? findsOneWidget : findsNothing,
-        );
-        expect(
-          find.byType(FxPanel),
-          id == 'fx' ? findsOneWidget : findsNothing,
         );
         expect(
           find.byType(NewsPanel),
@@ -426,30 +409,6 @@ void main() {
     await openModule(tester, 'news');
     expect(client.calls, ['news', 'news']);
     expect(find.text('正在获取最新数据…'), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('FX amount edits update the page and survive back', (
-    tester,
-  ) async {
-    final client = FixtureDashboardClient();
-    await tester.pumpWidget(app(DashboardScreen(client: client)));
-    await tester.pumpAndSettle();
-    await openModule(tester, 'fx');
-    final amount = find.byType(TextField);
-    await tester.ensureVisible(amount);
-    await tester.enterText(amount, '250');
-    await tester.pumpAndSettle();
-    expect(DashboardPreferences.decode(client.preferences).amount, 250);
-    expect(find.text('1,780.00 CNY'), findsOneWidget);
-    await tester.tap(find.byType(BackButton));
-    await tester.pumpAndSettle();
-    await openModule(tester, 'fx');
-    expect(
-      tester.widget<TextField>(find.byType(TextField)).controller!.text,
-      '250',
-    );
-    expect(client.calls.toSet(), {'fx'});
     expect(tester.takeException(), isNull);
   });
 

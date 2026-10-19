@@ -1,5 +1,5 @@
 // Public read-only APIs. No credentials, location permission or tracking.
-// Provider documentation: open-meteo.com/en/docs, frankfurter.dev,
+// Provider documentation: open-meteo.com/en/docs,
 // github.com/HackerNews/API,
 // docs.github.com/en/rest/releases/releases, sspai.com/post/24194 (official RSS).
 (() => {
@@ -13,7 +13,6 @@
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
     releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
-    fx: { ttl: 6 * HOUR, retain: 14 * DAY, gap: 10_000, label: '汇率' },
     news: { ttl: 10 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '科技资讯' },
   };
   const inflight = new Map(), attempts = new Map(), itemCache = new Map();
@@ -36,10 +35,6 @@
   }
   function finite(value) { return typeof value === 'number' && Number.isFinite(value); }
   function text(value, max = 500) { return typeof value === 'string' ? value.slice(0, max) : ''; }
-  function validDate(value) {
-    return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-      Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
-  }
   function safeUrl(value) {
     if (typeof value !== 'string' || value.length > 4096 || /[\u0000-\u001f\u007f]/.test(value)) return '';
     try {
@@ -70,11 +65,6 @@
         requireValue(/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?\/[a-zA-Z0-9_.-]{1,100}$/.test(repo) && !['.', '..'].includes(repo.split('/')[1]), '仓库格式应为 owner/repo，例如 flutter/flutter。');
         return { repo: repo.toLowerCase() };
       }
-      case 'fx': {
-        const base = text(args.base, 4).toUpperCase(), quote = text(args.quote, 4).toUpperCase();
-        requireValue(/^[A-Z]{3}$/.test(base) && /^[A-Z]{3}$/.test(quote), '请输入三位货币代码，例如 USD、CNY。');
-        return { base, quote };
-      }
       case 'news':
         requireValue(['sspai', 'top', 'new', 'show'].includes(args.feed), '请选择中文或 HN 资讯分类。');
         return { feed: args.feed };
@@ -86,7 +76,6 @@
       case 'searchCities': return Array.isArray(data.cities) && data.cities.length <= 10 && data.cities.every(c => object(c) && typeof c.name === 'string' && finite(c.latitude) && Math.abs(c.latitude) <= 90 && finite(c.longitude) && Math.abs(c.longitude) <= 180);
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
-      case 'fx': return /^[A-Z]{3}$/.test(data.base) && /^[A-Z]{3}$/.test(data.quote) && finite(data.rate) && data.rate > 0 && validDate(data.date) && Array.isArray(data.history) && data.history.length > 0 && data.history.length <= 40 && data.history.every(d => object(d) && validDate(d.date) && finite(d.rate) && d.rate > 0);
       case 'news':
         if (data.feed === 'sspai') return Array.isArray(data.stories) && data.stories.length <= 10 && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && s.source === '少数派' && finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY && !!sspaiUrl(s.url));
         return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
@@ -121,7 +110,7 @@
   }
   function cleanLimits() {
     const now = Date.now();
-    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'api.frankfurter.dev', 'hacker-news.firebaseio.com', 'sspai.com'].includes(key) && finite(value) && value > now && value <= now + 2 * DAY));
+    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com'].includes(key) && finite(value) && value > now && value <= now + 2 * DAY));
     saveObject(LIMIT_KEY, limits);
   }
   function blockedMessage(host, until) {
@@ -175,7 +164,6 @@
       if (response.status === 429 || (host === 'api.github.com' && response.status === 403)) throw blockHost(host, response);
       if (!response.ok) {
         if (host === 'api.github.com' && response.status === 404) throw new Error('找不到公开仓库，请检查 owner/repo；私有仓库不受支持。');
-        if (host === 'api.frankfurter.dev' && [400, 404, 422].includes(response.status)) throw new Error('暂不支持该货币或货币对，请换一组货币。');
         throw new Error(`数据服务暂时不可用（HTTP ${response.status}），请稍后重试。`);
       }
       if (host === 'api.github.com' && response.headers.get('x-ratelimit-remaining') === '0') blockHost(host, response);
@@ -234,21 +222,6 @@
           return { name: text(r.name, 240) || text(r.tag_name, 240), tag: text(r.tag_name, 240), publishedAt: r.published_at, url: safeUrl(r.html_url), body: text(r.body, 6000), ...(r.prerelease === true ? { prerelease: true } : {}) };
         });
         return { data: { repo: args.repo, releases, noReleases: releases.length === 0 } };
-      }
-      case 'fx': {
-        const end = new Date(Date.now()).toISOString().slice(0, 10);
-        const start = new Date(Date.now() - 29 * DAY).toISOString().slice(0, 10);
-        const url = new URL('https://api.frankfurter.dev/v2/rates');
-        url.search = new URLSearchParams({ base: args.base, quotes: args.quote, from: start, to: end });
-        const [latest, historyRaw] = await Promise.all([
-          jsonFetch(`https://api.frankfurter.dev/v2/rate/${args.base}/${args.quote}`), jsonFetch(url.href),
-        ]);
-        const rateValid = r => object(r) && r.base === args.base && r.quote === args.quote && validDate(r.date) && finite(r.rate) && r.rate > 0;
-        requireValue(rateValid(latest) && Array.isArray(historyRaw) && historyRaw.length > 0 && historyRaw.every(rateValid));
-        const unique = new Map(historyRaw.filter(r => r.date >= start && r.date <= end).map(r => [r.date, { date: r.date, rate: r.rate }]));
-        const history = [...unique.values()].sort((a, b) => a.date.localeCompare(b.date));
-        requireValue(history.length > 0, '该货币对近 30 天没有可用日频数据。');
-        return { data: { base: args.base, quote: args.quote, rate: latest.rate, date: latest.date, history } };
       }
       case 'news': {
         if (args.feed === 'sspai') {

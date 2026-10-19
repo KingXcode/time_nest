@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_client.dart';
-import 'package:time_nest/dashboard/fx_panel.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/news_panel.dart';
 import 'package:time_nest/dashboard/releases_panel.dart';
@@ -45,17 +44,6 @@ class _FakeClient implements DashboardClient {
                     'body': '## Highlights\nA useful update with [release details](https://flutter.dev).',
                   },
                 ],
-        },
-        'fx' => {
-          'base': args['base'],
-          'quote': args['quote'],
-          'rate': args['base'] == 'USD' ? 7.1 : 1 / 7.1,
-          'date': '2026-10-16',
-          'history': [
-            {'date': '2026-09-18', 'rate': 7.05},
-            {'date': '2026-10-01', 'rate': 7.12},
-            {'date': '2026-10-16', 'rate': 7.1},
-          ],
         },
         'news' => {
           'feed': args['feed'],
@@ -261,53 +249,6 @@ void main() {
     expect(find.text('查看仓库'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
-
-  testWidgets(
-    'FX validates and persists amount, swaps currencies without overflow',
-    (tester) async {
-      final client = _FakeClient();
-      var base = 'USD';
-      var quote = 'CNY';
-      var amount = 100.0;
-      await _pumpPanel(
-        tester,
-        StatefulBuilder(
-          builder: (context, setState) => FxPanel(
-            client: client,
-            base: base,
-            quote: quote,
-            amount: amount,
-            onChanged: (b, q, a) => setState(() {
-              base = b;
-              quote = q;
-              amount = a;
-            }),
-          ),
-        ),
-      );
-      expect(find.text('710.00 CNY'), findsOneWidget);
-      expect(find.text('近 30 天'), findsOneWidget);
-      expect(find.text('汇率日期 2026-10-16'), findsOneWidget);
-      await tester.enterText(find.byType(TextField), '200');
-      await tester.pumpAndSettle();
-      expect(amount, 200);
-      expect(find.text('1,420.00 CNY'), findsOneWidget);
-      expect(client.requests, hasLength(1));
-      await tester.enterText(find.byType(TextField), '1000000001');
-      await tester.pumpAndSettle();
-      expect(amount, 200);
-      expect(find.text('请输入有效金额'), findsOneWidget);
-      await tester.enterText(find.byType(TextField), '100');
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('交换货币'));
-      await tester.pumpAndSettle();
-      expect(base, 'CNY');
-      expect(quote, 'USD');
-      expect(client.requests.last['base'], 'CNY');
-      expect(find.text('14.08 USD'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
 
   testWidgets('news renders six stories, opens links and switches feeds', (
     tester,

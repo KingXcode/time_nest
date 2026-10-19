@@ -182,31 +182,6 @@ test('anonymous GitHub rolling budget stays below the public quota', async () =>
   assert.equal(h.calls.length, 40);
 });
 
-test('Frankfurter v2 latest and 30-day daily history preserve pair and dates', async () => {
-  const h = harness(url => response(url.includes('/rate/')
-    ? { base: 'USD', quote: 'CNY', rate: 6.68, date: '2026-10-17' }
-    : [
-      { base: 'USD', quote: 'CNY', rate: 6.7, date: '2026-10-16' },
-      { base: 'USD', quote: 'CNY', rate: 6.68, date: '2026-10-17' },
-    ]));
-  assert.deepEqual((await h.request('fx', { base: 'usd', quote: 'cny' })).data, {
-    base: 'USD', quote: 'CNY', rate: 6.68, date: '2026-10-17', history: [
-      { date: '2026-10-16', rate: 6.7 }, { date: '2026-10-17', rate: 6.68 },
-    ],
-  });
-  const historyUrl = new URL(h.calls.find(c => c.url.includes('/rates?')).url);
-  assert.equal(historyUrl.searchParams.get('from'), '2026-09-19');
-  assert.equal(historyUrl.searchParams.get('to'), '2026-10-18');
-  assert.equal(historyUrl.searchParams.get('quotes'), 'CNY');
-});
-
-test('invalid/unsupported currencies and mismatched response pairs fail honestly', async () => {
-  const unsupported = harness(() => response({ message: 'invalid currency' }, 422));
-  await assert.rejects(unsupported.request('fx', { base: 'XYZ', quote: 'USD' }), /暂不支持/);
-  const mismatch = harness(url => response(url.includes('/rate/') ? { base: 'EUR', quote: 'CNY', rate: 7, date: '2026-10-17' } : []));
-  await assert.rejects(mismatch.request('fx', { base: 'USD', quote: 'CNY' }), /格式异常/);
-});
-
 test('HN news bounds concurrency, maps 12 stories, and safely falls back to discussion URLs', async () => {
   let active = 0, maxActive = 0;
   const h = harness(async url => {
@@ -253,7 +228,7 @@ test('input validation rejects arbitrary requests before reaching the network', 
     ['weather', { latitude: '31', longitude: 1 }], ['releases', { repo: 'a/../../b' }],
     ['releases', { repo: 'https://github.com/a/b' }], ['releases', { repo: 'a/..' }],
     ['holidays', { year: 2026 }], ['searchCities', { query: 'a' }],
-    ['searchCities', { query: 'a\nb' }], ['fx', { base: 'USD&x=', quote: 'CNY' }],
+    ['searchCities', { query: 'a\nb' }], ['fx', { base: 'USD', quote: 'CNY' }],
   ]) await assert.rejects(h.request(module, args));
   await assert.rejects(h.api.request('news', '{broken', false), /有效 JSON/);
   assert.equal(h.calls.length, 0);
@@ -307,23 +282,6 @@ test('cache retention is bounded and malformed cache entries are ignored', async
   assert.ok(shared.getItem(CACHE_KEY).length <= 900000);
   assert.equal(Object.hasOwn(stored, 'weather:broken'), false);
 });
-
-test('same-currency FX pair uses provider-confirmed identity rates and actual observation dates', async () => {
-  const rows = [
-    { base: 'USD', quote: 'USD', rate: 1, date: '2026-10-16' },
-    { base: 'USD', quote: 'USD', rate: 1, date: '2026-10-17' },
-  ];
-  const h = harness(url => response(url.includes('/rate/') ? rows[1] : rows));
-  const result = await h.request('fx', { base: 'USD', quote: 'USD' });
-  assert.equal(result.data.rate, 1);
-  assert.equal(result.data.date, '2026-10-17');
-  assert.deepEqual(result.data.history, [
-    { date: '2026-10-16', rate: 1 }, { date: '2026-10-17', rate: 1 },
-  ]);
-  assert.equal(h.calls.length, 2);
-  assert.ok(h.calls.some(call => call.url.endsWith('/rate/USD/USD')));
-});
-
 
 // The DOM implementation belongs to the browser. These parsed-document fixtures
 // exercise the adapter contract; actual XML parsing is also checked in Chromium.

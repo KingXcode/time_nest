@@ -16,7 +16,7 @@ void main() {
       final old = DashboardPreferences.decode(
         '{"version":3,"order":["news","weather","fx","releases"],"favorites":["news"]}',
       );
-      expect(old.order, ['news', 'weather', 'fx', 'releases', 'market']);
+      expect(old.order, ['news', 'weather', 'releases', 'market']);
       expect(old.favorites, ['news']);
       expect(old.marketIndex, 'shanghai');
       expect(old.marketInterval, 'D');

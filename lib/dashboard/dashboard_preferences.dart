@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'market_config.dart';
 
-const dashboardModules = ['weather', 'releases', 'fx', 'news', 'market'];
+const dashboardModules = ['weather', 'releases', 'news', 'market'];
 
 // Curated popular projects, not a live star ranking. No authentication required.
 const defaultDashboardRepos = [
@@ -38,9 +38,6 @@ class DashboardPreferences {
   DashboardPreferences({
     this.city,
     this.repos = defaultDashboardRepos,
-    this.base = 'USD',
-    this.quote = 'CNY',
-    this.amount = 100,
     this.feed = 'sspai',
     this.marketIndex = 'shanghai',
     this.marketInterval = 'D',
@@ -50,9 +47,6 @@ class DashboardPreferences {
 
   Map<String, dynamic>? city;
   List<String> repos;
-  String base;
-  String quote;
-  double amount;
   String feed;
   String marketIndex;
   String marketInterval;
@@ -92,33 +86,6 @@ class DashboardPreferences {
           (json['repos'] as List).first == 'flutter/flutter') {
         prefs.repos = List.of(defaultDashboardRepos);
       }
-      const currencies = [
-        'CNY',
-        'USD',
-        'EUR',
-        'GBP',
-        'JPY',
-        'HKD',
-        'TWD',
-        'SGD',
-        'AUD',
-        'CAD',
-        'KRW',
-        'CHF',
-      ];
-      if (currencies.contains(json['base'])) {
-        prefs.base = json['base'] as String;
-      }
-      if (currencies.contains(json['quote'])) {
-        prefs.quote = json['quote'] as String;
-      }
-      final amount = json['amount'];
-      if (amount is num &&
-          amount.isFinite &&
-          amount >= 0 &&
-          amount <= 1000000000) {
-        prefs.amount = amount.toDouble();
-      }
       if (dashboardFeeds.contains(json['feed'])) {
         prefs.feed = json['feed'] as String;
       }
@@ -156,9 +123,6 @@ class DashboardPreferences {
     'version': 4,
     'city': city,
     'repos': repos,
-    'base': base,
-    'quote': quote,
-    'amount': amount,
     'feed': feed,
     'marketIndex': marketIndex,
     'marketInterval': marketInterval,

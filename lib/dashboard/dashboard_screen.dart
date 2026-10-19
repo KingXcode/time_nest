@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
-import 'fx_panel.dart';
 import 'market_panel.dart';
 import 'news_panel.dart';
 import 'releases_panel.dart';
@@ -12,21 +11,18 @@ import 'weather_panel.dart';
 const _titles = {
   'weather': '天气',
   'releases': '项目更新',
-  'fx': '汇率换算',
   'news': '科技资讯',
   'market': 'A股行情',
 };
 const _subtitles = {
   'weather': '查看城市天气与逐小时预报',
   'releases': '关注热门开源项目的最新发布',
-  'fx': '每日参考汇率与近 30 天变化',
   'news': '中文科技资讯，也可切换 HN 英文',
   'market': '免费收盘参考，查看 A 股指数与历史走势',
 };
 const _icons = {
   'weather': Icons.wb_sunny_outlined,
   'releases': Icons.code_rounded,
-  'fx': Icons.currency_exchange_rounded,
   'news': Icons.auto_awesome_outlined,
   'market': Icons.show_chart_rounded,
 };
@@ -437,17 +433,6 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         client: widget.client,
         repos: preferences.repos,
         onReposChanged: (repos) => _save(() => preferences.repos = repos),
-      ),
-      'fx' => FxPanel(
-        client: widget.client,
-        base: preferences.base,
-        quote: preferences.quote,
-        amount: preferences.amount,
-        onChanged: (base, quote, amount) => _save(() {
-          preferences.base = base;
-          preferences.quote = quote;
-          preferences.amount = amount;
-        }),
       ),
       'market' => MarketPanel(
         client: widget.client,
