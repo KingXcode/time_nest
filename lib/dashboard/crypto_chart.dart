@@ -32,6 +32,10 @@ class CryptoChart extends StatefulWidget {
     this.infoRight = false,
     this.onSettingsChanged,
     this.canAdvise = false,
+    this.onLoadOlder,
+    this.loadingOlder = false,
+    this.hasMoreHistory = false,
+    this.historyError,
   });
   final List<CryptoCandle> candles;
   final String asset;
@@ -39,6 +43,9 @@ class CryptoChart extends StatefulWidget {
   final List<String> overlays, panes;
   final bool infoRight, canAdvise;
   final void Function(List<String>, List<String>, bool)? onSettingsChanged;
+  final VoidCallback? onLoadOlder;
+  final bool loadingOlder, hasMoreHistory;
+  final String? historyError;
 
   @override
   State<CryptoChart> createState() => _CryptoChartState();
@@ -46,11 +53,56 @@ class CryptoChart extends StatefulWidget {
 
 class _CryptoChartState extends State<CryptoChart> {
   int? _selectedTime;
+  // Null follows the latest bars. Otherwise pin the left edge by time so that
+  // prepending history and receiving live bars never shift a historical view.
+  int? _viewportStartTime;
+  double _dragRemainder = 0;
+  bool _dragging = false, _requestedDuringDrag = false;
+  static const _visibleCount = 120;
+
+  int get _startIndex {
+    final rows = widget.candles;
+    final max = math.max(0, rows.length - _visibleCount);
+    if (_viewportStartTime == null) return max;
+    final index = rows.indexWhere((r) => r.time >= _viewportStartTime!);
+    return (index < 0 ? max : index).clamp(0, max);
+  }
+
+  void _loadOlder() {
+    if (widget.loadingOlder ||
+        !widget.hasMoreHistory ||
+        widget.onLoadOlder == null ||
+        widget.candles.isEmpty) {
+      return;
+    }
+    setState(() => _viewportStartTime = widget.candles[_startIndex].time);
+    widget.onLoadOlder!();
+  }
+
+  void _pan(int bars, {bool fromDrag = false}) {
+    final rows = widget.candles;
+    final max = math.max(0, rows.length - _visibleCount);
+    final start = (_startIndex + bars).clamp(0, max);
+    setState(() {
+      _viewportStartTime = start == max ? null : rows[start].time;
+      _selectedTime = null;
+    });
+    if (bars < 0 &&
+        start <= 20 &&
+        widget.historyError == null &&
+        (!fromDrag || !_requestedDuringDrag)) {
+      _requestedDuringDrag = true;
+      _loadOlder();
+    }
+  }
+
+  void _finishDrag() => setState(() => _dragging = false);
+
   late Map<String, IndicatorStudy> _studies = calculateCryptoIndicators(
     widget.candles,
   );
   late CryptoAssessment? _assessment = assessCrypto(
-    widget.candles,
+    widget.candles.skip(math.max(0, widget.candles.length - 500)).toList(),
     widget.fetchedAt.millisecondsSinceEpoch,
   );
   @override
@@ -59,7 +111,7 @@ class _CryptoChartState extends State<CryptoChart> {
     if (old.candles != widget.candles || old.fetchedAt != widget.fetchedAt) {
       _studies = calculateCryptoIndicators(widget.candles);
       _assessment = assessCrypto(
-        widget.candles,
+        widget.candles.skip(math.max(0, widget.candles.length - 500)).toList(),
         widget.fetchedAt.millisecondsSinceEpoch,
       );
     }
@@ -132,7 +184,7 @@ class _CryptoChartState extends State<CryptoChart> {
             ),
           ),
         const Text(
-          '参数见指标提示。指标预热不足显示“—”；计算使用最多 500 根历史，图上显示最近 120 根。',
+          '参数见指标提示。指标预热不足显示“—”；使用已加载历史计算，每屏显示 120 根，可左右拖动。',
           style: TextStyle(color: dashboardMuted, fontSize: 12),
         ),
         const SizedBox(height: 12),
@@ -144,11 +196,15 @@ class _CryptoChartState extends State<CryptoChart> {
   Widget build(BuildContext context) {
     final all = widget.candles;
     if (all.isEmpty) return const Text('币安暂未返回该周期的 K 线。');
-    final offset = math.max(0, all.length - 120), rows = all.sublist(offset);
+    final offset = _startIndex;
+    final rows = all.sublist(
+      offset,
+      math.min(all.length, offset + _visibleCount),
+    );
     var index = _selectedTime == null
         ? rows.length - 1
         : rows.indexWhere((r) => r.time == _selectedTime);
-    if (index < 0) index = 0;
+    if (index < 0) index = rows.length - 1;
     final selected = rows[index], absolute = index + offset;
     final forming =
         selected.closeTime >= widget.fetchedAt.millisecondsSinceEpoch;
@@ -187,13 +243,33 @@ class _CryptoChartState extends State<CryptoChart> {
               .clamp(0, rows.length - 1),
         );
         return MouseRegion(
-          onHover: (event) => point(event.localPosition),
+          cursor: _dragging
+              ? SystemMouseCursors.grabbing
+              : SystemMouseCursors.grab,
+          onHover: (event) {
+            if (!_dragging) point(event.localPosition);
+          },
           child: GestureDetector(
-            onTapDown: (event) => point(event.localPosition),
-            onHorizontalDragUpdate: (event) => point(event.localPosition),
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (event) => point(event.localPosition),
+            onHorizontalDragStart: (_) => setState(() {
+              _dragging = true;
+              _dragRemainder = 0;
+              _requestedDuringDrag = false;
+            }),
+            onHorizontalDragUpdate: (event) {
+              _dragRemainder -=
+                  event.delta.dx / math.max(1, box.maxWidth - 76) * rows.length;
+              final bars = _dragRemainder.truncate();
+              if (bars == 0) return;
+              _dragRemainder -= bars;
+              _pan(bars, fromDrag: true);
+            },
+            onHorizontalDragEnd: (_) => _finishDrag(),
+            onHorizontalDragCancel: _finishDrag,
             child: Semantics(
               label: study == null
-                  ? 'K 线主图，绿色上涨、红色下跌，可用下方滑杆选择时间'
+                  ? 'K 线主图，绿色上涨、红色下跌，左右拖动浏览历史，可用下方滑杆选择时间'
                   : '${cryptoIndicators[study.id]!.name} 副图，与主图时间联动',
               child: SizedBox(
                 key: study == null
@@ -219,6 +295,68 @@ class _CryptoChartState extends State<CryptoChart> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _settings(),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            TextButton.icon(
+              key: const Key('crypto-pan-older'),
+              onPressed: offset > 0 || widget.hasMoreHistory
+                  ? () => _pan(-_visibleCount)
+                  : null,
+              icon: const Icon(Icons.chevron_left),
+              label: const Text('更早'),
+            ),
+            TextButton.icon(
+              key: const Key('crypto-pan-newer'),
+              onPressed: offset + rows.length < all.length
+                  ? () => _pan(_visibleCount)
+                  : null,
+              icon: const Icon(Icons.chevron_right),
+              label: const Text('较新'),
+            ),
+            TextButton(
+              key: const Key('crypto-latest'),
+              onPressed: _viewportStartTime == null
+                  ? null
+                  : () => setState(() {
+                      _viewportStartTime = null;
+                      _selectedTime = null;
+                    }),
+              child: const Text('回到最新'),
+            ),
+            TextButton(
+              key: const Key('crypto-load-older'),
+              onPressed:
+                  widget.loadingOlder ||
+                      !widget.hasMoreHistory ||
+                      widget.onLoadOlder == null
+                  ? null
+                  : _loadOlder,
+              child: Text(
+                widget.loadingOlder
+                    ? '正在加载历史…'
+                    : widget.historyError != null
+                    ? '重试加载历史'
+                    : widget.hasMoreHistory
+                    ? '加载更多历史'
+                    : '已到最早数据',
+              ),
+            ),
+            Text(
+              '已加载 ${all.length} 根',
+              key: const Key('crypto-history-count'),
+              style: const TextStyle(color: dashboardMuted, fontSize: 12),
+            ),
+          ],
+        ),
+        if (widget.historyError != null)
+          Text(
+            widget.historyError!,
+            key: const Key('crypto-history-error'),
+            style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
+          ),
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -297,18 +435,29 @@ class _CryptoChartState extends State<CryptoChart> {
             label: cryptoTime(selected.time),
             onChanged: (v) => select(v.round()),
           ),
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          spacing: 16,
-          runSpacing: 4,
-          children: [
-            Text(cryptoTime(rows.first.time)),
-            Text(cryptoTime(rows.last.time)),
-          ],
+        Semantics(
+          label:
+              '显示区间：${cryptoTime(rows.first.time)} 至 ${cryptoTime(rows.last.time)}',
+          excludeSemantics: true,
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            spacing: 16,
+            runSpacing: 4,
+            children: [
+              Text(
+                cryptoTime(rows.first.time),
+                key: const Key('crypto-range-start'),
+              ),
+              Text(
+                cryptoTime(rows.last.time),
+                key: const Key('crypto-range-end'),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         const Text(
-          '悬停、点击图表或拖动滑杆查看开高低收、成交量与成交额。主副图时间联动；UTC 分周期，时间显示 UTC+8。',
+          '左右拖动图表浏览历史，接近左端自动加载更多。悬停、点击图表或拖动滑杆查看开高低收、成交量与成交额。主副图时间联动；UTC 分周期，时间显示 UTC+8。',
           style: TextStyle(color: dashboardMuted, fontSize: 12, height: 1.6),
         ),
         for (final id in widget.panes)
@@ -467,7 +616,7 @@ class _MarketPainter extends CustomPainter {
         for (final row in rows) ...[row.low, row.high],
       for (final study in studies)
         for (final line in study.lines)
-          for (final v in line.values.skip(offset))
+          for (final v in line.values.skip(offset).take(rows.length))
             if (v != null && v.isFinite) v,
       if (!price)
         for (final study in studies) ...study.levels,

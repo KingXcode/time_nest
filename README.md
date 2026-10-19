@@ -155,18 +155,19 @@ A 股行情是独立页面，只在进入时加载 TradingView 官方 Advanced C
 
 每日看板 → 数字货币行情。支持 BTC、ETH、BNB、SOL、XRP、DOGE 六个 USDT 现货交易对；展示最新成交价、滚动 24 小时涨跌幅、最高价、最低价、成交量和成交额。报价来源为币安交易所，不能代表数字货币全市场市值；USDT 不是美元。
 
-- 直接使用币安官方 `https://data-api.binance.vision`，无需账号、API Key 或自建代理。`/api/v3/ticker/24hr` 一次获取六个交易对，`/api/v3/klines` 获取所选交易对最近 500 根 K 线用于指标预热，图上展示最近 120 根。
-- 支持 15 分钟、1 小时、4 小时、日线和周线。Flutter 绘制蜡烛图，左上角或右上角显示所选 K 线的开高低收、基础币成交量和 USDT 成交额；悬停、点击及滑杆同步定位主副图。绿色上涨、红色下跌；UTC 分周期，时间显示 UTC+8，未收盘 K 线持续变化。
+- 直接使用币安官方 `https://data-api.binance.vision`，无需账号、API Key 或自建代理。`/api/v3/ticker/24hr` 一次获取六个交易对，`/api/v3/klines` 首次获取所选交易对最近 500 根 K 线用于指标预热，默认展示最近 120 根。左右拖动主图或任一副图可浏览历史；接近已加载数据的左端时，按最早开盘时间减 1 毫秒作为 `endTime`，每次再加载最多 500 根，直到数据源返回最早记录。
+- 支持 15 分钟、1 小时、4 小时、日线和周线。Flutter 绘制蜡烛图，左上角或右上角显示所选 K 线的开高低收、基础币成交量和 USDT 成交额；鼠标/触屏拖动同步平移主副图，悬停、点击及滑杆同步定位单根 K 线。绿色上涨、红色下跌；UTC 分周期，时间显示 UTC+8，未收盘 K 线持续变化。
 - 交易对、周期、主副图指标选择及角落位置保存在本浏览器；从旧版升级时自动补充入口，不恢复已移除的汇率功能，不覆盖原有收藏、排序或 A 股偏好。
 - 使用官方市场数据专用 `wss://data-stream.binance.vision/stream`：六个 `<symbol>@ticker`（约 1 秒）与所选 `<symbol>@kline_<interval>`（约 2 秒）。浏览器处理协议层 ping/pong；应用检查选中交易对的推送是否停滞，断线按 1–30 秒退避重连，并在连接满 23 小时 50 分前轮换。
 - 历史快照与增量推送合并：同一根更新、新周期追加，过期/重复帧忽略，切换品种关闭旧连接。断线恢复、跨周期或发现缺口时重新补齐历史，补齐前暂停技术建议；历史快照不得覆盖更新的推送值。没有实时连接时仍尝试快照，失败后延长间隔，最多 5 分钟。
+- 历史加载按时间连续拼接，不重复插入；补齐前后保持当前视图，实时推送与最新快照不丢弃已加载历史。可用“更早 / 较新”逐屏翻看、“加载更多历史”手动分页和“回到最新”恢复跟随；加载失败保留原图并可重试，切换交易对/周期丢弃旧请求。长时间离线导致新旧快照不连续时，重新从最新数据开始加载，不拼接虚假缺口。
 - 页面后台、离开或手动暂停时关闭推送、停止定时请求；回到前台重新订阅并补齐。状态明确区分连接中、实时、重连、暂停，不能把旧缓存标成实时。
 - 数据缓存 15 秒，失败时最多使用 10 分钟内的旧缓存，并保留原获取时间及旧数据提示；不生成模拟价格。接口限流时遵守 `Retry-After`，地区或网络不可用时显示错误和官方来源入口。
 - 浏览器会向币安发送常规网络信息及所选交易对、周期。不包含交易、钱包、账户或下单功能。
 
 官方文档：[WebSocket 推送](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md)、[公开行情域名](https://developers.binance.com/en/docs/products/spot/faqs/market_data_only)、[报价与 K 线接口](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/market)、[请求频率限制](https://developers.binance.com/en/docs/products/spot/rest-api)。
 
-发布构建后运行 `node tool/crypto_smoke.mjs` 可验证真实 Chrome 中的币安快照与 WebSocket 推送、交易对与周期切换、8+8 指标恢复及截图；它依赖当前网络可访问币安，不代替 iPhone Safari 真机验收。
+发布构建后运行 `node tool/crypto_smoke.mjs` 可验证真实 Chrome 中的币安快照与 WebSocket 推送、鼠标/触屏平移和历史分页、交易对与周期切换、8+8 指标恢复及截图；它依赖当前网络可访问币安，不代替 iPhone Safari 真机验收。
 
 ### 图表指标与技术参考
 
@@ -176,7 +177,7 @@ A 股行情是独立页面，只在进入时加载 TradingView 官方 Advanced C
 - 副图 24 种：VOL、AMOUNT、MACD、RSI、KDJ、STOCH、Stoch RSI、WR、CCI、ATR、NATR、DMI/ADX、OBV、CMF、MFI、ROC、MOM、TRIX、AO、BIAS、DPO、BBW、PPO、TSI。
 - 参数和公式见每个指标选项的提示及 [计算源码](lib/dashboard/crypto_indicators.dart)。EMA 用 SMA 作种子，Wilder 平滑 α=1/N；标准差采用总体标准差。MACD 柱为 DIF−DEA，不乘 2。ATR 首根 TR 使用高低差；DMI 从第二根开始平滑。OBV 以当前加载窗口为基准。均线族作为一个可选叠加项，可包含多条线。
 - 预热不足保留空值；零成交量的 VWMA 显示不可用；平盘 RSI/MFI 为 50。按原时间索引绘制，计算不引用未来数据；部分递归指标可能与使用更长历史或不同种子的平台有细微差异。
-- 下方「技术指标 · 买入参考」展示最新已收盘 K 线上的 EMA、MACD、RSI、DMI/ADX、CMF、STOCH 数值、方向和逐项规则。每项 +1/0/−1，合计≥3为偏多买入观察，≤−3为暂缓买入，其余观望；图上选择不会改变这六项评分。少于 60 根已收盘 K 线、未实时同步、暂停、错误或历史补齐中不提供建议。
+- 下方「技术指标 · 买入参考」展示最新已收盘 K 线上的 EMA、MACD、RSI、DMI/ADX、CMF、STOCH 数值、方向和逐项规则。固定使用最近 500 根计算评分，补充更早历史不改变当前参考。每项 +1/0/−1，合计≥3为偏多买入观察，≤−3为暂缓买入，其余观望；图上选择不会改变这六项评分。少于 60 根已收盘 K 线、未实时同步、暂停、错误或历史补齐中不提供建议。
 - 这套规则没有收益回测，不是个人投资方案，也不保证收益；不包含交易、下单、持仓或账户信息。ATR/收盘价显示当前周期的波动参考。
 
 独立验证：`test/fixtures/crypto_talib.json` 来自 TA-Lib Python 0.8.1 的合成行情参考值，22 条曲线在 3 个时点做数值比对；其他测试覆盖无未来数据、平盘/零量、连接恢复、快照竞态、320px/2倍字体及8+8数量和高度。TA-Lib 仅用于生成测试参考，不是产品运行依赖。公式参考：[RSI](https://www.tradingview.com/support/solutions/43000502338-relative-strength-index-rsi/)、[ATR](https://www.tradingview.com/support/solutions/43000501823-average-true-range-atr/)。本项目评分规则独立定义，不宣称与 TradingView 技术评级一致。

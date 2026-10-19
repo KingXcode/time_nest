@@ -425,6 +425,42 @@ test('Binance restricts symbols and intervals before making network requests', a
   assert.equal(h.calls.length, 0);
 });
 
+test('Binance history pages send exclusive cursor, isolate and restore cached pages', async () => {
+  const shared = storage(), args = { symbol:'BTCUSDT', interval:'1h' };
+  const cursor = START - 3 * hour - 1;
+  const h = harness(url => {
+    const end = new URL(url).searchParams.get('endTime');
+    return response(binanceCandles().map(row => end ? [row[0]-3*hour,...row.slice(1,6),row[6]-3*hour,...row.slice(7)] : row));
+  }, { storage:shared });
+  const latest = await h.request('cryptoCandles',args);
+  const older = await h.request('cryptoCandles',{...args,endTime:cursor});
+  assert.equal(new URL(h.calls[1].url).searchParams.get('endTime'),String(cursor));
+  assert.equal(older.data.candles.at(-1).closeTime + 1,latest.data.candles[0].time);
+  assert.equal(older.data.endTime,cursor);
+  const reload = harness(()=>{throw new Error('must use saved page');},{storage:shared});
+  assert.deepEqual((await reload.request('cryptoCandles',args)).data,latest.data);
+  assert.deepEqual((await reload.request('cryptoCandles',{...args,endTime:cursor})).data,older.data);
+  assert.equal(reload.calls.length,0);
+});
+
+test('Binance history rejects invalid cursors and out-of-range responses; coalesces identical pages', async () => {
+  const args={symbol:'BTCUSDT',interval:'1h'};
+  const invalid=harness(()=>{throw new Error('must not fetch');});
+  for(const endTime of [null,-1,0,1.5,'123',START,START+hour,8640000000000000])
+    await assert.rejects(invalid.request('cryptoCandles',{...args,endTime}),/时间无效/);
+  assert.equal(invalid.calls.length,0);
+  const out=harness(()=>response(binanceCandles()));
+  await assert.rejects(out.request('cryptoCandles',{...args,endTime:START-3*hour-1}),/格式异常/);
+  let finish;
+  const h=harness(()=>new Promise(resolve=>{finish=resolve;}));
+  const page={...args,endTime:START-1};
+  const a=h.request('cryptoCandles',page), b=h.request('cryptoCandles',page);
+  assert.equal(h.calls.length,1);
+  finish(response([]));
+  assert.deepEqual((await a).data.candles,[]);
+  assert.deepEqual(await a,await b);
+});
+
 test('Binance rejects invalid numbers, OHLC, duplicate times and malformed arrays', async () => {
   for (const mutate of [rows => { rows[0][2] = '1'; }, rows => { rows[0][5] = '-1'; },
     rows => { rows[0][4] = 'NaN'; }, rows => { rows[0][1] = ''; },

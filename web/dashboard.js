@@ -91,7 +91,8 @@
       case 'cryptoQuotes': return {};
       case 'cryptoCandles':
         requireValue(cryptoSymbols.includes(args.symbol) && Object.hasOwn(cryptoIntervals, args.interval), '请选择支持的交易对与 K 线周期。');
-        return { symbol: args.symbol, interval: args.interval };
+        requireValue(args.endTime === undefined || (timestamp(args.endTime) && args.endTime < Date.now()), '历史 K 线时间无效。');
+        return { symbol: args.symbol, interval: args.interval, ...(args.endTime === undefined ? {} : { endTime: args.endTime }) };
       case 'news':
         requireValue(['sspai', 'top', 'new', 'show'].includes(args.feed), '请选择中文或 HN 资讯分类。');
         return { feed: args.feed };
@@ -104,7 +105,7 @@
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
       case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
-      case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
+      case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && (data.endTime === undefined || (timestamp(data.endTime) && data.endTime < Date.now())) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && (data.endTime === undefined || c.closeTime <= data.endTime) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
       case 'news':
         if (data.feed === 'sspai') return Array.isArray(data.stories) && data.stories.length <= 10 && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && s.source === '少数派' && finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY && !!sspaiUrl(s.url));
         return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
@@ -115,7 +116,7 @@
     const now = Date.now();
     const entries = Object.entries(cache).filter(([key, entry]) => {
       const module = key.split(':', 1)[0], config = settings[module];
-      return config && object(entry) && finite(entry.at) && entry.at <= now + 5 * MINUTE && now - entry.at <= config.retain && validData(module, entry.data) && (module !== 'news' || key === `news:${JSON.stringify({ feed: entry.data.feed })}`) && (module !== 'cryptoCandles' || key === `cryptoCandles:${JSON.stringify({ symbol: entry.data.symbol, interval: entry.data.interval })}`);
+      return config && object(entry) && finite(entry.at) && entry.at <= now + 5 * MINUTE && now - entry.at <= config.retain && validData(module, entry.data) && (module !== 'news' || key === `news:${JSON.stringify({ feed: entry.data.feed })}`) && (module !== 'cryptoCandles' || key === `cryptoCandles:${JSON.stringify({ symbol: entry.data.symbol, interval: entry.data.interval, ...(entry.data.endTime === undefined ? {} : { endTime: entry.data.endTime }) })}`);
     }).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_CACHE_ENTRIES);
     cache = Object.fromEntries(entries);
     while (JSON.stringify(cache).length > MAX_CACHE_BYTES && entries.length) {
@@ -242,6 +243,7 @@
       case 'cryptoCandles': {
         const url = new URL(`https://${binanceHost}/api/v3/klines`);
         url.search = new URLSearchParams({ symbol: args.symbol, interval: args.interval, limit: '500', timeZone: '0' });
+        if (args.endTime !== undefined) url.searchParams.set('endTime', String(args.endTime));
         const rows = await jsonFetch(url.href);
         requireValue(Array.isArray(rows) && rows.length <= 500);
         const candles = rows.map(r => {
@@ -249,7 +251,7 @@
           return { time: r[0], open: decimal(r[1]), high: decimal(r[2]), low: decimal(r[3]), close: decimal(r[4]),
             volume: decimal(r[5]), closeTime: r[6], quoteVolume: decimal(r[7]) };
         });
-        return { data: { symbol: args.symbol, interval: args.interval, candles } };
+        return { data: { ...args, candles } };
       }
       case 'searchCities': {
         const url = new URL('https://geocoding-api.open-meteo.com/v1/search');

@@ -1,0 +1,293 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:time_nest/dashboard/crypto_chart.dart';
+import 'package:time_nest/dashboard/crypto_market.dart';
+import 'package:time_nest/dashboard/crypto_panel.dart';
+import 'package:time_nest/dashboard/dashboard_client.dart';
+
+import 'crypto_fixture.dart';
+import 'crypto_live_widget_test.dart' show Feed, candleEvent;
+import 'dashboard_widget_test.dart' as fixture;
+
+const hour = 3600000;
+final startTime = DateTime.utc(2026, 1, 1).millisecondsSinceEpoch;
+Map<String, dynamic> bar(int i) => {
+  'time': startTime + i * hour,
+  'closeTime': startTime + (i + 1) * hour - 1,
+  'open': 100.0 + i,
+  'high': 110.0 + i,
+  'low': 90.0 + i,
+  'close': 102.0 + i,
+  'volume': 12.0,
+  'quoteVolume': 1200.0,
+};
+List<CryptoCandle> candles(int from, int to) => [
+  for (var i = from; i < to; i++) CryptoCandle.fromJson(bar(i)),
+];
+
+class HistoryClient extends fixture.FixtureDashboardClient {
+  int total = 1500;
+  bool historyFailure = false;
+  Completer<DashboardData>? olderPending;
+  List<Map<String, dynamic>>? historyOverride;
+  final olderCalls = <Map<String, dynamic>>[];
+  DashboardData page(
+    String symbol,
+    String interval,
+    List<Map<String, dynamic>> rows,
+  ) => DashboardData(
+    data: {'symbol': symbol, 'interval': interval, 'candles': rows},
+    fetchedAt: DateTime.fromMillisecondsSinceEpoch(
+      startTime + (total - 1) * hour + 1000,
+    ),
+  );
+  @override
+  Future<DashboardData> load(
+    String module,
+    Map<String, dynamic> args, {
+    bool refresh = false,
+  }) async {
+    if (module == 'cryptoQuotes') {
+      return DashboardData(
+        data: cryptoQuotesFixture(),
+        fetchedAt: DateTime.utc(2026, 10, 19),
+      );
+    }
+    if (args.containsKey('endTime')) {
+      olderCalls.add(Map.of(args));
+      if (olderPending != null) return olderPending!.future;
+      if (historyFailure) throw const DashboardException('连接超时，请重试。');
+      final end = ((args['endTime'] as int) + 1 - startTime) ~/ hour;
+      return page(
+        args['symbol'] as String,
+        args['interval'] as String,
+        historyOverride ??
+            [for (var i = (end - 500).clamp(0, end); i < end; i++) bar(i)],
+      );
+    }
+    return page(args['symbol'] as String, args['interval'] as String, [
+      for (var i = total - 500; i < total; i++) bar(i),
+    ]);
+  }
+}
+
+Widget panel(HistoryClient client, Feed feed) {
+  var symbol = 'BTCUSDT', interval = '1h';
+  return fixture.app(
+    Scaffold(
+      body: SingleChildScrollView(
+        child: StatefulBuilder(
+          builder: (context, update) => CryptoPanel(
+            client: client,
+            feed: feed,
+            symbol: symbol,
+            interval: interval,
+            onChanged: (s, i) => update(() {
+              symbol = s;
+              interval = i;
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+String rangeStart(WidgetTester tester) =>
+    tester.widget<Text>(find.byKey(const Key('crypto-range-start'))).data!;
+Future<void> press(WidgetTester tester, String key) async {
+  final control = find.byKey(Key(key));
+  await tester.ensureVisible(control);
+  await tester.tap(control);
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  for (final kind in [PointerDeviceKind.mouse, PointerDeviceKind.touch]) {
+    testWidgets(
+      '$kind pans main and subcharts, anchors across prepends and pushes, returns to live',
+      (tester) async {
+        fixture.setSize(
+          tester,
+          Size(kind == PointerDeviceKind.mouse ? 1280 : 320, 1000),
+        );
+        var rows = candles(1000, 1500);
+        late StateSetter update;
+        await tester.pumpWidget(
+          fixture.app(
+            Scaffold(
+              body: SingleChildScrollView(
+                child: StatefulBuilder(
+                  builder: (context, setState) {
+                    update = setState;
+                    return CryptoChart(
+                      candles: rows,
+                      asset: 'BTC',
+                      fetchedAt: DateTime.fromMillisecondsSinceEpoch(
+                        startTime + 1500 * hour,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(rangeStart(tester), cryptoTime(bar(1380)['time'] as int));
+        final plot = find.byKey(const Key('crypto-price-plot'));
+        await tester.ensureVisible(plot);
+        final width = tester.getSize(plot).width;
+        await tester.drag(plot, Offset(width * .3, 0), kind: kind);
+        await tester.pumpAndSettle();
+        final older = rangeStart(tester);
+        expect(
+          older.compareTo(cryptoTime(bar(1380)['time'] as int)),
+          lessThan(0),
+        );
+        expect(tester.getSize(plot).height, cryptoPriceHeight);
+        update(() => rows = [...candles(500, 1000), ...rows]);
+        await tester.pumpAndSettle();
+        expect(rangeStart(tester), older);
+        update(() => rows = [...rows, CryptoCandle.fromJson(bar(1500))]);
+        await tester.pumpAndSettle();
+        expect(rangeStart(tester), older);
+        final pane = find.byKey(const Key('crypto-pane-vol'));
+        await tester.ensureVisible(pane);
+        await tester.drag(pane, Offset(-width * .15, 0), kind: kind);
+        await tester.pumpAndSettle();
+        expect(rangeStart(tester).compareTo(older), greaterThan(0));
+        await press(tester, 'crypto-latest');
+        expect(rangeStart(tester), cryptoTime(bar(1381)['time'] as int));
+        update(() => rows = [...rows, CryptoCandle.fromJson(bar(1501))]);
+        await tester.pumpAndSettle();
+        expect(rangeStart(tester), cryptoTime(bar(1382)['time'] as int));
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'left edge pages once, preserves viewport and retained history through live refresh',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 1000));
+      final client = HistoryClient(), feed = Feed();
+      await tester.pumpWidget(panel(client, feed));
+      await tester.pumpAndSettle();
+      client.olderPending = Completer<DashboardData>();
+      for (var i = 0; i < 4; i++) {
+        await press(tester, 'crypto-pan-older');
+      }
+      expect(client.olderCalls, hasLength(1));
+      expect(client.olderCalls.single['endTime'], startTime + 1000 * hour - 1);
+      final pinned = rangeStart(tester);
+      // A simultaneous latest snapshot must not cancel the older request.
+      final refresh = find.widgetWithText(TextButton, '刷新行情');
+      await tester.ensureVisible(refresh);
+      await tester.tap(refresh);
+      await tester.pumpAndSettle();
+      client.olderPending!.complete(
+        client.page('BTCUSDT', '1h', [for (var i = 500; i < 1000; i++) bar(i)]),
+      );
+      client.olderPending = null;
+      await tester.pumpAndSettle();
+      CryptoChart chart() =>
+          tester.widget<CryptoChart>(find.byType(CryptoChart));
+      expect(chart().candles, hasLength(1000));
+      expect(chart().candles.map((c) => c.time).toSet(), hasLength(1000));
+      expect(rangeStart(tester), pinned);
+      client.total++;
+      feed.send(candleEvent(bar(1500), startTime + 1500 * hour + 2000));
+      feed.send({'type': 'status', 'status': 'live'});
+      await tester.pumpAndSettle();
+      expect(chart().candles, hasLength(1001));
+      expect(chart().candles.first.time, startTime + 500 * hour);
+      expect(rangeStart(tester), pinned);
+      await press(tester, 'crypto-load-older');
+      expect(chart().candles, hasLength(1501));
+      expect(client.olderCalls.last['endTime'], startTime + 500 * hour - 1);
+      await press(tester, 'crypto-load-older');
+      expect(chart().hasMoreHistory, isFalse);
+      final calls = client.olderCalls.length;
+      expect(find.text('已到最早数据'), findsOneWidget);
+      await press(tester, 'crypto-pan-older');
+      expect(client.olderCalls.length, calls);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'pagination failure and invalid pages retain data, explicit retry accepts short final page',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 1000));
+      final client = HistoryClient()..historyFailure = true;
+      await tester.pumpWidget(panel(client, Feed()));
+      await tester.pumpAndSettle();
+      CryptoChart chart() =>
+          tester.widget<CryptoChart>(find.byType(CryptoChart));
+      await press(tester, 'crypto-load-older');
+      expect(chart().candles, hasLength(500));
+      expect(find.text('重试加载历史'), findsOneWidget);
+      expect(chart().hasMoreHistory, isTrue);
+      client.historyFailure = false;
+      for (final invalid in [
+        [bar(999), bar(1000)],
+        [bar(998)],
+        [bar(997), bar(999)],
+      ]) {
+        client.historyOverride = invalid;
+        await press(tester, 'crypto-load-older');
+        expect(chart().candles, hasLength(500));
+        expect(chart().historyError, isNotNull);
+      }
+      client.historyOverride = [bar(998), bar(999)];
+      await press(tester, 'crypto-load-older');
+      expect(chart().candles, hasLength(502));
+      expect(chart().historyError, isNull);
+      expect(chart().hasMoreHistory, isFalse);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'late older page cannot enter a different symbol or interval, and disposal is safe',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 1000));
+      final client = HistoryClient(), feed = Feed();
+      await tester.pumpWidget(panel(client, feed));
+      await tester.pumpAndSettle();
+      for (final switchSymbol in [true, false]) {
+        client.olderPending = Completer<DashboardData>();
+        final pending = client.olderPending!;
+        await press(tester, 'crypto-load-older');
+        final selection = switchSymbol
+            ? find.byKey(const ValueKey('crypto-select-ETHUSDT'))
+            : find.widgetWithText(ChoiceChip, '日线');
+        await tester.ensureVisible(selection);
+        await tester.tap(selection);
+        await tester.pumpAndSettle();
+        pending.complete(
+          client.page(switchSymbol ? 'BTCUSDT' : 'ETHUSDT', '1h', [
+            for (var i = 500; i < 1000; i++) bar(i),
+          ]),
+        );
+        client.olderPending = null;
+        await tester.pumpAndSettle();
+        final chart = tester.widget<CryptoChart>(find.byType(CryptoChart));
+        expect(chart.asset, 'ETH');
+        expect(chart.candles, hasLength(500));
+        expect(chart.loadingOlder, isFalse);
+        expect(rangeStart(tester), cryptoTime(bar(1380)['time'] as int));
+      }
+      client.olderPending = Completer<DashboardData>();
+      await press(tester, 'crypto-load-older');
+      await tester.pumpWidget(const SizedBox());
+      client.olderPending!.complete(client.page('ETHUSDT', '1d', []));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+}

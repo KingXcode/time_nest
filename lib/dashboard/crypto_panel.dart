@@ -55,6 +55,9 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   String _streamStatus = 'connecting';
   int _lastCandleEvent = 0;
   bool _historySynchronized = false;
+  bool _olderBusy = false, _hasMoreHistory = true;
+  String? _olderError;
+  int _olderSerial = 0;
   final Map<int, CryptoCandle> _pendingCandles = {};
   final Map<String, CryptoQuote> _pushedQuotes = {};
   late List<String> _overlays = List.of(widget.overlays),
@@ -90,6 +93,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       _candleData = null;
       _candleError = null;
       _historySynchronized = false;
+      _olderSerial++;
+      _olderBusy = false;
+      _hasMoreHistory = true;
+      _olderError = null;
       _lastCandleEvent = 0;
       _pendingCandles.clear();
       _feed = widget.feed ?? _feed;
@@ -197,21 +204,27 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         'symbol': symbol,
         'interval': interval,
       }, refresh: refresh);
-      if (data.data['symbol'] != symbol || data.data['interval'] != interval) {
-        throw const FormatException('Mismatched candle series');
-      }
-      final rows = (data.data['candles'] as List)
-          .map((r) => CryptoCandle.fromJson(r as Map))
-          .toList();
-      if (rows.length > 500) throw const FormatException('Too many candles');
-      for (var i = 1; i < rows.length; i++) {
-        if (rows[i].time != rows[i - 1].closeTime + 1) {
-          throw const FormatException('Unordered candles');
-        }
-      }
+      final rows = _readCandles(data, symbol, interval);
       if (!mounted || serial != _candleSerial) return;
+      if (rows.isEmpty && _candles.isNotEmpty) {
+        throw const FormatException('Empty refresh');
+      }
       setState(() {
-        _candles = rows;
+        // Retain paged history when the current snapshot overlaps or adjoins it.
+        // After a very long outage, never bridge a missing interval with fake bars.
+        final prefix = rows.isEmpty
+            ? <CryptoCandle>[]
+            : _candles.where((c) => c.time < rows.first.time).toList();
+        final connected =
+            prefix.isNotEmpty && prefix.last.closeTime + 1 == rows.first.time;
+        if (_candles.isEmpty ||
+            (!connected && rows.first.time != _candles.first.time)) {
+          _olderSerial++;
+          _olderBusy = false;
+          _olderError = null;
+          _hasMoreHistory = rows.length == 500 || data.stale;
+        }
+        _candles = [if (connected) ...prefix, ...rows];
         _historySynchronized = !data.stale;
         for (final row
             in _pendingCandles.values.toList()
@@ -228,6 +241,68 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     } finally {
       if (mounted && serial == _candleSerial) {
         setState(() => _candlesBusy = false);
+      }
+    }
+  }
+
+  List<CryptoCandle> _readCandles(
+    DashboardData data,
+    String symbol,
+    String interval,
+  ) {
+    if (data.data['symbol'] != symbol || data.data['interval'] != interval) {
+      throw const FormatException('Mismatched candle series');
+    }
+    final rows = (data.data['candles'] as List)
+        .map((r) => CryptoCandle.fromJson(r as Map))
+        .toList();
+    if (rows.length > 500) throw const FormatException('Too many candles');
+    for (var i = 1; i < rows.length; i++) {
+      if (rows[i].time != rows[i - 1].closeTime + 1) {
+        throw const FormatException('Unordered candles');
+      }
+    }
+    return rows;
+  }
+
+  Future<void> _loadOlder() async {
+    if (_olderBusy || !_hasMoreHistory || !_visible || _candles.isEmpty) return;
+    final serial = ++_olderSerial;
+    final firstTime = _candles.first.time;
+    final symbol = widget.symbol, interval = widget.interval;
+    setState(() {
+      _olderBusy = true;
+      _olderError = null;
+    });
+    try {
+      final data = await widget.client.load('cryptoCandles', {
+        'symbol': symbol,
+        'interval': interval,
+        'endTime': firstTime - 1,
+      }, refresh: true);
+      final rows = _readCandles(data, symbol, interval);
+      if (data.stale) throw const DashboardException('历史数据未能更新，请重试。');
+      if (rows.any((c) => c.closeTime >= firstTime) ||
+          (rows.isNotEmpty && rows.last.closeTime + 1 != firstTime)) {
+        throw const FormatException('History page overlaps or skips candles');
+      }
+      if (!mounted ||
+          serial != _olderSerial ||
+          _candles.isEmpty ||
+          _candles.first.time != firstTime) {
+        return;
+      }
+      setState(() {
+        _candles = [...rows, ..._candles];
+        _hasMoreHistory = rows.length == 500;
+      });
+    } catch (error) {
+      if (mounted && serial == _olderSerial) {
+        setState(() => _olderError = _message(error));
+      }
+    } finally {
+      if (mounted && serial == _olderSerial) {
+        setState(() => _olderBusy = false);
       }
     }
   }
@@ -328,9 +403,6 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       _candles = List.of(_candles)..[index] = candle;
     } else if (candle.time == _candles.last.closeTime + 1) {
       _candles = [..._candles, candle];
-      if (_candles.length > 500) {
-        _candles = _candles.sublist(_candles.length - 500);
-      }
     } else if (candle.time > _candles.last.time) {
       _historySynchronized = false;
     }
@@ -352,6 +424,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     _stopFeed();
     _quoteSerial++;
     _candleSerial++;
+    _olderSerial++;
     super.dispose();
   }
 
@@ -517,6 +590,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             panes: _panes,
             infoRight: _infoRight,
             onSettingsChanged: _chartChanged,
+            onLoadOlder: _loadOlder,
+            loadingOlder: _olderBusy,
+            hasMoreHistory: _hasMoreHistory,
+            historyError: _olderError,
             canAdvise:
                 _automatic &&
                 _visible &&

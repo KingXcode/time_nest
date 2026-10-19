@@ -149,16 +149,50 @@ async function labels(p = page) {
   return p.evaluate(`(${deepQuery})('flt-semantics, [aria-label]').map(e => ({role:e.getAttribute('role'), label:e.getAttribute('aria-label') || e.textContent, checked:e.getAttribute('aria-checked')}))`);
 }
 async function activate(label, p = page) {
-  const point = await p.evaluate(`(() => {
+  const locate = () => p.evaluate(`(() => {
     const nodes = (${deepQuery})('[role="button"], [role="menuitem"], [role="menuitemcheckbox"], [role="checkbox"], [role="group"]');
     const element = nodes.find(e => (e.getAttribute('aria-label') || e.textContent).trim().split('\\n').includes(${JSON.stringify(label)}));
     if (!element) throw new Error('Missing control: ' + ${JSON.stringify(label)} + ' available=' + nodes.map(e=>e.getAttribute('aria-label') || e.textContent).join('|'));
-    const box = element.getBoundingClientRect(); return {x: box.x + box.width/2, y: box.y + box.height/2};
+    const box = element.getBoundingClientRect(); return {x: box.x + box.width/2, y: box.y + box.height/2, viewport: innerHeight};
   })()`);
+  let point=await locate();
+  for(let i=0;i<4 && (point.y<0 || point.y>point.viewport);i++) {
+    await p.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:point.x,y:point.viewport/2,deltaX:0,deltaY:point.y-point.viewport/2});
+    await delay(400);point=await locate();
+  }
+  assert.ok(point.y>=0 && point.y<=point.viewport,`Control not visible: ${label}`);
   await click(point.x, point.y, p); await delay(350);
 }
 async function showToolbar(p = page) { await click(5, 5, p); await delay(250); }
 function passed(name) { checks.push(name); console.log(`PASS ${name}`); }
+async function visibleRange() {
+  return (await labels()).find(item => item.label?.startsWith('显示区间：'))?.label;
+}
+async function dragPrice(older = true, touch = false) {
+  async function bounds() {
+    return page.evaluate(`(() => {
+      const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('K 线主图，'));
+      if(!e) throw new Error('Price plot semantics missing');
+      const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};
+    })()`);
+  }
+  let rect=await bounds();
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:200,y:500,deltaX:0,deltaY:rect.y-150});
+  await delay(400); rect=await bounds();
+  const left=rect.x+20, right=rect.x+rect.width-90, y=rect.y+rect.height/2;
+  const from=older?left:right, to=older?right:left;
+  if(touch) await page.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:from,y}]});
+  else await page.send('Input.dispatchMouseEvent',{type:'mousePressed',x:from,y,button:'left',buttons:1,clickCount:1});
+  for(let i=1;i<=12;i++) {
+    const x=from+(to-from)*i/12;
+    if(touch) await page.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y}]});
+    else await page.send('Input.dispatchMouseEvent',{type:'mouseMoved',x,y,button:'left',buttons:1});
+    await delay(20);
+  }
+  if(touch) await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  else await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:to,y,button:'left',buttons:0,clickCount:1});
+  await delay(400);
+}
 try {
   port = await waitFor(async () => Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]), 'Chrome debugging endpoint');
   page = await connect();
@@ -188,6 +222,33 @@ try {
   assert.ok(streamFrames.length>streamStart, 'pushes continue without a manual refresh');
   passed('actual WebSocket ticker and kline pushes continue and Flutter reports live');
   await page.screenshot('01-crypto-desktop.png');
+  const latestRange=await visibleRange();
+  assert.ok(latestRange);
+  await dragPrice();
+  assert.notEqual(await visibleRange(),latestRange,'mouse drag changes the visible time window');
+  for(let i=0;i<8 && ![...requests].some(url=>url.includes('/klines') && url.includes('endTime='));i++) await dragPrice();
+  await waitFor(async()=>(await labels()).some(item=>item.label==='已加载 1000 根'),'dragging left edge loads another 500 bars');
+  const historyUrl=new URL([...requests].find(url=>url.includes('/klines') && url.includes('endTime=')));
+  assert.equal(Number(historyUrl.searchParams.get('endTime')),btc.data.candles[0].time-1);
+  const olderPage=await page.evaluate(`timeNestDashboard.request('cryptoCandles',JSON.stringify({symbol:'BTCUSDT',interval:'1h',endTime:${btc.data.candles[0].time-1}})).then(JSON.parse)`);
+  assert.equal(olderPage.data.candles.length,500);
+  assert.equal(olderPage.data.candles.at(-1).closeTime+1,btc.data.candles[0].time);
+  const pinned=await visibleRange(); await delay(2200);
+  assert.equal(await visibleRange(),pinned,'live pushes preserve historical viewport');
+  await page.screenshot('09-crypto-history-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:true});
+  await delay(500);
+  const narrowRange=await visibleRange(); await dragPrice(false,true);
+  assert.notEqual(await visibleRange(),narrowRange,'touch drag pans the narrow chart');
+  await page.screenshot('10-crypto-history-mobile.png');
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});
+  await delay(600);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:500,deltaX:0,deltaY:-10000}); await delay(500);
+  await activate('回到最新');
+  assert.equal(await visibleRange(),latestRange);
+  passed('mouse and touch pan real charts; left edge loads contiguous older candles and live pushes keep the viewport');
   // Flutter semantics represents the entire card as one tappable node.
   const ethPoint = await page.evaluate(`(() => {
     const node = (${deepQuery})('flt-semantics, [aria-label]').find(e => (e.getAttribute('aria-label') || e.textContent || '').startsWith('ETH · 以太坊'));
