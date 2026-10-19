@@ -137,7 +137,7 @@ A 股行情是独立页面，只在进入时加载 TradingView 官方 Advanced C
 - 点星标收藏卡片，可只看收藏；“调整顺序”支持拖动和上下按钮。城市、仓库、新闻类型、指数、数字货币交易对、周期、收藏及顺序保存于本浏览器，刷新后恢复。
 - 入口小屏单列、大屏双列；每个功能独立滚动，返回后保留城市、关注仓库、新闻频道及行情选择。加载、无数据、失败、重试、旧缓存和数据时间均有独立状态。
 - 无账号、无需 API Key、没有自建后端。请求直接从浏览器发往下表来源；来源服务会收到常规网络信息及请求参数（选定城市坐标、公开仓库名等）。不会自动请求设备位置，也不会将偏好同步到服务器。
-- 天气、项目更新和资讯在首次进入页面、参数改变或手动刷新时按需请求；数字货币行情在页面前台每 30 秒刷新，可手动暂停，后台及离开页面后停止定时请求。缓存仅用于避免重复调用和断网降级，不能当作实时保证；数据源在部分地区可能不可达。
+- 天气、项目更新和资讯在首次进入页面、参数改变或手动刷新时按需请求；数字货币行情在页面前台接收实时推送，可手动暂停，后台及离开页面后关闭连接；推送中断时尝试快照补齐。缓存仅用于避免重复调用和断网降级，不能当作实时保证；数据源在部分地区可能不可达。
 
 | 模块 | 数据及边界 |
 | --- | --- |
@@ -155,16 +155,31 @@ A 股行情是独立页面，只在进入时加载 TradingView 官方 Advanced C
 
 每日看板 → 数字货币行情。支持 BTC、ETH、BNB、SOL、XRP、DOGE 六个 USDT 现货交易对；展示最新成交价、滚动 24 小时涨跌幅、最高价、最低价、成交量和成交额。报价来源为币安交易所，不能代表数字货币全市场市值；USDT 不是美元。
 
-- 直接使用币安官方 `https://data-api.binance.vision`，无需账号、API Key 或自建代理。`/api/v3/ticker/24hr` 一次获取六个交易对，`/api/v3/klines` 获取所选交易对最近 120 根 K 线。
-- 支持 15 分钟、1 小时、4 小时、日线和周线。Flutter 绘制蜡烛图与成交量，点击或拖动滑杆查看开高低收；绿色上涨、红色下跌。周期按 UTC 划分，页面时间标注为 UTC+8，最后一根未收盘 K 线会继续变化。
-- 交易对和周期保存在本浏览器；从旧版升级时自动补充入口，不恢复已移除的汇率功能，不覆盖原有收藏、排序或 A 股偏好。
-- 页面前台每 30 秒拉取一次行情快照，并非逐笔推送；自动更新可暂停。报价与 K 线独立加载，切换品种不接受旧请求的迟到结果。失败后延长重试间隔，最多 5 分钟；后台和离开页面后停止定时请求。
+- 直接使用币安官方 `https://data-api.binance.vision`，无需账号、API Key 或自建代理。`/api/v3/ticker/24hr` 一次获取六个交易对，`/api/v3/klines` 获取所选交易对最近 500 根 K 线用于指标预热，图上展示最近 120 根。
+- 支持 15 分钟、1 小时、4 小时、日线和周线。Flutter 绘制蜡烛图，左上角或右上角显示所选 K 线的开高低收、基础币成交量和 USDT 成交额；悬停、点击及滑杆同步定位主副图。绿色上涨、红色下跌；UTC 分周期，时间显示 UTC+8，未收盘 K 线持续变化。
+- 交易对、周期、主副图指标选择及角落位置保存在本浏览器；从旧版升级时自动补充入口，不恢复已移除的汇率功能，不覆盖原有收藏、排序或 A 股偏好。
+- 使用官方市场数据专用 `wss://data-stream.binance.vision/stream`：六个 `<symbol>@ticker`（约 1 秒）与所选 `<symbol>@kline_<interval>`（约 2 秒）。浏览器处理协议层 ping/pong；应用检查选中交易对的推送是否停滞，断线按 1–30 秒退避重连，并在连接满 23 小时 50 分前轮换。
+- 历史快照与增量推送合并：同一根更新、新周期追加，过期/重复帧忽略，切换品种关闭旧连接。断线恢复、跨周期或发现缺口时重新补齐历史，补齐前暂停技术建议；历史快照不得覆盖更新的推送值。没有实时连接时仍尝试快照，失败后延长间隔，最多 5 分钟。
+- 页面后台、离开或手动暂停时关闭推送、停止定时请求；回到前台重新订阅并补齐。状态明确区分连接中、实时、重连、暂停，不能把旧缓存标成实时。
 - 数据缓存 15 秒，失败时最多使用 10 分钟内的旧缓存，并保留原获取时间及旧数据提示；不生成模拟价格。接口限流时遵守 `Retry-After`，地区或网络不可用时显示错误和官方来源入口。
 - 浏览器会向币安发送常规网络信息及所选交易对、周期。不包含交易、钱包、账户或下单功能。
 
-官方文档：[公开行情域名](https://developers.binance.com/en/docs/products/spot/faqs/market_data_only)、[报价与 K 线接口](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/market)、[请求频率限制](https://developers.binance.com/en/docs/products/spot/rest-api)。
+官方文档：[WebSocket 推送](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md)、[公开行情域名](https://developers.binance.com/en/docs/products/spot/faqs/market_data_only)、[报价与 K 线接口](https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/market)、[请求频率限制](https://developers.binance.com/en/docs/products/spot/rest-api)。
 
-发布构建后运行 `node tool/crypto_smoke.mjs` 可验证真实 Chrome 中的币安取数、交易对与周期切换及截图；它依赖当前网络可访问币安，不代替 iPhone Safari 真机验收。
+发布构建后运行 `node tool/crypto_smoke.mjs` 可验证真实 Chrome 中的币安快照与 WebSocket 推送、交易对与周期切换、8+8 指标恢复及截图；它依赖当前网络可访问币安，不代替 iPhone Safari 真机验收。
+
+### 图表指标与技术参考
+
+共 36 种指标，主图最多同时叠加 8 种，独立副图最多同时显示 8 个。主图价格绘图区固定 320 像素，每个副图另占 150 像素；增加副图只延长页面，不缩短主图。主图顶部的信息、图例会按屏幕宽度换行，不遮挡蜡烛图。勾选达到上限后仍可取消已有指标。
+
+- 主图 12 种：MA、EMA、WMA、BOLL、Donchian、Keltner、VWMA、HMA、DEMA、TEMA、BBI、ENV。
+- 副图 24 种：VOL、AMOUNT、MACD、RSI、KDJ、STOCH、Stoch RSI、WR、CCI、ATR、NATR、DMI/ADX、OBV、CMF、MFI、ROC、MOM、TRIX、AO、BIAS、DPO、BBW、PPO、TSI。
+- 参数和公式见每个指标选项的提示及 [计算源码](lib/dashboard/crypto_indicators.dart)。EMA 用 SMA 作种子，Wilder 平滑 α=1/N；标准差采用总体标准差。MACD 柱为 DIF−DEA，不乘 2。ATR 首根 TR 使用高低差；DMI 从第二根开始平滑。OBV 以当前加载窗口为基准。均线族作为一个可选叠加项，可包含多条线。
+- 预热不足保留空值；零成交量的 VWMA 显示不可用；平盘 RSI/MFI 为 50。按原时间索引绘制，计算不引用未来数据；部分递归指标可能与使用更长历史或不同种子的平台有细微差异。
+- 下方「技术指标 · 买入参考」展示最新已收盘 K 线上的 EMA、MACD、RSI、DMI/ADX、CMF、STOCH 数值、方向和逐项规则。每项 +1/0/−1，合计≥3为偏多买入观察，≤−3为暂缓买入，其余观望；图上选择不会改变这六项评分。少于 60 根已收盘 K 线、未实时同步、暂停、错误或历史补齐中不提供建议。
+- 这套规则没有收益回测，不是个人投资方案，也不保证收益；不包含交易、下单、持仓或账户信息。ATR/收盘价显示当前周期的波动参考。
+
+独立验证：`test/fixtures/crypto_talib.json` 来自 TA-Lib Python 0.8.1 的合成行情参考值，22 条曲线在 3 个时点做数值比对；其他测试覆盖无未来数据、平盘/零量、连接恢复、快照竞态、320px/2倍字体及8+8数量和高度。TA-Lib 仅用于生成测试参考，不是产品运行依赖。公式参考：[RSI](https://www.tradingview.com/support/solutions/43000502338-relative-strength-index-rsi/)、[ATR](https://www.tradingview.com/support/solutions/43000501823-average-true-range-atr/)。本项目评分规则独立定义，不宣称与 TradingView 技术评级一致。
 
 ## 发布构建与离线
 

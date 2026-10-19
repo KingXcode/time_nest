@@ -410,7 +410,7 @@ test('Binance public quotes and candles preserve values, identity and UTC times'
   const quoteUrl = new URL(h.calls[0].url), candleUrl = new URL(h.calls[1].url);
   assert.deepEqual(JSON.parse(quoteUrl.searchParams.get('symbols')), symbols);
   assert.equal(quoteUrl.hostname, 'data-api.binance.vision');
-  assert.equal(candleUrl.searchParams.get('limit'), '120');
+  assert.equal(candleUrl.searchParams.get('limit'), '500');
   assert.equal(candleUrl.searchParams.get('timeZone'), '0');
   assert.equal(h.calls[0].init.credentials, 'omit');
   assert.equal(Object.keys(h.calls[0].init.headers).some(k => /key|authorization/i.test(k)), false);

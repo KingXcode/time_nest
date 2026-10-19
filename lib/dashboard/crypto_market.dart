@@ -82,7 +82,11 @@ class CryptoCandle {
 }
 
 String cryptoPrice(double value) {
-  final digits = value.abs() >= 1 ? 2 : 6;
+  final digits = value.abs() >= 10
+      ? 2
+      : value.abs() >= 1
+      ? 4
+      : 6;
   final parts = value.toStringAsFixed(digits).split('.');
   parts[0] = parts[0].replaceAllMapped(
     RegExp(r'(\d)(?=(\d{3})+$)'),
@@ -91,11 +95,15 @@ String cryptoPrice(double value) {
   return parts.join('.');
 }
 
-String cryptoVolume(double value) => value >= 100000000
-    ? '${(value / 100000000).toStringAsFixed(2)} 亿'
-    : value >= 10000
-    ? '${(value / 10000).toStringAsFixed(2)} 万'
-    : value.toStringAsFixed(2);
+String cryptoVolume(double value) {
+  final magnitude = value.abs();
+  final body = magnitude >= 100000000
+      ? '${(magnitude / 100000000).toStringAsFixed(2)} 亿'
+      : magnitude >= 10000
+      ? '${(magnitude / 10000).toStringAsFixed(2)} 万'
+      : magnitude.toStringAsFixed(2);
+  return '${value < 0 ? '−' : ''}$body';
+}
 
 String cryptoTime(int milliseconds, {bool seconds = false}) {
   final date = DateTime.fromMillisecondsSinceEpoch(

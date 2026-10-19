@@ -442,6 +442,14 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         client: widget.client,
         symbol: preferences.cryptoSymbol,
         interval: preferences.cryptoInterval,
+        overlays: preferences.cryptoOverlays,
+        panes: preferences.cryptoPanes,
+        infoRight: preferences.cryptoInfoRight,
+        onChartChanged: (overlays, panes, right) => _save(() {
+          preferences.cryptoOverlays = overlays;
+          preferences.cryptoPanes = panes;
+          preferences.cryptoInfoRight = right;
+        }),
         onChanged: (symbol, interval) => _save(() {
           preferences.cryptoSymbol = symbol;
           preferences.cryptoInterval = interval;

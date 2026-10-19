@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'market_config.dart';
 import 'crypto_market.dart';
+import 'crypto_indicators.dart';
 
 const dashboardModules = ['weather', 'releases', 'news', 'market', 'crypto'];
 
@@ -44,6 +45,9 @@ class DashboardPreferences {
     this.marketInterval = 'D',
     this.cryptoSymbol = 'BTCUSDT',
     this.cryptoInterval = '1h',
+    this.cryptoOverlays = defaultCryptoOverlays,
+    this.cryptoPanes = defaultCryptoPanes,
+    this.cryptoInfoRight = false,
     this.order = dashboardModules,
     this.favorites = const ['weather'],
   });
@@ -55,6 +59,8 @@ class DashboardPreferences {
   String marketInterval;
   String cryptoSymbol;
   String cryptoInterval;
+  List<String> cryptoOverlays, cryptoPanes;
+  bool cryptoInfoRight;
   List<String> order;
   List<String> favorites;
 
@@ -109,6 +115,17 @@ class DashboardPreferences {
       if (cryptoIntervals.containsKey(json['cryptoInterval'])) {
         prefs.cryptoInterval = json['cryptoInterval'] as String;
       }
+      prefs.cryptoOverlays = cleanIndicators(
+        json['cryptoOverlays'],
+        overlay: true,
+        fallback: defaultCryptoOverlays,
+      );
+      prefs.cryptoPanes = cleanIndicators(
+        json['cryptoPanes'],
+        overlay: false,
+        fallback: defaultCryptoPanes,
+      );
+      prefs.cryptoInfoRight = json['cryptoInfoRight'] == true;
       if (json['order'] is List) {
         prefs.order = <String>{
           ...(json['order'] as List).whereType<String>().where(
@@ -139,6 +156,9 @@ class DashboardPreferences {
     'marketInterval': marketInterval,
     'cryptoSymbol': cryptoSymbol,
     'cryptoInterval': cryptoInterval,
+    'cryptoOverlays': cryptoOverlays,
+    'cryptoPanes': cryptoPanes,
+    'cryptoInfoRight': cryptoInfoRight,
     'order': order,
     'favorites': favorites,
   });

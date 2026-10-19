@@ -69,6 +69,8 @@ const sockets = [];
 const checks = [];
 const errors = [];
 const requests = new Set();
+const requestEvents = [];
+const streamFrames = [], streamConnections = [], streamClosed = [];
 let page;
 let port;
 const deepQuery = `(selector) => {
@@ -95,8 +97,15 @@ async function connect(url = 'about:blank') {
       if (message.error) item.reject(new Error(JSON.stringify(message.error))); else item.resolve(message.result);
     } else if (message.method === 'Runtime.exceptionThrown') {
       errors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
+    } else if (message.method === 'Network.webSocketCreated') {
+      streamConnections.push({requestId:message.params.requestId,url:message.params.url});
+    } else if (message.method === 'Network.webSocketClosed') {
+      streamClosed.push(message.params.requestId);
+    } else if (message.method === 'Network.webSocketFrameReceived') {
+      try { streamFrames.push({id:message.params.requestId, ...JSON.parse(message.params.response.payloadData)}); } catch { /* control frames */ }
     } else if (message.method === 'Network.requestWillBeSent') {
       requests.add(message.params.request.url);
+      requestEvents.push(message.params.request.url);
     }
   });
   function send(method, params = {}) {
@@ -153,7 +162,7 @@ function passed(name) { checks.push(name); console.log(`PASS ${name}`); }
 try {
   port = await waitFor(async () => Number((await readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]), 'Chrome debugging endpoint');
   page = await connect();
-  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('shike.intro.v1','1');` });
+  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('shike.intro.v1','1');const OriginalSocket=window.WebSocket;window.__cryptoSockets=[];window.WebSocket=class extends OriginalSocket {constructor(...args){super(...args);window.__cryptoSockets.push(this);}};` });
   await page.navigate(origin + '/'); await ready(); await enableSemantics();
   await activate('每日看板');
   assert.equal([...requests].filter(url => url.includes('data-api.binance.vision')).length, 0);
@@ -168,8 +177,16 @@ try {
   assert.ok(quotes.data.quotes.some(q => q.symbol === 'BTCUSDT' && q.price > 0));
   assert.ok(quotes.data.quotes.some(q => q.symbol === 'ETHUSDT' && q.price > 0));
   const btc = await page.evaluate(`timeNestDashboard.request('cryptoCandles',JSON.stringify({symbol:'BTCUSDT',interval:'1h'})).then(JSON.parse)`);
-  assert.equal(btc.stale, false); assert.equal(btc.data.candles.length, 120);
-  passed('actual Binance browser requests return six spot quotes and 120 BTC candles without credentials');
+  assert.equal(btc.stale, false); assert.equal(btc.data.candles.length, 500);
+  passed('actual Binance browser requests return six spot quotes and 500 BTC candles without credentials');
+  await waitFor(async () => (await labels()).some(item => item.label?.includes('● 币安实时推送')), 'live stream status');
+  await waitFor(() => streamFrames.filter(f=>f.data?.e==='kline' && f.data?.s==='BTCUSDT').length>=2, 'multiple actual BTC pushed candles');
+  assert.ok(streamConnections.some(s=>s.url.startsWith('wss://data-stream.binance.vision/stream?streams=')));
+  assert.ok(streamFrames.some(f=>f.data?.e==='24hrTicker'));
+  const streamStart=streamFrames.length;
+  await delay(2200);
+  assert.ok(streamFrames.length>streamStart, 'pushes continue without a manual refresh');
+  passed('actual WebSocket ticker and kline pushes continue and Flutter reports live');
   await page.screenshot('01-crypto-desktop.png');
   // Flutter semantics represents the entire card as one tappable node.
   const ethPoint = await page.evaluate(`(() => {
@@ -184,7 +201,10 @@ try {
   await waitFor(() => page.evaluate(`JSON.parse(timeNestDashboard.readPreferences()).cryptoInterval === '1d'`), 'daily period saved');
   await waitFor(() => [...requests].some(url => url.includes('symbol=ETHUSDT') && url.includes('interval=1d')), 'ETH daily request');
   const eth = await page.evaluate(`timeNestDashboard.request('cryptoCandles',JSON.stringify({symbol:'ETHUSDT',interval:'1d'})).then(JSON.parse)`);
-  assert.equal(eth.stale, false); assert.equal(eth.data.candles.length, 120);
+  assert.equal(eth.stale, false); assert.equal(eth.data.candles.length, 500);
+  await waitFor(() => streamFrames.some(f=>f.data?.s==='ETHUSDT' && f.data?.k?.i==='1d'), 'ETH daily pushed frame');
+  await waitFor(async () => (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'ETH stream live');
+  await waitFor(() => streamConnections.slice(0,2).every(s=>streamClosed.includes(s.requestId)), 'superseded sockets fully close');
   await delay(500); await page.screenshot('02-crypto-eth.png');
   passed('ETH card and daily interval select the matching real series and persist');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
@@ -192,18 +212,46 @@ try {
   // Scroll the live Flutter viewport to inspect chart controls on a narrow screen.
   await page.send('Input.dispatchMouseEvent', { type:'mouseWheel', x:200, y:650, deltaX:0, deltaY:900 });
   await delay(600); await page.screenshot('04-crypto-mobile-chart.png');
+  // A fresh page restores a demanding 8+8 saved configuration.
+  await page.evaluate(`(() => { const p=JSON.parse(timeNestDashboard.readPreferences());p.cryptoOverlays=['ma','ema','wma','boll','donchian','keltner','vwma','hma'];p.cryptoPanes=['vol','amount','macd','rsi','kdj','stoch','cci','adx'];p.cryptoInfoRight=true;timeNestDashboard.writePreferences(JSON.stringify(p)); })()`);
+  await page.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1280,deviceScaleFactor:1,mobile:false});
   await page.send('Page.reload'); await ready(); await enableSemantics();
   await activate('每日看板');
   // Reopening a route is covered in widget tests at 320 px and 2x text.
   const restored = await page.evaluate(`JSON.parse(timeNestDashboard.readPreferences())`);
   assert.equal(restored.cryptoSymbol, 'ETHUSDT'); assert.equal(restored.cryptoInterval, '1d');
   assert.ok(!restored.order?.includes('fx'));
-  passed('narrow screenshots captured; saved crypto selection survives a real reload');
+  await activate('数字货币行情');
+  await waitFor(async()=> (await labels()).some(item=>item.label?.includes('主图 8/8 · 副图 8/8')), '8+8 chart settings restored');
+  await waitFor(async()=> (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'restored stream live');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:620});await delay(500);await page.screenshot('05-crypto-eight-overlays.png');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('06-crypto-eight-panes.png');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('07-crypto-assessment.png');
+  assert.ok((await labels()).some(item=>item.label?.includes('评分规则：六项')));
+  passed('narrow screenshots captured; 8 overlays, 8 panes, right corner info and closed-bar assessment restore');
+  const connectionCount=streamConnections.length, requestCount=requestEvents.length;
+  await page.evaluate(`window.__cryptoSockets.at(-1).close(1000,'smoke reconnect')`);
+  await waitFor(()=>streamConnections.length>connectionCount,'actual closed connection reconnects');
+  const restoredSocket=streamConnections.at(-1).requestId;
+  await waitFor(()=>streamFrames.some(f=>f.id===restoredSocket && f.data?.s==='ETHUSDT' && f.data?.k?.i==='1d'),'reconnected ETH daily frames');
+  await waitFor(()=>requestEvents.slice(requestCount).some(url=>url.includes('/api/v3/klines')),'reconnection refetches history');
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('评分规则：六项')),'assessment resumes after resync');
+  await page.screenshot('08-crypto-reconnected.png');
+  passed('closing a real Binance connection resubscribes, refetches history and restores assessment');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:-10000});await delay(500);
+  await activate('实时推送已开启');
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('推送已暂停，当前为暂停前的快照')),'manual pause visible');
+  assert.ok(await page.evaluate('window.__cryptoSockets.every(s=>s.readyState!==WebSocket.OPEN)'));
+  await delay(2000);
+  const pausedLabels=(await labels()).filter(item=>item.label?.startsWith('报价截至'));
+  await delay(2200);
+  assert.deepEqual((await labels()).filter(item=>item.label?.startsWith('报价截至')),pausedLabels);
+  passed('manual pause closes active sockets and stops visible quote updates');
   assert.deepEqual(errors, []);
   await writeFile(path.join(output, 'report.json'), JSON.stringify({status:'passed',
     generatedAt:new Date().toISOString(), releaseFingerprint:renderServiceWorker(files, template).manifest.version,
     checks, quotes: quotes.data, btcCandles: btc.data.candles.length, ethCandles: eth.data.candles.length,
-    errors, requests:[...requests]}, null, 2));
+    errors, streamConnections, streamClosed, pushedFrameCount:streamFrames.length, streamSamples:streamFrames.filter(f=>f.data?.e==='kline').slice(-3), requests:[...requests]}, null, 2));
   console.log(`Verified ${checks.length} scenarios. Screenshots/report: ${output}`);
 } catch (error) {
   if (page) {
@@ -212,7 +260,7 @@ try {
   }
   let preferences;
   try { preferences = await page?.evaluate('timeNestDashboard.readPreferences()'); } catch { /* unavailable */ }
-  await writeFile(path.join(output,'failure.json'),JSON.stringify({error:error.stack,checks,errors,requests:[...requests],preferences,browserLog},null,2));
+  await writeFile(path.join(output,'failure.json'),JSON.stringify({error:error.stack,checks,errors,streamConnections,streamClosed,streamFrames:streamFrames.slice(-6),requests:[...requests],preferences,browserLog},null,2));
   console.error(error.stack); process.exitCode=1;
 } finally {
   for (const ws of sockets) ws.close(); chrome.kill('SIGTERM');

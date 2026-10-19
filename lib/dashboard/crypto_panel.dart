@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'crypto_chart.dart';
+import 'crypto_feed.dart';
+import 'crypto_indicators.dart';
 import 'crypto_market.dart';
 import 'dashboard_client.dart';
 import 'dashboard_widgets.dart';
@@ -15,9 +17,23 @@ class CryptoPanel extends StatefulWidget {
     required this.symbol,
     required this.interval,
     required this.onChanged,
+    this.feed,
+    this.overlays = defaultCryptoOverlays,
+    this.panes = defaultCryptoPanes,
+    this.infoRight = false,
+    this.onChartChanged,
   });
   final DashboardClient client;
   final String symbol, interval;
+  final CryptoFeed? feed;
+  final List<String> overlays, panes;
+  final bool infoRight;
+  final void Function(
+    List<String> overlays,
+    List<String> panes,
+    bool infoRight,
+  )?
+  onChartChanged;
   final void Function(String symbol, String interval) onChanged;
 
   @override
@@ -33,6 +49,17 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   bool _visible = true;
   int _quoteSerial = 0, _candleSerial = 0, _failures = 0;
   Timer? _timer;
+  late CryptoFeed _feed = widget.feed ?? createCryptoFeed();
+  StreamSubscription<Map<String, dynamic>>? _subscription;
+  int _feedSerial = 0;
+  String _streamStatus = 'connecting';
+  int _lastCandleEvent = 0;
+  bool _historySynchronized = false;
+  final Map<int, CryptoCandle> _pendingCandles = {};
+  final Map<String, CryptoQuote> _pushedQuotes = {};
+  late List<String> _overlays = List.of(widget.overlays),
+      _panes = List.of(widget.panes);
+  late bool _infoRight = widget.infoRight;
 
   @override
   void initState() {
@@ -43,20 +70,30 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         state == null ||
         state == AppLifecycleState.resumed ||
         state == AppLifecycleState.inactive;
+    _startFeed();
     _refresh();
   }
 
   @override
   void didUpdateWidget(CryptoPanel old) {
     super.didUpdateWidget(old);
+    if (old.overlays != widget.overlays) _overlays = List.of(widget.overlays);
+    if (old.panes != widget.panes) _panes = List.of(widget.panes);
+    if (old.infoRight != widget.infoRight) _infoRight = widget.infoRight;
     if (old.symbol != widget.symbol ||
         old.interval != widget.interval ||
-        old.client != widget.client) {
+        old.client != widget.client ||
+        old.feed != widget.feed) {
       _candleSerial++;
       _candlesBusy = false;
       _candles = [];
       _candleData = null;
       _candleError = null;
+      _historySynchronized = false;
+      _lastCandleEvent = 0;
+      _pendingCandles.clear();
+      _feed = widget.feed ?? _feed;
+      _startFeed();
       _loadCandles();
     }
   }
@@ -69,14 +106,26 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     if (_visible == visible) return;
     _visible = visible;
     _timer?.cancel();
-    if (visible && _automatic) _refresh(refresh: true);
+    if (visible && _automatic) {
+      _startFeed();
+      _refresh(refresh: true);
+    } else {
+      _stopFeed();
+      setState(() => _streamStatus = 'paused');
+    }
   }
 
   void _schedule() {
     _timer?.cancel();
     if (!mounted || !_visible || !_automatic) return;
     final seconds = math.min(300, 30 * (1 << _failures.clamp(0, 4)));
-    _timer = Timer(Duration(seconds: seconds), () => _refresh(refresh: true));
+    _timer = Timer(Duration(seconds: seconds), () {
+      if (_streamStatus == 'live' && _historySynchronized) {
+        _schedule();
+      } else {
+        _refresh(refresh: true);
+      }
+    });
   }
 
   Future<void> _refresh({bool refresh = false}) async {
@@ -117,7 +166,13 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       if (rows.isEmpty) throw const FormatException('Empty quotes');
       if (!mounted || serial != _quoteSerial) return;
       setState(() {
-        _quotes = rows;
+        _quotes = [
+          for (final quote in rows)
+            if ((_pushedQuotes[quote.symbol]?.closeTime ?? 0) > quote.closeTime)
+              _pushedQuotes[quote.symbol]!
+            else
+              quote,
+        ];
         _quoteData = data;
         _quoteError = null;
       });
@@ -148,15 +203,21 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       final rows = (data.data['candles'] as List)
           .map((r) => CryptoCandle.fromJson(r as Map))
           .toList();
-      if (rows.length > 120) throw const FormatException('Too many candles');
+      if (rows.length > 500) throw const FormatException('Too many candles');
       for (var i = 1; i < rows.length; i++) {
-        if (rows[i].time <= rows[i - 1].time) {
+        if (rows[i].time != rows[i - 1].closeTime + 1) {
           throw const FormatException('Unordered candles');
         }
       }
       if (!mounted || serial != _candleSerial) return;
       setState(() {
         _candles = rows;
+        _historySynchronized = !data.stale;
+        for (final row
+            in _pendingCandles.values.toList()
+              ..sort((a, b) => a.time.compareTo(b.time))) {
+          _mergeCandle(row);
+        }
         _candleData = data;
         _candleError = null;
       });
@@ -171,10 +232,124 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     }
   }
 
+  void _stopFeed() {
+    _feedSerial++;
+    _subscription?.cancel();
+    _subscription = null;
+  }
+
+  void _startFeed() {
+    _stopFeed();
+    if (!_automatic || !_visible) return;
+    _streamStatus = 'connecting';
+    final serial = _feedSerial;
+    _subscription = _feed
+        .subscribe(widget.symbol, widget.interval)
+        .listen(
+          (event) {
+            if (!mounted || serial != _feedSerial) return;
+            try {
+              final type = event['type'];
+              if (type == 'status') {
+                setState(() => _streamStatus = event['status'] as String);
+                if (event['resync'] == true) {
+                  _historySynchronized = false;
+                  _refresh(refresh: true);
+                }
+                return;
+              }
+              final at = event['eventTime'] as int;
+              if (type == 'quote') {
+                final quote = CryptoQuote.fromJson(event['quote'] as Map);
+                if ((_pushedQuotes[quote.symbol]?.closeTime ?? 0) >=
+                    quote.closeTime) {
+                  return;
+                }
+                _pushedQuotes[quote.symbol] = quote;
+                setState(() {
+                  _quotes = [
+                    for (final id in cryptoAssets.keys)
+                      if (id == quote.symbol)
+                        quote
+                      else
+                        ?_quotes.where((q) => q.symbol == id).firstOrNull,
+                  ];
+                  _quoteData = DashboardData(
+                    data: const {},
+                    fetchedAt: DateTime.fromMillisecondsSinceEpoch(at),
+                  );
+                  _quoteError = null;
+                });
+              } else if (type == 'candle' &&
+                  event['symbol'] == widget.symbol &&
+                  event['interval'] == widget.interval) {
+                if (at <= _lastCandleEvent) return;
+                final candle = CryptoCandle.fromJson(event['candle'] as Map);
+                _lastCandleEvent = at;
+                _pendingCandles[candle.time] = candle;
+                while (_pendingCandles.length > 500) {
+                  _pendingCandles.remove(_pendingCandles.keys.first);
+                }
+                final rollover =
+                    _candles.isNotEmpty && candle.time > _candles.last.time;
+                setState(() {
+                  _mergeCandle(candle);
+                  if (_candleData != null) {
+                    _candleData = DashboardData(
+                      data: const {},
+                      fetchedAt: DateTime.fromMillisecondsSinceEpoch(at),
+                    );
+                  }
+                });
+                // Snapshot after a new bar also finalizes the preceding bar if its last frame was missed.
+                if (rollover || !_historySynchronized) {
+                  _historySynchronized = false;
+                  _loadCandles(refresh: true);
+                }
+              }
+            } catch (_) {
+              setState(() => _streamStatus = 'error');
+            }
+          },
+          onError: (_) {
+            if (mounted && serial == _feedSerial) {
+              setState(() => _streamStatus = 'error');
+            }
+          },
+        );
+  }
+
+  void _mergeCandle(CryptoCandle candle) {
+    if (_candles.isEmpty) return; // A push cannot substitute for history.
+    final index = _candles.indexWhere((c) => c.time == candle.time);
+    if (index >= 0) {
+      // Cumulative base volume prevents an older buffered frame replacing a newer snapshot.
+      if (candle.volume < _candles[index].volume) return;
+      _candles = List.of(_candles)..[index] = candle;
+    } else if (candle.time == _candles.last.closeTime + 1) {
+      _candles = [..._candles, candle];
+      if (_candles.length > 500) {
+        _candles = _candles.sublist(_candles.length - 500);
+      }
+    } else if (candle.time > _candles.last.time) {
+      _historySynchronized = false;
+    }
+  }
+
+  void _chartChanged(List<String> overlays, List<String> panes, bool right) {
+    setState(() {
+      _overlays = overlays;
+      _panes = panes;
+      _infoRight = right;
+    });
+    widget.onChartChanged?.call(overlays, panes, right);
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _stopFeed();
     _quoteSerial++;
     _candleSerial++;
     super.dispose();
@@ -226,12 +401,18 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             FilterChip(
-              label: Text(_automatic ? '每 30 秒更新' : '自动更新已暂停'),
+              label: Text(_automatic ? '实时推送已开启' : '实时推送已暂停'),
               selected: _automatic,
               onSelected: (value) {
                 setState(() => _automatic = value);
                 _timer?.cancel();
-                if (value) _refresh(refresh: true);
+                if (value) {
+                  _startFeed();
+                  _refresh(refresh: true);
+                } else {
+                  _stopFeed();
+                  setState(() => _streamStatus = 'paused');
+                }
               },
             ),
             TextButton.icon(
@@ -242,6 +423,20 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               label: Text(_quotesBusy || _candlesBusy ? '更新中' : '刷新行情'),
             ),
           ],
+        ),
+        Text(
+          switch (_streamStatus) {
+            'live' => '● 币安实时推送 · 报价约 1 秒 / K 线约 2 秒',
+            'connected' => '已连接，等待行情推送…',
+            'connecting' => '正在连接币安推送…',
+            'paused' => '推送已暂停，当前为暂停前的快照',
+            _ => '推送暂不可用，正在重连；已启用快照补齐，当前数据可能已过时',
+          },
+          key: const Key('crypto-stream-status'),
+          style: TextStyle(
+            color: _streamStatus == 'live' ? dashboardAccent : dashboardMuted,
+            fontSize: 12,
+          ),
         ),
         _status(_quoteData, _quoteError, _quotesBusy),
         LayoutBuilder(
@@ -307,12 +502,27 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           ],
         ),
         _status(_candleData, _candleError, _candlesBusy),
+        if (_streamStatus == 'live' && !_historySynchronized)
+          const Text(
+            '正在补齐历史 K 线，技术建议暂时暂停。',
+            style: TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
+          ),
         if (_candleData != null)
           CryptoChart(
             key: ValueKey('${widget.symbol}-${widget.interval}'),
             candles: _candles,
             asset: cryptoAssets[widget.symbol]!.$1,
             fetchedAt: _candleData!.fetchedAt,
+            overlays: _overlays,
+            panes: _panes,
+            infoRight: _infoRight,
+            onSettingsChanged: _chartChanged,
+            canAdvise:
+                _automatic &&
+                _visible &&
+                _streamStatus == 'live' &&
+                _historySynchronized &&
+                _candleError == null,
           ),
         const SizedBox(height: 16),
         Wrap(
@@ -333,7 +543,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           ],
         ),
         const Text(
-          '24h 涨跌为滚动 24 小时变化，绿色上涨、红色下跌。这里只展示币安所选现货交易对，不代表全市场市值；USDT 不等同美元。后台暂停更新，断网时可能显示旧数据。',
+          '24h 涨跌为滚动 24 小时变化，绿色上涨、红色下跌。这里只展示币安所选现货交易对，不代表全市场市值；USDT 不等同美元。后台暂停推送，断网时可能显示旧数据。',
           style: TextStyle(color: dashboardMuted, fontSize: 12, height: 1.7),
         ),
       ],

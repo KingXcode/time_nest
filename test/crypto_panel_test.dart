@@ -189,7 +189,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(client.marketCalls, hasLength(6));
-    await tester.tap(find.text('每 30 秒更新'));
+    await tester.tap(find.text('实时推送已开启'));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(minutes: 2));
     expect(client.marketCalls, hasLength(6));

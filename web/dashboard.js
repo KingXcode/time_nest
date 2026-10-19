@@ -104,7 +104,7 @@
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
       case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
-      case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && Array.isArray(data.candles) && data.candles.length <= 120 && data.candles.every((c, i, rows) => validCandle(c) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time > rows[i - 1].time));
+      case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
       case 'news':
         if (data.feed === 'sspai') return Array.isArray(data.stories) && data.stories.length <= 10 && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && s.source === '少数派' && finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY && !!sspaiUrl(s.url));
         return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
@@ -241,9 +241,9 @@
       }
       case 'cryptoCandles': {
         const url = new URL(`https://${binanceHost}/api/v3/klines`);
-        url.search = new URLSearchParams({ symbol: args.symbol, interval: args.interval, limit: '120', timeZone: '0' });
+        url.search = new URLSearchParams({ symbol: args.symbol, interval: args.interval, limit: '500', timeZone: '0' });
         const rows = await jsonFetch(url.href);
-        requireValue(Array.isArray(rows) && rows.length <= 120);
+        requireValue(Array.isArray(rows) && rows.length <= 500);
         const candles = rows.map(r => {
           requireValue(Array.isArray(r) && r.length === 12);
           return { time: r[0], open: decimal(r[1]), high: decimal(r[2]), low: decimal(r[3]), close: decimal(r[4]),
@@ -362,9 +362,95 @@
     inflight.set(key, pending);
     return pending;
   }
+  // Public market-only streams. Browsers handle WebSocket protocol ping/pong.
+  const cryptoSessions = new Map();
+  let cryptoSessionId = 0;
+  function subscribeCrypto(raw, callback) {
+    const args = normalizeArgs('cryptoCandles', JSON.parse(raw));
+    requireValue(typeof callback === 'function');
+    const id = String(++cryptoSessionId);
+    let socket, retryTimer, watchdog, rotation, stopped = false, generation = 0, failures = 0;
+    let opened = false;
+    const selected = args.symbol.toLowerCase();
+    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), `${selected}@kline_${args.interval}`];
+    const emit = event => { if (!stopped) callback(JSON.stringify(event)); };
+    function clear() {
+      generation++;
+      clearTimeout(retryTimer); clearTimeout(watchdog); clearTimeout(rotation);
+      if (socket) { socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null; socket.close(); socket = null; }
+    }
+    function retry() {
+      if (stopped) return;
+      clear();
+      const delay = Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
+      emit({ type:'status', status:'reconnecting', message:'推送中断，正在重连；当前价格可能已过时。' });
+      retryTimer = setTimeout(connect, delay);
+    }
+    function connect() {
+      if (stopped) return;
+      if (globalThis.document?.hidden) { emit({type:'status',status:'paused'}); return; }
+      clear();
+      const epoch = generation, received = new Map(), times = new Map();
+      let live = false;
+      emit({type:'status',status:'connecting'});
+      try { socket = new WebSocket(`wss://data-stream.binance.vision/stream?streams=${streams.join('/')}`); }
+      catch (_) { retry(); return; }
+      const valid = () => !stopped && epoch === generation;
+      function check() {
+        if (!valid()) return;
+        const now = Date.now();
+        if ([`${selected}@ticker`, `${selected}@kline_${args.interval}`].some(key => now - (received.get(key) || start) > 15000)) { retry(); return; }
+        watchdog = setTimeout(check, 5000);
+      }
+      const start = Date.now();
+      watchdog = setTimeout(check, 5000);
+      socket.onopen = () => {
+        if (!valid()) return;
+        emit({type:'status',status:'connected',resync:opened}); opened = true;
+        rotation = setTimeout(retry, 23 * HOUR + 50 * MINUTE);
+      };
+      socket.onmessage = message => {
+        if (!valid()) return;
+        try {
+          const envelope = JSON.parse(message.data), data = envelope.data;
+          if (data?.e === 'serverShutdown' || envelope.e === 'serverShutdown') { retry(); return; }
+          requireValue(streams.includes(envelope.stream) && object(data) && timestamp(data.E) && data.E <= Date.now() + MINUTE && Date.now() - data.E < MINUTE);
+          if (data.E <= (times.get(envelope.stream) || 0)) return;
+          let event;
+          if (data.e === '24hrTicker' && envelope.stream === `${data.s?.toLowerCase()}@ticker`) {
+            const quote = { symbol:data.s, price:decimal(data.c), changePercent:decimal(data.P), high:decimal(data.h), low:decimal(data.l), volume:decimal(data.v), quoteVolume:decimal(data.q), openTime:data.O, closeTime:data.C };
+            requireValue(validQuote(quote));
+            event = {type:'quote',quote,eventTime:data.E};
+          } else if (data.e === 'kline' && data.s === args.symbol && data.k?.s === args.symbol && data.k.i === args.interval && envelope.stream === `${selected}@kline_${args.interval}`) {
+            const k = data.k, candle = {time:k.t,closeTime:k.T,open:decimal(k.o),high:decimal(k.h),low:decimal(k.l),close:decimal(k.c),volume:decimal(k.v),quoteVolume:decimal(k.q)};
+            requireValue(validCandle(candle) && candle.closeTime - candle.time + 1 === cryptoIntervals[args.interval] && typeof k.x === 'boolean');
+            event = {type:'candle',candle,symbol:args.symbol,interval:args.interval,eventTime:data.E,closed:k.x};
+          } else return;
+          times.set(envelope.stream, data.E); received.set(envelope.stream, Date.now());
+          emit(event);
+          if (!live && received.has(`${selected}@ticker`) && received.has(`${selected}@kline_${args.interval}`)) {
+            live = true; failures = 0; emit({type:'status',status:'live'});
+          }
+        } catch (_) { /* Invalid/foreign frames never mutate market state. Watchdog recovers a broken stream. */ }
+      };
+      socket.onclose = socket.onerror = () => { if (valid()) retry(); };
+    }
+    const visibility = () => {
+      if (globalThis.document?.hidden) { clear(); emit({type:'status',status:'paused'}); }
+      else connect();
+    };
+    globalThis.document?.addEventListener('visibilitychange', visibility);
+    cryptoSessions.set(id, () => {
+      stopped = true; clear(); globalThis.document?.removeEventListener('visibilitychange', visibility);
+    });
+    connect();
+    return id;
+  }
+  function unsubscribeCrypto(id) { cryptoSessions.get(id)?.(); cryptoSessions.delete(id); }
   cleanCache();
   cleanLimits();
   globalThis.timeNestDashboard = Object.freeze({
+    subscribeCrypto, unsubscribeCrypto,
     async request(module, rawArgs, refresh = false) {
       return JSON.stringify(await requestData(module, rawArgs, refresh === true));
     },
