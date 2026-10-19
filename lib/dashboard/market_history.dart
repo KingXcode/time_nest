@@ -1,7 +1,7 @@
 import 'market_config.dart';
 
-/// A source must be cleared for public display before implementing this adapter.
-/// There is deliberately no default provider, network client, or sample data.
+/// Public deployments require separate permission for public display. The
+/// localhost personal-research adapter is opt-in; there is no default provider.
 abstract interface class MarketHistorySource {
   Future<MarketHistory> load(String indexId, {bool refresh = false});
 }

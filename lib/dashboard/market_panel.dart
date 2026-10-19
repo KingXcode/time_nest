@@ -4,6 +4,8 @@ import 'dashboard_client.dart';
 import 'dashboard_widgets.dart';
 import 'market_chart.dart';
 import 'market_config.dart';
+import 'local_market_config.dart';
+import 'local_market_panel.dart';
 
 class MarketPanel extends StatefulWidget {
   const MarketPanel({
@@ -26,6 +28,13 @@ class _MarketPanelState extends State<MarketPanel> {
 
   @override
   Widget build(BuildContext context) {
+    if (localMarketResearchBuild) {
+      return LocalMarketPanel(
+        client: widget.client,
+        indexId: widget.indexId,
+        onChanged: widget.onChanged,
+      );
+    }
     final selected = marketIndexFor(widget.indexId);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -7,7 +7,7 @@ import 'dashboard_widgets.dart';
 import 'market_config.dart';
 import 'market_history.dart';
 
-/// Not wired into the live market page until a usable licensed source exists.
+/// Enabled only in the opt-in localhost personal-research build.
 /// No iframe, external script, or data fixture is used by this renderer.
 class NativeMarketHistory extends StatefulWidget {
   const NativeMarketHistory({

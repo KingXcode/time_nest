@@ -45,6 +45,8 @@
 
 ## 开发运行
 
+本机 BaoStock 个人研究版的独立构建、回环服务及数据边界，见 [本机行情运行说明](docs/local-market-research.md)。该模式不用于公开部署。
+
 安装 Git、[FVM](https://fvm.app/documentation/getting-started/installation) 和 Chrome；已有项目可跳过克隆。
 
 ```bash

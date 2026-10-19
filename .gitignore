@@ -5,6 +5,7 @@ build/
 .pub-cache/
 .flutter-plugins-dependencies
 .DS_Store
+__pycache__/
 
 # Local editor configuration
 .idea/

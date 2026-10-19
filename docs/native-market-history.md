@@ -1,13 +1,14 @@
-# Native market chart foundation (not enabled)
+# Native market chart foundation
 
-The live market page remains unchanged. `NativeMarketHistory` is a local Flutter
-renderer awaiting an independently verified, free public-display data source.
-It is **not** a finished replacement and has no built-in provider, network request,
-production fixture, or inferred market score.
+The default public build keeps its existing market page. `NativeMarketHistory`
+is a local Flutter renderer with no built-in provider, production fixture, or
+inferred market score. The explicit localhost-only personal-research build now
+uses the separately tested BaoStock adapter; see [local-market-research.md](local-market-research.md).
+This integration does not authorize public display or redistribution.
 
 ## Integration contract
 
-Implement `MarketHistorySource.load(indexId, refresh:)` only after verifying:
+Before enabling any adapter in a public deployment, verify:
 
 - Permission to display the data publicly, including any caching/redistribution.
 - HTTPS delivery usable by the deployed browser (CORS if a direct API), without
