@@ -1,8 +1,9 @@
 import 'dart:convert';
 
 import 'market_config.dart';
+import 'crypto_market.dart';
 
-const dashboardModules = ['weather', 'releases', 'news', 'market'];
+const dashboardModules = ['weather', 'releases', 'news', 'market', 'crypto'];
 
 // Curated popular projects, not a live star ranking. No authentication required.
 const defaultDashboardRepos = [
@@ -41,6 +42,8 @@ class DashboardPreferences {
     this.feed = 'sspai',
     this.marketIndex = 'shanghai',
     this.marketInterval = 'D',
+    this.cryptoSymbol = 'BTCUSDT',
+    this.cryptoInterval = '1h',
     this.order = dashboardModules,
     this.favorites = const ['weather'],
   });
@@ -50,6 +53,8 @@ class DashboardPreferences {
   String feed;
   String marketIndex;
   String marketInterval;
+  String cryptoSymbol;
+  String cryptoInterval;
   List<String> order;
   List<String> favorites;
 
@@ -98,6 +103,12 @@ class DashboardPreferences {
       if (marketIntervals.containsKey(json['marketInterval'])) {
         prefs.marketInterval = json['marketInterval'] as String;
       }
+      if (cryptoAssets.containsKey(json['cryptoSymbol'])) {
+        prefs.cryptoSymbol = json['cryptoSymbol'] as String;
+      }
+      if (cryptoIntervals.containsKey(json['cryptoInterval'])) {
+        prefs.cryptoInterval = json['cryptoInterval'] as String;
+      }
       if (json['order'] is List) {
         prefs.order = <String>{
           ...(json['order'] as List).whereType<String>().where(
@@ -126,6 +137,8 @@ class DashboardPreferences {
     'feed': feed,
     'marketIndex': marketIndex,
     'marketInterval': marketInterval,
+    'cryptoSymbol': cryptoSymbol,
+    'cryptoInterval': cryptoInterval,
     'order': order,
     'favorites': favorites,
   });

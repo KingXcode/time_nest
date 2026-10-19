@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'crypto_fixture.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,6 +45,11 @@ class FixtureDashboardClient implements DashboardClient {
     if (pending != null) await pending!.future;
     if (fail) throw Exception('网络暂时不可用，请稍后重试。');
     final data = switch (module) {
+      'cryptoQuotes' => cryptoQuotesFixture(),
+      'cryptoCandles' => cryptoCandlesFixture(
+        args['symbol'] as String,
+        args['interval'] as String,
+      ),
       'weather' => {
         'timezone': 'Asia/Shanghai',
         'utcOffsetSeconds': 28800,
@@ -127,6 +134,7 @@ const titles = {
   'releases': '项目更新',
   'news': '科技资讯',
   'market': 'A股行情',
+  'crypto': '数字货币行情',
 };
 final testNow = DateTime.utc(2026, 10, 18, 1);
 
@@ -210,11 +218,20 @@ void main() {
       for (final id in dashboardModules) {
         client.calls.clear();
         await openModule(tester, id);
-        expect(client.calls.toSet(), id == 'market' ? <String>{} : {id});
+        expect(
+          client.calls.toSet(),
+          id == 'market'
+              ? <String>{}
+              : id == 'crypto'
+              ? {'cryptoQuotes', 'cryptoCandles'}
+              : {id},
+        );
         expect(
           client.calls.length,
           id == 'market'
               ? 0
+              : id == 'crypto'
+              ? 2
               : id == 'releases'
               ? 4
               : 1,

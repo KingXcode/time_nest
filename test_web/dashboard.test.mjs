@@ -386,3 +386,90 @@ test('older weather cache remains honest without invented actual temperature', a
   assert.equal(result.data.hours[0].temperature, undefined);
   assert.equal(result.data.hours[0].feels, 22.1);
 });
+
+// Synthetic Binance contracts; live-provider verification is separate.
+const symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
+const binanceQuotes = () => symbols.map(symbol => ({ symbol, lastPrice: '100.25',
+  priceChangePercent: '-2.5', highPrice: '110', lowPrice: '90', volume: '123',
+  quoteVolume: '12330.75', openTime: START - day, closeTime: START }));
+const binanceCandles = () => [0, 1, 2].map(i => [START - (3 - i) * hour,
+  '100', '110', '90', '101', '12', START - (2 - i) * hour - 1, '1212', 10, '6', '606', '0']);
+
+test('Binance public quotes and candles preserve values, identity and UTC times', async () => {
+  const h = harness(url => response(url.includes('/ticker/') ? binanceQuotes() : binanceCandles()));
+  const quotes = await h.request('cryptoQuotes', {});
+  assert.equal(quotes.data.quotes.length, 6);
+  assert.equal(quotes.data.quotes[0].price, 100.25);
+  assert.equal(quotes.data.quotes[0].changePercent, -2.5);
+  assert.equal(quotes.data.quotes[0].closeTime, START);
+  const result = await h.request('cryptoCandles', { symbol: 'ETHUSDT', interval: '1h' });
+  assert.equal(result.data.symbol, 'ETHUSDT');
+  assert.equal(result.data.interval, '1h');
+  assert.equal(result.data.candles[0].time, START - 3 * hour);
+  assert.equal(result.data.candles[0].quoteVolume, 1212);
+  const quoteUrl = new URL(h.calls[0].url), candleUrl = new URL(h.calls[1].url);
+  assert.deepEqual(JSON.parse(quoteUrl.searchParams.get('symbols')), symbols);
+  assert.equal(quoteUrl.hostname, 'data-api.binance.vision');
+  assert.equal(candleUrl.searchParams.get('limit'), '120');
+  assert.equal(candleUrl.searchParams.get('timeZone'), '0');
+  assert.equal(h.calls[0].init.credentials, 'omit');
+  assert.equal(Object.keys(h.calls[0].init.headers).some(k => /key|authorization/i.test(k)), false);
+});
+
+test('Binance restricts symbols and intervals before making network requests', async () => {
+  const h = harness(() => { throw new Error('must not fetch'); });
+  for (const args of [{ symbol: 'BTCUSDT', interval: '__proto__' },
+    { symbol: 'https://evil.test', interval: '1h' }, { symbol: 'BTCUSDT', interval: '1s' }]) {
+    await assert.rejects(h.request('cryptoCandles', args), /请选择/);
+  }
+  assert.equal(h.calls.length, 0);
+});
+
+test('Binance rejects invalid numbers, OHLC, duplicate times and malformed arrays', async () => {
+  for (const mutate of [rows => { rows[0][2] = '1'; }, rows => { rows[0][5] = '-1'; },
+    rows => { rows[0][4] = 'NaN'; }, rows => { rows[0][1] = ''; },
+    rows => { rows[1] = rows[0]; }, rows => { rows[0][6] += 1; }]) {
+    const rows = binanceCandles(); mutate(rows);
+    const h = harness(() => response(rows));
+    await assert.rejects(h.request('cryptoCandles', { symbol: 'BTCUSDT', interval: '1h' }), /格式异常/);
+  }
+  const quotes = binanceQuotes(); quotes[1].symbol = 'BTCUSDT';
+  await assert.rejects(harness(() => response(quotes)).request('cryptoQuotes', {}), /格式异常/);
+  const empty = await harness(() => response([])).request('cryptoCandles', { symbol: 'BTCUSDT', interval: '1h' });
+  assert.deepEqual(empty.data.candles, []);
+});
+
+test('Binance stale fallback preserves original fetch time and expires after ten minutes', async () => {
+  let failed = false;
+  const h = harness(() => failed ? response({}, 500) : response(binanceQuotes()));
+  const first = await h.request('cryptoQuotes', {});
+  await h.request('cryptoQuotes', {}); assert.equal(h.calls.length, 1);
+  failed = true; h.advance(30000);
+  const stale = await h.request('cryptoQuotes', {}, true);
+  assert.equal(stale.stale, true); assert.equal(stale.fetchedAt, first.fetchedAt);
+  h.advance(11 * minute);
+  await assert.rejects(h.request('cryptoQuotes', {}, true), /HTTP 500/);
+});
+
+test('Binance rate-limit and ban responses suppress requests across both modules', async () => {
+  for (const status of [429, 418]) {
+    const shared = storage();
+    const h = harness(() => response({}, status, { 'retry-after': '180' }), { storage: shared });
+    await assert.rejects(h.request('cryptoQuotes', {}), /币安行情请求受限/);
+    await assert.rejects(h.request('cryptoCandles', { symbol: 'BTCUSDT', interval: '1h' }), /币安行情请求受限/);
+    assert.equal(h.calls.length, 1);
+    const reopened = harness(() => response(binanceQuotes()), { storage: shared, now: START + minute });
+    await assert.rejects(reopened.request('cryptoQuotes', {}), /币安行情请求受限/);
+    assert.equal(reopened.calls.length, 0);
+    reopened.advance(3 * minute);
+    assert.equal((await reopened.request('cryptoQuotes', {})).data.quotes.length, 6);
+  }
+});
+
+test('Binance regional errors are explicit and quote failure does not block candles', async () => {
+  const blocked = harness(() => response({}, 451));
+  await assert.rejects(blocked.request('cryptoQuotes', {}), /当前网络或地区不可用/);
+  const h = harness(url => response(url.includes('/ticker/') ? {} : binanceCandles(), url.includes('/ticker/') ? 500 : 200));
+  await assert.rejects(h.request('cryptoQuotes', {}));
+  assert.equal((await h.request('cryptoCandles', { symbol: 'BTCUSDT', interval: '1h' })).data.candles.length, 3);
+});

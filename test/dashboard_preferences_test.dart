@@ -15,7 +15,7 @@ void main() {
     expect(read.repos, defaultDashboardRepos);
     expect(read.repos, hasLength(24));
     expect(read.feed, 'sspai');
-    expect(read.order, ['weather', 'releases', 'news', 'market']);
+    expect(read.order, ['weather', 'releases', 'news', 'market', 'crypto']);
     expect(read.favorites, ['weather']);
   });
 
@@ -76,7 +76,7 @@ void main() {
     expect(read.city?['name'], '上海');
     expect(read.repos, ['dart-lang/sdk']);
     expect(read.feed, 'show');
-    expect(read.order, ['news', 'market', 'weather', 'releases']);
+    expect(read.order, ['news', 'market', 'weather', 'releases', 'crypto']);
     expect(read.favorites, ['news']);
   });
 
@@ -99,7 +99,7 @@ void main() {
           'favorites': ['holidays', 'fx', 'news', 'weather'],
         }),
       );
-      expect(read.order, ['news', 'weather', 'releases', 'market']);
+      expect(read.order, ['news', 'weather', 'releases', 'market', 'crypto']);
       expect(read.favorites, ['news', 'weather']);
       expect(read.city?['name'], '上海');
       expect(read.repos, ['owner/project']);

@@ -1,5 +1,6 @@
 // Public read-only APIs. No credentials, location permission or tracking.
 // Provider documentation: open-meteo.com/en/docs,
+// developers.binance.com/docs/binance-spot-api-docs/faqs/market_data_only,
 // github.com/HackerNews/API,
 // docs.github.com/en/rest/releases/releases, sspai.com/post/24194 (official RSS).
 (() => {
@@ -9,10 +10,15 @@
   const LIMIT_KEY = 'shike.dashboard.limits.v1';
   const PREF_KEY = 'shike.dashboard.preferences.v1';
   const MAX_CACHE_ENTRIES = 80, MAX_CACHE_BYTES = 900_000;
+  const cryptoSymbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
+  const cryptoIntervals = { '15m': 900000, '1h': 3600000, '4h': 14400000, '1d': 86400000, '1w': 604800000 };
+  const binanceHost = 'data-api.binance.vision';
   const settings = {
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
     releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
+    cryptoQuotes: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币报价' },
+    cryptoCandles: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币 K 线' },
     news: { ttl: 10 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '科技资讯' },
   };
   const inflight = new Map(), attempts = new Map(), itemCache = new Map();
@@ -35,6 +41,23 @@
   }
   function finite(value) { return typeof value === 'number' && Number.isFinite(value); }
   function text(value, max = 500) { return typeof value === 'string' ? value.slice(0, max) : ''; }
+  function decimal(value) {
+    requireValue(typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(value));
+    const number = Number(value); requireValue(finite(number)); return number;
+  }
+  function timestamp(value) { return Number.isSafeInteger(value) && value > 0 && value < 8640000000000000; }
+  function validQuote(q) {
+    return object(q) && cryptoSymbols.includes(q.symbol) && ['price', 'high', 'low'].every(k => finite(q[k]) && q[k] > 0)
+      && q.high >= q.price && q.low <= q.price && finite(q.changePercent) && q.changePercent >= -100
+      && ['volume', 'quoteVolume'].every(k => finite(q[k]) && q[k] >= 0)
+      && timestamp(q.openTime) && timestamp(q.closeTime) && q.closeTime > q.openTime && q.closeTime <= Date.now() + MINUTE;
+  }
+  function validCandle(c) {
+    return object(c) && timestamp(c.time) && timestamp(c.closeTime) && c.closeTime >= c.time && c.time <= Date.now() + MINUTE
+      && ['open', 'high', 'low', 'close'].every(k => finite(c[k]) && c[k] > 0)
+      && c.high >= Math.max(c.open, c.close) && c.low <= Math.min(c.open, c.close)
+      && ['volume', 'quoteVolume'].every(k => finite(c[k]) && c[k] >= 0);
+  }
   function safeUrl(value) {
     if (typeof value !== 'string' || value.length > 4096 || /[\u0000-\u001f\u007f]/.test(value)) return '';
     try {
@@ -65,6 +88,10 @@
         requireValue(/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?\/[a-zA-Z0-9_.-]{1,100}$/.test(repo) && !['.', '..'].includes(repo.split('/')[1]), '仓库格式应为 owner/repo，例如 flutter/flutter。');
         return { repo: repo.toLowerCase() };
       }
+      case 'cryptoQuotes': return {};
+      case 'cryptoCandles':
+        requireValue(cryptoSymbols.includes(args.symbol) && Object.hasOwn(cryptoIntervals, args.interval), '请选择支持的交易对与 K 线周期。');
+        return { symbol: args.symbol, interval: args.interval };
       case 'news':
         requireValue(['sspai', 'top', 'new', 'show'].includes(args.feed), '请选择中文或 HN 资讯分类。');
         return { feed: args.feed };
@@ -76,6 +103,8 @@
       case 'searchCities': return Array.isArray(data.cities) && data.cities.length <= 10 && data.cities.every(c => object(c) && typeof c.name === 'string' && finite(c.latitude) && Math.abs(c.latitude) <= 90 && finite(c.longitude) && Math.abs(c.longitude) <= 180);
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
+      case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
+      case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && Array.isArray(data.candles) && data.candles.length <= 120 && data.candles.every((c, i, rows) => validCandle(c) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time > rows[i - 1].time));
       case 'news':
         if (data.feed === 'sspai') return Array.isArray(data.stories) && data.stories.length <= 10 && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && s.source === '少数派' && finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY && !!sspaiUrl(s.url));
         return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
@@ -86,7 +115,7 @@
     const now = Date.now();
     const entries = Object.entries(cache).filter(([key, entry]) => {
       const module = key.split(':', 1)[0], config = settings[module];
-      return config && object(entry) && finite(entry.at) && entry.at <= now + 5 * MINUTE && now - entry.at <= config.retain && validData(module, entry.data) && (module !== 'news' || key === `news:${JSON.stringify({ feed: entry.data.feed })}`);
+      return config && object(entry) && finite(entry.at) && entry.at <= now + 5 * MINUTE && now - entry.at <= config.retain && validData(module, entry.data) && (module !== 'news' || key === `news:${JSON.stringify({ feed: entry.data.feed })}`) && (module !== 'cryptoCandles' || key === `cryptoCandles:${JSON.stringify({ symbol: entry.data.symbol, interval: entry.data.interval })}`);
     }).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_CACHE_ENTRIES);
     cache = Object.fromEntries(entries);
     while (JSON.stringify(cache).length > MAX_CACHE_BYTES && entries.length) {
@@ -110,15 +139,15 @@
   }
   function cleanLimits() {
     const now = Date.now();
-    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com'].includes(key) && finite(value) && value > now && value <= now + 2 * DAY));
+    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com', binanceHost].includes(key) && finite(value) && value > now && value <= now + (key === binanceHost ? 3 : 2) * DAY));
     saveObject(LIMIT_KEY, limits);
   }
   function blockedMessage(host, until) {
     const minutes = Math.max(1, Math.ceil((until - Date.now()) / MINUTE));
-    return `${host === 'api.github.com' ? 'GitHub' : '数据服务'}请求受限，请约 ${minutes} 分钟后重试。`;
+    return `${host === 'api.github.com' ? 'GitHub' : host === binanceHost ? '币安行情' : '数据服务'}请求受限，请约 ${minutes} 分钟后重试。`;
   }
   function blockHost(host, response) {
-    let until = Date.now() + MINUTE;
+    let until = Date.now() + (host === binanceHost && response.status === 418 && !response.headers.get('retry-after') ? 3 * DAY : MINUTE);
     const retry = response.headers.get('retry-after');
     if (retry) {
       const seconds = Number(retry);
@@ -128,7 +157,7 @@
     const reset = Number(response.headers.get('x-ratelimit-reset'));
     if (finite(reset) && reset > 0) until = Math.max(until, reset * 1000 + 1000);
     else if (!retry && host === 'api.github.com') until = Date.now() + 15 * MINUTE;
-    limits[host] = Math.min(until, Date.now() + DAY);
+    limits[host] = Math.min(until, Date.now() + (host === binanceHost ? 3 : 1) * DAY);
     cleanLimits();
     return new Error(blockedMessage(host, limits[host]));
   }
@@ -161,8 +190,12 @@
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
       const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', headers: { Accept: host === 'api.github.com' ? 'application/vnd.github+json' : xml ? 'application/rss+xml, application/xml, text/xml' : 'application/json' } });
-      if (response.status === 429 || (host === 'api.github.com' && response.status === 403)) throw blockHost(host, response);
+      if (response.status === 429 || (host === binanceHost && response.status === 418) || (host === 'api.github.com' && response.status === 403)) throw blockHost(host, response);
       if (!response.ok) {
+        if (host === binanceHost && [403, 451].includes(response.status)) {
+          limits[host] = Date.now() + 10 * MINUTE; cleanLimits();
+          throw new Error('币安行情在当前网络或地区不可用，请稍后重试或打开官方来源。');
+        }
         if (host === 'api.github.com' && response.status === 404) throw new Error('找不到公开仓库，请检查 owner/repo；私有仓库不受支持。');
         throw new Error(`数据服务暂时不可用（HTTP ${response.status}），请稍后重试。`);
       }
@@ -192,6 +225,32 @@
   }
   async function loadSource(module, args) {
     switch (module) {
+      case 'cryptoQuotes': {
+        const url = new URL(`https://${binanceHost}/api/v3/ticker/24hr`);
+        url.search = new URLSearchParams({ symbols: JSON.stringify(cryptoSymbols), type: 'FULL' });
+        const rows = await jsonFetch(url.href);
+        requireValue(Array.isArray(rows) && rows.length > 0 && rows.length <= cryptoSymbols.length);
+        const quotes = rows.map(r => {
+          requireValue(object(r));
+          return { symbol: r.symbol, price: decimal(r.lastPrice), changePercent: decimal(r.priceChangePercent),
+            high: decimal(r.highPrice), low: decimal(r.lowPrice), volume: decimal(r.volume), quoteVolume: decimal(r.quoteVolume),
+            openTime: r.openTime, closeTime: r.closeTime };
+        });
+        quotes.sort((a, b) => cryptoSymbols.indexOf(a.symbol) - cryptoSymbols.indexOf(b.symbol));
+        return { data: { quotes }, ...(quotes.length < cryptoSymbols.length ? { warning: '部分交易对暂未返回报价。' } : {}) };
+      }
+      case 'cryptoCandles': {
+        const url = new URL(`https://${binanceHost}/api/v3/klines`);
+        url.search = new URLSearchParams({ symbol: args.symbol, interval: args.interval, limit: '120', timeZone: '0' });
+        const rows = await jsonFetch(url.href);
+        requireValue(Array.isArray(rows) && rows.length <= 120);
+        const candles = rows.map(r => {
+          requireValue(Array.isArray(r) && r.length === 12);
+          return { time: r[0], open: decimal(r[1]), high: decimal(r[2]), low: decimal(r[3]), close: decimal(r[4]),
+            volume: decimal(r[5]), closeTime: r[6], quoteVolume: decimal(r[7]) };
+        });
+        return { data: { symbol: args.symbol, interval: args.interval, candles } };
+      }
       case 'searchCities': {
         const url = new URL('https://geocoding-api.open-meteo.com/v1/search');
         url.search = new URLSearchParams({ name: args.query, count: '8', language: 'zh', format: 'json' });
