@@ -374,7 +374,7 @@
     let socket, retryTimer, watchdog, rotation, stopped = false, generation = 0, failures = 0;
     let opened = false;
     const selected = args.symbol.toLowerCase();
-    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), `${selected}@kline_${args.interval}`];
+    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), `${selected}@depth20`, `${selected}@kline_${args.interval}`];
     const emit = event => { if (!stopped) callback(JSON.stringify(event)); };
     function clear() {
       generation++;
@@ -401,7 +401,7 @@
       function check() {
         if (!valid()) return;
         const now = Date.now();
-        if ([`${selected}@ticker`, `${selected}@kline_${args.interval}`].some(key => now - (received.get(key) || start) > 15000)) { retry(); return; }
+        if ([`${selected}@ticker`, `${selected}@kline_${args.interval}`, `${selected}@depth20`].some(key => now - (received.get(key) || start) > 15000)) { retry(); return; }
         watchdog = setTimeout(check, 5000);
       }
       const start = Date.now();
@@ -416,6 +416,27 @@
         try {
           const envelope = JSON.parse(message.data), data = envelope.data;
           if (data?.e === 'serverShutdown' || envelope.e === 'serverShutdown') { retry(); return; }
+          if (envelope.stream === `${selected}@depth20`) {
+            requireValue(object(data) && Number.isSafeInteger(data.lastUpdateId) && data.lastUpdateId >= 0);
+            const side = (rows, bid) => {
+              requireValue(Array.isArray(rows) && rows.length <= 20);
+              return rows.map((row, i) => {
+                requireValue(Array.isArray(row) && row.length === 2);
+                const price = decimal(row[0]), quantity = decimal(row[1]);
+                requireValue(price > 0 && quantity > 0 && finite(price * quantity));
+                if (i) requireValue(bid ? price < decimal(rows[i-1][0]) : price > decimal(rows[i-1][0]));
+                return {price, quantity};
+              });
+            };
+            const bids = side(data.bids, true), asks = side(data.asks, false);
+            requireValue(!bids.length || !asks.length || bids[0].price < asks[0].price);
+            if (data.lastUpdateId < (times.get(envelope.stream) ?? -1)) return;
+            const digits = Math.max(0, ...[...data.bids, ...data.asks].map(row => (row[0].replace(/0+$/, '').split('.')[1] || '').length));
+            requireValue(digits <= 8);
+            times.set(envelope.stream, data.lastUpdateId); received.set(envelope.stream, Date.now());
+            emit({type:'depth',symbol:args.symbol,eventTime:Date.now(),book:{lastUpdateId:data.lastUpdateId,bids,asks,priceDecimals:digits}});
+            return;
+          }
           requireValue(streams.includes(envelope.stream) && object(data) && timestamp(data.E) && data.E <= Date.now() + MINUTE && Date.now() - data.E < MINUTE);
           if (data.E <= (times.get(envelope.stream) || 0)) return;
           let event;

@@ -236,6 +236,38 @@ try {
   await delay(2200);
   assert.ok(streamFrames.length>streamStart, 'pushes continue without a manual refresh');
   passed('actual WebSocket ticker and kline pushes continue and Flutter reports live');
+  await waitFor(()=>streamFrames.filter(f=>f.stream?.endsWith('@depth20') && Number.isSafeInteger(f.data?.lastUpdateId)).length>=2,'multiple real complete depth snapshots');
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('实时 · 20档')),'live depth UI');
+  assert.ok(streamConnections.some(s=>s.url.includes('btcusdt@depth20')));
+  passed('actual Binance depth20 stream supplies live complete order-book snapshots on the shared socket');
+  async function bookGeometry() {
+    return page.evaluate(`(() => {
+      const nodes=(${deepQuery})('flt-semantics, [aria-label]');
+      const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix));if(!e)throw new Error('Missing geometry '+prefix);const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
+      return {plot:rect('K 线主图，'),book:rect('订单簿 BTC'),lastPane:rect('RSI 相对强弱 副图，'),assessment:rect('技术指标 · 买入参考')};
+    })()`);
+  }
+  let bookBoxes=await bookGeometry();
+  assert.ok(bookBoxes.book.x>=bookBoxes.plot.right,'desktop book is to the right of the chart');
+  await page.screenshot('19-orderbook-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});await delay(500);
+  bookBoxes=await bookGeometry();
+  assert.ok(bookBoxes.book.y>bookBoxes.lastPane.bottom && bookBoxes.book.y<bookBoxes.assessment.y,'portrait book is below subcharts and above assessment');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:bookBoxes.book.y-100});await delay(500);
+  await page.screenshot('20-orderbook-portrait.png');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:844,height:390,deviceScaleFactor:1,mobile:false});await delay(500);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:200,deltaX:0,deltaY:-10000});await delay(500);
+  bookBoxes=await bookGeometry();assert.ok(bookBoxes.book.x>=bookBoxes.plot.right,'phone landscape book is to the right');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:200,deltaX:0,deltaY:bookBoxes.plot.y-150});await delay(500);
+  await page.screenshot('21-orderbook-landscape.png');
+  await activate('只看买盘');
+  assert.ok(!(await labels()).some(e=>e.label?.startsWith('卖盘 ')),'single bid view hides asks');
+  await activate('显示买卖盘');await activate('显示档位');await activate('20 档');
+  assert.ok((await labels()).some(e=>e.label?.startsWith('卖盘 20 档')),'twenty levels can be shown in landscape');
+  passed('order-book side filters and level menu work in the live landscape browser');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});await delay(500);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(500);
+  passed('order book sits right on desktop and landscape phones and below charts in portrait');
   await page.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
   await delay(500);
   const chartGeometry=await page.evaluate(`(() => {

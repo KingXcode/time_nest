@@ -41,6 +41,7 @@ class CryptoChart extends StatefulWidget {
     this.paneHeights = const {},
     this.onPaneHeightsChanged,
     this.onSettingsChanged,
+    this.afterCharts,
     this.canAdvise = false,
     this.onLoadOlder,
     this.loadingOlder = false,
@@ -52,6 +53,7 @@ class CryptoChart extends StatefulWidget {
   final DateTime fetchedAt;
   final List<String> overlays, panes;
   final bool infoRight, canAdvise;
+  final Widget? afterCharts;
   final Map<String, double> paneHeights;
   final ValueChanged<Map<String, double>>? onPaneHeightsChanged;
   final void Function(List<String>, List<String>, bool)? onSettingsChanged;
@@ -787,6 +789,7 @@ class _CryptoChartState extends State<CryptoChart> {
           '左右拖动 · 双指缩放 · 点击查看十字线后可滚轮缩放，再次点击关闭 · 副图边缘拖动调高。UTC+8。',
           style: TextStyle(color: dashboardMuted, fontSize: 11, height: 1.4),
         ),
+        ?widget.afterCharts,
         const SizedBox(height: 14),
         _assessmentPanel(),
       ],

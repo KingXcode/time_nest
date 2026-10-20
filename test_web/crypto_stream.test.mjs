@@ -27,10 +27,10 @@ function harness() {
 function ticker(time=START,symbol='BTCUSDT',price='100') {return {stream:`${symbol.toLowerCase()}@ticker`,data:{e:'24hrTicker',E:time,s:symbol,c:price,P:'1.2',h:'110',l:'90',v:'20',q:'2000',O:time-86400000,C:time}};}
 function candle(time=START,symbol='BTCUSDT',interval='1h') {return {stream:`${symbol.toLowerCase()}@kline_${interval}`,data:{e:'kline',E:time,s:symbol,k:{s:symbol,i:interval,t:START,T:START+3599999,o:'100',h:'110',l:'90',c:'101',v:'10',q:'1010',x:false}}};}
 
-test('market-only combined socket carries six tickers and selected UTC kline; live requires both',()=>{
+test('market-only combined socket carries six tickers and selected UTC kline and depth; price live requires ticker and kline',()=>{
   const h=harness(),id=h.start(),ws=h.sockets[0];
   assert.equal(new URL(ws.url).hostname,'data-stream.binance.vision');
-  assert.equal(new URL(ws.url).searchParams.get('streams').split('/').length,7);
+  assert.equal(new URL(ws.url).searchParams.get('streams').split('/').length,8);
   ws.open();ws.frame(ticker());
   assert.equal(h.events.some(e=>e.status==='live'),false);
   ws.frame(candle());
@@ -80,4 +80,42 @@ test('invalid choices fail before dialing; server shutdown triggers resubscribe'
   const h=harness();assert.throws(()=>h.start('BTCUSDT','__proto__'));assert.equal(h.sockets.length,0);
   const id=h.start();h.sockets[0].open();h.sockets[0].frame({e:'serverShutdown'});
   assert.equal(h.events.at(-1).status,'reconnecting');h.advance(1000);assert.equal(h.sockets.length,2);h.api.unsubscribeCrypto(id);
+});
+
+function depth(id=10, symbol='BTCUSDT') {
+  return {stream:`${symbol.toLowerCase()}@depth20`,data:{lastUpdateId:id,
+    bids:[['100.00','2.00000000'],['99.99','1.2']],asks:[['100.01','3.5'],['100.02','0.01']]}};
+}
+test('depth snapshots without event timestamps are atomic, validated and isolated by stream and update id',()=>{
+  const h=harness(),id=h.start(),ws=h.sockets[0];ws.open();
+  assert.ok(new URL(ws.url).searchParams.get('streams').includes('btcusdt@depth20'));
+  ws.frame(depth());const event=h.events.at(-1);
+  assert.equal(event.type,'depth');assert.equal(event.symbol,'BTCUSDT');assert.equal(event.book.priceDecimals,2);
+  assert.equal(event.book.bids[0].quantity,2);assert.equal(event.book.asks[0].price,100.01);
+  const before=h.events.length;
+  ws.frame(depth(9));ws.frame(depth(12,'ETHUSDT'));
+  const crossed=depth(11);crossed.data.bids[0][0]='101';ws.frame(crossed);
+  const unsorted=depth(11);unsorted.data.asks.reverse();ws.frame(unsorted);
+  const invalid=depth(11);invalid.data.bids[0][1]='NaN';ws.frame(invalid);
+  const zero=depth(11);zero.data.asks[0][1]='0';ws.frame(zero);
+  const duplicate=depth(11);duplicate.data.bids[1][0]='100.00';ws.frame(duplicate);
+  assert.equal(h.events.length,before);
+  h.advance(1000);ws.frame(depth(10));assert.equal(h.events.at(-1).eventTime,h.now(),'equal update IDs are valid fresh complete snapshots');
+  const obsolete=ws.onmessage;ws.onerror();h.advance(1000);h.sockets[1].open();h.sockets[1].frame(depth(1));
+  assert.equal(h.events.at(-1).book.lastUpdateId,1,'a new connection starts a fresh depth sequence');
+  const count=h.events.length;obsolete({data:JSON.stringify(depth(100))});assert.equal(h.events.length,count);
+  h.api.unsubscribeCrypto(id);
+});
+test('silent depth is detected while ticker and candles keep flowing; pause stops all streams',()=>{
+  const h=harness(),id=h.start(),ws=h.sockets[0];ws.open();
+  for(let i=0;i<4;i++){h.advance(5000);if(!ws.closed){ws.frame(ticker(h.now()));ws.frame(candle(h.now()));}}
+  assert.equal(ws.closed,true);assert.equal(h.events.at(-1).status,'reconnecting');
+  h.api.unsubscribeCrypto(id);assert.equal(h.timers.size,0);
+});
+
+test('fresh complete depth snapshots keep the shared connection healthy without timestamp fields',()=>{
+  const h=harness(),id=h.start(),ws=h.sockets[0];ws.open();
+  for(let i=0;i<7;i++) {h.advance(3000);ws.frame(ticker(h.now()));ws.frame(candle(h.now()));ws.frame(depth(i+10));}
+  assert.notEqual(ws.closed,true);assert.equal(h.sockets.length,1);assert.equal(h.events.at(-1).type,'depth');
+  h.visibility(true);assert.equal(ws.closed,true);assert.equal(h.timers.size,0);h.api.unsubscribeCrypto(id);
 });
