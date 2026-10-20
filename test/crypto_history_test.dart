@@ -194,14 +194,39 @@ void main() {
         await tester.pumpAndSettle();
         CryptoTimeline timeline() =>
             tester.widget<CryptoTimeline>(find.byType(CryptoTimeline));
+        bool horizontal(String key) {
+          final dynamic painter = tester
+              .widget<CustomPaint>(
+                find.descendant(
+                  of: find.byKey(Key(key)),
+                  matching: find.byType(CustomPaint),
+                ),
+              )
+              .painter;
+          return painter.crosshair && painter.horizontalCrosshair;
+        }
+
         expect(timeline().count, 200);
         expect(timeline().start, 300);
+        expect(
+          tester.getSize(find.byKey(const Key('crypto-info-window'))).width,
+          lessThanOrEqualTo(164),
+        );
+        final load = find.byKey(const Key('crypto-load-older'));
+        expect(tester.widget<IconButton>(load).tooltip, '加载更多历史');
+        expect(tester.getSize(load).width, 32);
+        expect(
+          find.descendant(of: load, matching: find.byType(Text)),
+          findsNothing,
+        );
         final plot = find.byKey(const Key('crypto-price-plot'));
         await tester.ensureVisible(plot);
         final rect = tester.getRect(plot);
         final finger = await tester.startGesture(rect.center, pointer: 1);
         await tester.pump();
         expect(find.byKey(const Key('crypto-crosshair')), findsOneWidget);
+        expect(horizontal('crypto-price-plot'), isTrue);
+        expect(horizontal('crypto-pane-vol'), isFalse);
         final selected = tester
             .widget<Text>(find.byKey(const Key('crypto-candle-time')))
             .data;
@@ -215,18 +240,27 @@ void main() {
         await tester.tapAt(rect.center);
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('crypto-crosshair')), findsNothing);
+        final pane = find.byKey(const Key('crypto-pane-vol'));
+        await tester.ensureVisible(pane);
+        await tester.tapAt(tester.getCenter(pane));
+        await tester.pumpAndSettle();
+        expect(horizontal('crypto-pane-vol'), isTrue);
+        expect(horizontal('crypto-price-plot'), isFalse);
+        // Return the main plot to the same scroll position before pinching.
+        await tester.ensureVisible(plot);
+        final pinchCenter = tester.getRect(plot).center;
         final one = await tester.startGesture(
-          rect.center - const Offset(60, 0),
+          pinchCenter - const Offset(60, 0),
           pointer: 2,
         );
         final two = await tester.startGesture(
-          rect.center + const Offset(60, 0),
+          pinchCenter + const Offset(60, 0),
           pointer: 3,
         );
         await tester.pump();
         for (var i = 1; i <= 5; i++) {
-          await one.moveTo(rect.center - Offset(60 + i * 14, 0));
-          await two.moveTo(rect.center + Offset(60 + i * 14, 0));
+          await one.moveTo(pinchCenter - Offset(60 + i * 14, 0));
+          await two.moveTo(pinchCenter + Offset(60 + i * 14, 0));
           await tester.pump();
         }
         await one.up();
@@ -304,7 +338,7 @@ void main() {
       await press(tester, 'crypto-load-older');
       expect(chart().hasMoreHistory, isFalse);
       final calls = client.olderCalls.length;
-      expect(find.text('已到最早数据'), findsOneWidget);
+      expect(find.byTooltip('已到最早数据'), findsOneWidget);
       await press(tester, 'crypto-pan-older');
       expect(client.olderCalls.length, calls);
       await tester.pumpWidget(const SizedBox());
@@ -322,7 +356,7 @@ void main() {
           tester.widget<CryptoChart>(find.byType(CryptoChart));
       await press(tester, 'crypto-load-older');
       expect(chart().candles, hasLength(500));
-      expect(find.text('重试加载历史'), findsOneWidget);
+      expect(find.byTooltip('重试加载历史'), findsOneWidget);
       expect(chart().hasMoreHistory, isTrue);
       client.historyFailure = false;
       for (final invalid in [

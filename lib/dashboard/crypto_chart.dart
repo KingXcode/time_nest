@@ -60,6 +60,7 @@ class _CryptoChartState extends State<CryptoChart> {
   bool _dragging = false, _crosshair = false, _tapHadCrosshair = false;
   int _visibleCount = 200, _scaleCount = 200, _scaleStart = 0;
   double _scaleAnchor = .5, _pointerY = .5;
+  String? _pointerPane;
 
   void _range(int start, int count) {
     final rows = widget.candles;
@@ -282,9 +283,10 @@ class _CryptoChartState extends State<CryptoChart> {
                 .floor()
                 .clamp(0, rows.length - 1),
           );
-          if (study == null) {
-            _pointerY = (pos.dy / cryptoPriceHeight).clamp(0.0, 1.0);
-          }
+          _pointerPane = study?.id;
+          _pointerY =
+              (pos.dy / (study == null ? cryptoPriceHeight : cryptoPaneHeight))
+                  .clamp(0.0, 1.0);
         }
 
         return MouseRegion(
@@ -359,6 +361,7 @@ class _CryptoChartState extends State<CryptoChart> {
                           price: study == null,
                           crosshair: _crosshair,
                           pointerY: _pointerY,
+                          horizontalCrosshair: _pointerPane == study?.id,
                         ),
                       ),
                       if (study == null)
@@ -370,10 +373,10 @@ class _CryptoChartState extends State<CryptoChart> {
                             child: Container(
                               key: const Key('crypto-info-window'),
                               width: math.min(
-                                202,
-                                math.max(146, box.maxWidth * .4),
+                                164,
+                                math.max(144, box.maxWidth * .36),
                               ),
-                              padding: const EdgeInsets.all(8),
+                              padding: const EdgeInsets.all(6),
                               decoration: BoxDecoration(
                                 color: dashboardSurface.withValues(alpha: .94),
                                 border: Border.all(color: dashboardBorder),
@@ -399,7 +402,7 @@ class _CryptoChartState extends State<CryptoChart> {
                                     const SizedBox(height: 4),
                                     for (final entry in <String, String>{
                                       '数值': cryptoPrice(
-                                        _crosshair
+                                        _crosshair && _pointerPane == null
                                             ? cursorValue
                                             : selected.close,
                                       ),
@@ -566,22 +569,33 @@ class _CryptoChartState extends State<CryptoChart> {
         ),
         Row(
           children: [
-            TextButton(
+            IconButton(
               key: const Key('crypto-load-older'),
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              padding: EdgeInsets.zero,
+              tooltip: widget.loadingOlder
+                  ? '正在加载历史…'
+                  : widget.historyError != null
+                  ? '重试加载历史'
+                  : widget.hasMoreHistory
+                  ? '加载更多历史'
+                  : '已到最早数据',
               onPressed:
                   widget.loadingOlder ||
                       !widget.hasMoreHistory ||
                       widget.onLoadOlder == null
                   ? null
                   : _loadOlder,
-              child: Text(
+              icon: Icon(
                 widget.loadingOlder
-                    ? '正在加载历史…'
+                    ? Icons.hourglass_top
                     : widget.historyError != null
-                    ? '重试加载历史'
-                    : widget.hasMoreHistory
-                    ? '加载更多历史'
-                    : '已到最早数据',
+                    ? Icons.refresh
+                    : Icons.history,
+                size: 18,
               ),
             ),
             Expanded(
@@ -774,11 +788,12 @@ class _MarketPainter extends CustomPainter {
     required this.price,
     this.crosshair = false,
     this.pointerY = .5,
+    this.horizontalCrosshair = false,
   });
   final List<CryptoCandle> rows;
   final int selected, offset;
   final List<IndicatorStudy> studies;
-  final bool price, crosshair;
+  final bool price, crosshair, horizontalCrosshair;
   final double pointerY;
   @override
   void paint(Canvas canvas, Size size) {
@@ -926,6 +941,10 @@ class _MarketPainter extends CustomPainter {
           3,
           Paint()..color = Colors.white,
         );
+      }
+      if (!horizontalCrosshair) {
+        canvas.restore();
+        return;
       }
       final py = (size.height * pointerY).clamp(10.0, bottom);
       canvas.drawLine(
