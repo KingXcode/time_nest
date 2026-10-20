@@ -37,6 +37,7 @@ class DashboardOverview extends StatelessWidget {
     ),
     padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
     child: Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
@@ -57,7 +58,7 @@ class DashboardOverview extends StatelessWidget {
           style: const TextStyle(fontSize: 11, color: dashboardMuted),
         ),
         const SizedBox(height: 8),
-        child,
+        Flexible(fit: FlexFit.loose, child: child),
       ],
     ),
   );
@@ -320,6 +321,7 @@ class DashboardOverview extends StatelessWidget {
           )
         : Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               for (final repo in preferences.repos.take(4))
                 Padding(
@@ -412,13 +414,30 @@ class DashboardOverview extends StatelessWidget {
         if (a && b && wide) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: firstFlex, child: first),
-                const SizedBox(width: 12),
-                Expanded(flex: secondFlex, child: second),
-              ],
+            child: StatefulBuilder(
+              builder: (context, update) =>
+                  NotificationListener<ApiSectionChanged>(
+                    onNotification: (_) {
+                      // Loaded text can outgrow the row's previous tight height.
+                      // Remeasure both cells together after each snapshot settles.
+                      update(() {});
+                      return true;
+                    },
+                    child: Table(
+                      columnWidths: {
+                        0: FlexColumnWidth(firstFlex.toDouble()),
+                        1: const FixedColumnWidth(12),
+                        2: FlexColumnWidth(secondFlex.toDouble()),
+                      },
+                      defaultVerticalAlignment:
+                          TableCellVerticalAlignment.intrinsicHeight,
+                      children: [
+                        TableRow(
+                          children: [first, const SizedBox(width: 12), second],
+                        ),
+                      ],
+                    ),
+                  ),
             ),
           );
         }

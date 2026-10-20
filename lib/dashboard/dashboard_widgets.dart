@@ -137,6 +137,10 @@ class DashboardColumns extends StatelessWidget {
 
 /// One asynchronous result at a time. Request generations keep fast input
 /// changes from letting an older network response replace the current result.
+class ApiSectionChanged extends Notification {
+  const ApiSectionChanged();
+}
+
 class ApiSection extends StatefulWidget {
   const ApiSection({
     super.key,
@@ -201,12 +205,14 @@ class _ApiSectionState extends State<ApiSection> {
         _error = null;
         _loading = false;
       });
+      const ApiSectionChanged().dispatch(context);
     } catch (error) {
       if (!mounted || generation != _generation) return;
       setState(() {
         _error = error.toString().replaceFirst(RegExp(r'^Exception: '), '');
         _loading = false;
       });
+      const ApiSectionChanged().dispatch(context);
     }
   }
 
@@ -219,108 +225,135 @@ class _ApiSectionState extends State<ApiSection> {
   @override
   Widget build(BuildContext context) {
     final result = _result;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_loading && result == null)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: widget.compact ? 10 : 20),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                SizedBox(width: 12),
-                Flexible(
-                  child: Text(
-                    '正在获取最新数据…',
-                    style: TextStyle(color: dashboardMuted),
+    return LayoutBuilder(
+      builder: (context, box) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_loading && result == null)
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: widget.compact ? 10 : 20),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                ),
-              ],
-            ),
-          ),
-        if (result != null) widget.builder(context, result),
-        if (_error != null || result?.warning != null || result?.stale == true)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Semantics(
-              liveRegion: true,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF242A2A),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  [
-                    if (result?.stale == true) '当前为上次保存的数据，可能已过时。',
-                    ?_error,
-                    if (result?.warning != null) result!.warning!,
-                  ].join(' '),
-                  style: const TextStyle(color: Color(0xFFD1D7D5), height: 1.5),
-                ),
+                  SizedBox(width: 12),
+                  Flexible(
+                    child: Text(
+                      '正在获取最新数据…',
+                      style: TextStyle(color: dashboardMuted),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-        SizedBox(height: widget.compact ? 3 : 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            if (widget.sourceLabel != null)
-              InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: widget.sourceUrl == null
-                    ? null
-                    : () => widget.client.openUrl(widget.sourceUrl!),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+          if (result != null) widget.builder(context, result),
+          if (_error != null ||
+              result?.warning != null ||
+              result?.stale == true)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Semantics(
+                liveRegion: true,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF242A2A),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Text(
-                    '${widget.sourceLabel} ↗',
-                    style: const TextStyle(color: dashboardMuted, fontSize: 11),
+                    [
+                      if (result?.stale == true) '当前为上次保存的数据，可能已过时。',
+                      ?_error,
+                      if (result?.warning != null) result!.warning!,
+                    ].join(' '),
+                    style: const TextStyle(
+                      color: Color(0xFFD1D7D5),
+                      height: 1.5,
+                    ),
                   ),
                 ),
               ),
-            if (result != null)
-              Text(
-                '${result.stale
-                    ? '旧数据'
-                    : result.cached
-                    ? '缓存'
-                    : '更新'} ${_updated(result.fetchedAt)}',
-                style: const TextStyle(color: dashboardMuted, fontSize: 11),
-              ),
-            TextButton.icon(
-              onPressed: _loading ? null : () => _load(refresh: true),
-              icon: Icon(
-                _loading ? Icons.hourglass_top_rounded : Icons.refresh_rounded,
-                size: 15,
-              ),
-              label: Text(
-                _loading
-                    ? '更新中'
-                    : _error == null
-                    ? '刷新'
-                    : '重试',
-              ),
-              style: TextButton.styleFrom(
-                textStyle: const TextStyle(fontSize: 12),
-                minimumSize: Size(
-                  widget.compact ? 0 : 54,
-                  widget.compact ? 26 : 32,
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
             ),
-          ],
-        ),
-      ],
+          if (box.hasBoundedHeight) const Spacer(),
+          SizedBox(height: widget.compact ? 3 : 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (widget.sourceLabel != null)
+                InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: widget.sourceUrl == null
+                      ? null
+                      : () => widget.client.openUrl(widget.sourceUrl!),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 32),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: 1,
+                      heightFactor: 1,
+                      child: Text(
+                        '${widget.sourceLabel} ↗',
+                        style: const TextStyle(
+                          color: dashboardMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (result != null)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 32),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: 1,
+                    heightFactor: 1,
+                    child: Text(
+                      '${result.stale
+                          ? '旧数据'
+                          : result.cached
+                          ? '缓存'
+                          : '更新'} ${_updated(result.fetchedAt)}',
+                      style: const TextStyle(
+                        color: dashboardMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ),
+              TextButton.icon(
+                onPressed: _loading ? null : () => _load(refresh: true),
+                icon: Icon(
+                  _loading
+                      ? Icons.hourglass_top_rounded
+                      : Icons.refresh_rounded,
+                  size: 15,
+                ),
+                label: Text(
+                  _loading
+                      ? '更新中'
+                      : _error == null
+                      ? '刷新'
+                      : '重试',
+                ),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.standard,
+                  textStyle: const TextStyle(fontSize: 12),
+                  minimumSize: Size(widget.compact ? 0 : 54, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

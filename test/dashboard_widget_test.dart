@@ -190,6 +190,30 @@ void main() {
         });
         expect(client.calls.where((m) => m == 'releases'), hasLength(4));
         expect(client.calls, hasLength(7));
+        if (size.width >= 760) {
+          for (final ids in [('weather', 'crypto'), ('news', 'releases')]) {
+            final left = tester.getRect(
+              find.byKey(ValueKey('dashboard-summary-${ids.$1}')),
+            );
+            final right = tester.getRect(
+              find.byKey(ValueKey('dashboard-summary-${ids.$2}')),
+            );
+            expect(left.top, closeTo(right.top, .01));
+            expect(left.bottom, closeTo(right.bottom, .01));
+          }
+          final weatherRefresh = find.descendant(
+            of: find.byKey(const ValueKey('dashboard-summary-weather')),
+            matching: find.widgetWithText(TextButton, '刷新'),
+          );
+          final cryptoRefresh = find.descendant(
+            of: find.byKey(const ValueKey('dashboard-summary-crypto')),
+            matching: find.widgetWithText(TextButton, '刷新'),
+          );
+          expect(
+            tester.getRect(weatherRefresh).bottom,
+            closeTo(tester.getRect(cryptoRefresh).bottom, .01),
+          );
+        }
         await tester.drag(
           find.byKey(const PageStorageKey('dashboard-scroll')),
           const Offset(0, -1500),
