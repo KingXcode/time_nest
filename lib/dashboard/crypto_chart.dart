@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
@@ -61,6 +62,7 @@ class _CryptoChartState extends State<CryptoChart> {
   int _visibleCount = 200, _scaleCount = 200, _scaleStart = 0;
   double _scaleAnchor = .5, _pointerY = .5;
   String? _pointerPane;
+  final _paneHeights = <String, double>{};
 
   void _range(int start, int count) {
     final rows = widget.candles;
@@ -234,27 +236,24 @@ class _CryptoChartState extends State<CryptoChart> {
         selected.closeTime >= widget.fetchedAt.millisecondsSinceEpoch;
     void select(int i) => setState(() => _selectedTime = rows[i].time);
     final overlays = [for (final id in widget.overlays) ?_studies[id]];
-    final priceValues = <double>[
-      for (final row in rows) ...[row.low, row.high],
-      for (final study in overlays)
-        for (final line in study.lines)
-          for (final value in line.values.skip(offset).take(rows.length))
-            if (value != null && value.isFinite) value,
-    ];
-    final low = priceValues.reduce(math.min),
-        high = priceValues.reduce(math.max);
-    final padding = math.max(
-      (high - low) * .08,
-      math.max(high.abs(), 1) * .001,
-    );
+    final scales = <String, _ChartScale>{
+      'price': _ChartScale(rows, offset, overlays, price: true),
+      for (final id in widget.panes)
+        if (_studies[id] case final study?)
+          id: _ChartScale(rows, offset, [study], price: false),
+    };
+    // One measured gutter keeps candle timestamps aligned across every pane.
+    final axisWidth = scales.values
+        .map((scale) => scale.axisWidth)
+        .reduce(math.max);
+    final priceScale = scales['price']!;
     final cursorValue =
-        high +
-        padding -
+        priceScale.high -
         ((_pointerY * cryptoPriceHeight - 10) / (cryptoPriceHeight - 20)).clamp(
               0.0,
               1.0,
             ) *
-            (high - low + padding * 2);
+            (priceScale.high - priceScale.low);
     Widget legend(List<IndicatorStudy> studies, {bool right = false}) {
       var color = 0;
       return Wrap(
@@ -279,13 +278,18 @@ class _CryptoChartState extends State<CryptoChart> {
       builder: (context, box) {
         void point(Offset pos) {
           select(
-            ((pos.dx - 4) / math.max(1, box.maxWidth - 76) * rows.length)
+            ((pos.dx - 4) /
+                    math.max(1, box.maxWidth - axisWidth - 4) *
+                    rows.length)
                 .floor()
                 .clamp(0, rows.length - 1),
           );
           _pointerPane = study?.id;
           _pointerY =
-              (pos.dy / (study == null ? cryptoPriceHeight : cryptoPaneHeight))
+              (pos.dy /
+                      (study == null
+                          ? cryptoPriceHeight
+                          : (_paneHeights[study.id] ?? cryptoPaneHeight)))
                   .clamp(0.0, 1.0);
         }
 
@@ -297,6 +301,34 @@ class _CryptoChartState extends State<CryptoChart> {
             if (_crosshair && !_dragging) point(event.localPosition);
           },
           child: Listener(
+            onPointerSignal: (event) {
+              if (event is! PointerScrollEvent ||
+                  !_crosshair ||
+                  study != null ||
+                  event.scrollDelta.dy == 0) {
+                return;
+              }
+              GestureBinding.instance.pointerSignalResolver.register(event, (
+                _,
+              ) {
+                final anchor =
+                    ((event.localPosition.dx - 4) /
+                            math.max(1, box.maxWidth - axisWidth - 4))
+                        .clamp(0.0, 1.0);
+                final count =
+                    (rows.length *
+                            math.exp(
+                              event.scrollDelta.dy.clamp(-600.0, 600.0) * .0015,
+                            ))
+                        .round()
+                        .clamp(math.min(20, all.length), all.length)
+                        .toInt();
+                _range(
+                  (offset + (rows.length - count) * anchor).round(),
+                  count,
+                );
+              });
+            },
             onPointerDown: (event) {
               _tapHadCrosshair = _crosshair;
               point(event.localPosition);
@@ -311,7 +343,8 @@ class _CryptoChartState extends State<CryptoChart> {
                 _scaleCount = rows.length;
                 _scaleStart = _startIndex;
                 _scaleAnchor =
-                    (event.localFocalPoint.dx / math.max(1, box.maxWidth - 76))
+                    (event.localFocalPoint.dx /
+                            math.max(1, box.maxWidth - axisWidth - 4))
                         .clamp(0.0, 1.0);
               },
               onScaleUpdate: (event) {
@@ -330,7 +363,7 @@ class _CryptoChartState extends State<CryptoChart> {
                 } else {
                   _dragRemainder -=
                       event.focalPointDelta.dx /
-                      math.max(1, box.maxWidth - 76) *
+                      math.max(1, box.maxWidth - axisWidth - 4) *
                       rows.length;
                   final bars = _dragRemainder.truncate();
                   if (bars != 0) {
@@ -348,7 +381,9 @@ class _CryptoChartState extends State<CryptoChart> {
                   key: study == null
                       ? const Key('crypto-price-plot')
                       : ValueKey('crypto-pane-${study.id}'),
-                  height: study == null ? cryptoPriceHeight : cryptoPaneHeight,
+                  height: study == null
+                      ? cryptoPriceHeight
+                      : (_paneHeights[study.id] ?? cryptoPaneHeight),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -361,6 +396,8 @@ class _CryptoChartState extends State<CryptoChart> {
                           price: study == null,
                           crosshair: _crosshair,
                           pointerY: _pointerY,
+                          axisWidth: axisWidth,
+                          scale: scales[study?.id ?? 'price']!,
                           horizontalCrosshair: _pointerPane == study?.id,
                         ),
                       ),
@@ -368,7 +405,7 @@ class _CryptoChartState extends State<CryptoChart> {
                         Positioned(
                           top: 8,
                           left: widget.infoRight ? null : 8,
-                          right: widget.infoRight ? 78 : null,
+                          right: widget.infoRight ? axisWidth + 6 : null,
                           child: IgnorePointer(
                             child: Container(
                               key: const Key('crypto-info-window'),
@@ -559,13 +596,41 @@ class _CryptoChartState extends State<CryptoChart> {
                 legend(overlays, right: widget.infoRight),
                 const SizedBox(height: 6),
                 plot(),
+                for (final id in widget.panes)
+                  if (_studies[id] case final study?) ...[
+                    Container(
+                      padding: const EdgeInsets.only(top: 4),
+                      decoration: const BoxDecoration(
+                        border: Border(top: BorderSide(color: dashboardBorder)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            cryptoIndicators[id]!.name,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: legend([study])),
+                        ],
+                      ),
+                    ),
+                    plot(study: study),
+                    _resizeHandle(id),
+                  ],
               ],
             ),
           ),
         ),
         SizedBox(
           height: 22,
-          child: CustomPaint(painter: _TimeAxisPainter(rows)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: CustomPaint(painter: _TimeAxisPainter(rows, axisWidth)),
+          ),
         ),
         Row(
           children: [
@@ -630,47 +695,48 @@ class _CryptoChartState extends State<CryptoChart> {
         ),
         const SizedBox(height: 8),
         const Text(
-          '左右拖动 · 双指缩放 · 点击查看十字线，再次点击关闭。时间为 UTC+8。',
+          '左右拖动 · 双指缩放 · 点击查看十字线后可滚轮缩放，再次点击关闭 · 副图边缘拖动调高。UTC+8。',
           style: TextStyle(color: dashboardMuted, fontSize: 11, height: 1.4),
         ),
-        for (final id in widget.panes)
-          if (_studies[id] case final study?)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: dashboardBorder),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            cryptoIndicators[id]!.name,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(child: legend([study])),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      plot(study: study),
-                    ],
-                  ),
-                ),
-              ),
-            ),
         const SizedBox(height: 14),
         _assessmentPanel(),
       ],
+    );
+  }
+
+  Widget _resizeHandle(String id) {
+    final height = _paneHeights[id] ?? cryptoPaneHeight;
+    void resize(double value) =>
+        setState(() => _paneHeights[id] = value.clamp(64.0, 400.0));
+    return Semantics(
+      label: '调整 ${cryptoIndicators[id]!.name} 副图高度',
+      value: '${height.round()} 像素',
+      increasedValue: '${(height + 20).clamp(64, 400).round()} 像素',
+      decreasedValue: '${(height - 20).clamp(64, 400).round()} 像素',
+      onIncrease: () => resize(height + 20),
+      onDecrease: () => resize(height - 20),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeUpDown,
+        child: Tooltip(
+          message: '拖动调整副图高度',
+          child: GestureDetector(
+            key: ValueKey('crypto-resize-$id'),
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragUpdate: (e) =>
+                resize((_paneHeights[id] ?? cryptoPaneHeight) + e.delta.dy),
+            child: const SizedBox(
+              height: 10,
+              child: Center(
+                child: SizedBox(
+                  width: 28,
+                  height: 2,
+                  child: ColoredBox(color: dashboardBorder),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -779,6 +845,61 @@ class _CryptoChartState extends State<CryptoChart> {
   }
 }
 
+class _ChartScale {
+  _ChartScale(
+    List<CryptoCandle> rows,
+    int offset,
+    List<IndicatorStudy> studies, {
+    required this.price,
+  }) {
+    final values = <double>[
+      if (price)
+        for (final row in rows) ...[row.low, row.high],
+      for (final study in studies)
+        for (final line in study.lines)
+          for (final value in line.values.skip(offset).take(rows.length))
+            if (value != null && value.isFinite) value,
+      if (!price)
+        for (final study in studies) ...study.levels,
+      if (!price && studies.any((s) => s.lines.any((l) => l.bars))) 0,
+    ];
+    final min = values.isEmpty ? 0.0 : values.reduce(math.min);
+    final max = values.isEmpty ? 1.0 : values.reduce(math.max);
+    final pad = math.max((max - min) * .08, math.max(max.abs(), 1) * .001);
+    low =
+        !price &&
+            studies.every(
+              (s) =>
+                  const ['vol', 'amount', 'atr', 'natr', 'bbw'].contains(s.id),
+            )
+        ? 0.0
+        : min - pad;
+    high = max + pad;
+  }
+  final bool price;
+  late final double low, high;
+  String format(double value) => price
+      ? cryptoPrice(value)
+      : value.abs() >= 10000
+      ? cryptoVolume(value)
+      : value.toStringAsFixed(value.abs() < 1 ? 3 : 2);
+  double get axisWidth {
+    var width = 0.0;
+    for (var i = 0; i <= 4; i++) {
+      final text = TextPainter(
+        text: TextSpan(
+          text: format(low + (high - low) * i / 4),
+          style: const TextStyle(fontSize: 10, fontFamily: 'ShikeSans'),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      width = math.max(width, text.width);
+      text.dispose();
+    }
+    return width.ceilToDouble() + 10;
+  }
+}
+
 class _MarketPainter extends CustomPainter {
   _MarketPainter(
     this.rows,
@@ -786,6 +907,8 @@ class _MarketPainter extends CustomPainter {
     this.offset,
     this.studies, {
     required this.price,
+    required this.scale,
+    required this.axisWidth,
     this.crosshair = false,
     this.pointerY = .5,
     this.horizontalCrosshair = false,
@@ -794,33 +917,14 @@ class _MarketPainter extends CustomPainter {
   final int selected, offset;
   final List<IndicatorStudy> studies;
   final bool price, crosshair, horizontalCrosshair;
-  final double pointerY;
+  final double pointerY, axisWidth;
+  final _ChartScale scale;
   @override
   void paint(Canvas canvas, Size size) {
-    final right = size.width - 72,
+    final right = size.width - axisWidth,
         width = math.max(1.0, right - 4),
         bottom = size.height - 10;
-    final values = <double>[
-      if (price)
-        for (final row in rows) ...[row.low, row.high],
-      for (final study in studies)
-        for (final line in study.lines)
-          for (final v in line.values.skip(offset).take(rows.length))
-            if (v != null && v.isFinite) v,
-      if (!price)
-        for (final study in studies) ...study.levels,
-      if (!price && studies.any((s) => s.lines.any((l) => l.bars))) 0,
-    ];
-    if (values.isEmpty) return;
-    final min = values.reduce(math.min),
-        max = values.reduce(math.max),
-        pad = math.max((max - min) * .08, math.max(max.abs(), 1) * .001);
-    final positivePane =
-        !price &&
-        studies.every(
-          (s) => const ['vol', 'amount', 'atr', 'natr', 'bbw'].contains(s.id),
-        );
-    final low = positivePane ? 0.0 : min - pad, high = max + pad;
+    final low = scale.low, high = scale.high;
     double y(double value) =>
         10 + (high - value) / (high - low) * (bottom - 10);
     void label(String text, Offset point, {Color color = dashboardMuted}) {
@@ -831,7 +935,7 @@ class _MarketPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
         maxLines: 1,
-      )..layout(maxWidth: 68);
+      )..layout(maxWidth: math.max(1, axisWidth - 6));
       painter.paint(canvas, point);
     }
 
@@ -841,14 +945,7 @@ class _MarketPainter extends CustomPainter {
     for (var i = 0; i <= 4; i++) {
       final value = low + (high - low) * i / 4;
       canvas.drawLine(Offset(4, y(value)), Offset(right, y(value)), grid);
-      label(
-        price
-            ? cryptoPrice(value)
-            : value.abs() >= 10000
-            ? cryptoVolume(value)
-            : value.toStringAsFixed(value.abs() < 1 ? 3 : 2),
-        Offset(right + 4, y(value) - 6),
-      );
+      label(scale.format(value), Offset(right + 4, y(value) - 6));
     }
     final step = width / rows.length, bodyWidth = (step * .65).clamp(.6, 12.0);
     canvas.save();
@@ -956,11 +1053,11 @@ class _MarketPainter extends CustomPainter {
       );
       canvas.restore();
       canvas.drawRect(
-        Rect.fromLTWH(right + 2, py - 8, 70, 17),
+        Rect.fromLTWH(right + 2, py - 8, axisWidth - 2, 17),
         Paint()..color = dashboardSurface,
       );
       label(
-        cryptoPrice(high - (py - 10) / (bottom - 10) * (high - low)),
+        scale.format(high - (py - 10) / (bottom - 10) * (high - low)),
         Offset(right + 4, py - 6),
         color: Colors.white,
       );
@@ -1088,7 +1185,8 @@ void _axisText(Canvas canvas, String text, double x, double y, double width) {
 }
 
 class _TimeAxisPainter extends CustomPainter {
-  _TimeAxisPainter(this.rows);
+  _TimeAxisPainter(this.rows, this.axisWidth);
+  final double axisWidth;
   final List<CryptoCandle> rows;
   @override
   void paint(Canvas canvas, Size size) {
@@ -1099,7 +1197,7 @@ class _TimeAxisPainter extends CustomPainter {
       _axisText(
         canvas,
         date.substring(5),
-        i / ticks * math.max(1, size.width - 76),
+        i / ticks * math.max(1, size.width - axisWidth - 4),
         3,
         size.width,
       );
@@ -1107,7 +1205,8 @@ class _TimeAxisPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_TimeAxisPainter old) => old.rows != rows;
+  bool shouldRepaint(_TimeAxisPainter old) =>
+      old.rows != rows || old.axisWidth != axisWidth;
 }
 
 class _TimelinePainter extends CustomPainter {

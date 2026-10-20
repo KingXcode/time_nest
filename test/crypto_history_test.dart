@@ -295,6 +295,109 @@ void main() {
   }
 
   testWidgets(
+    'connected plots resize independently; active crosshair wheel zoom consumes scrolling',
+    (tester) async {
+      fixture.setSize(tester, const Size(1000, 1100));
+      var loads = 0;
+      await tester.pumpWidget(
+        fixture.app(
+          Scaffold(
+            body: SingleChildScrollView(
+              child: CryptoChart(
+                candles: candles(0, 500),
+                asset: 'BTC',
+                fetchedAt: DateTime.utc(2026, 2),
+                onLoadOlder: () => loads++,
+                hasMoreHistory: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final plot = find.byKey(const Key('crypto-price-plot'));
+      final vol = find.byKey(const Key('crypto-pane-vol'));
+      final macd = find.byKey(const Key('crypto-pane-macd'));
+      final timeline = find.byKey(const Key('crypto-timeline'));
+      expect(
+        tester.getTopLeft(vol).dy - tester.getBottomLeft(plot).dy,
+        lessThan(40),
+      );
+      expect(
+        tester.getTopLeft(timeline).dy,
+        greaterThan(tester.getBottomLeft(macd).dy),
+      );
+      final dynamic mainPainter = tester
+          .widget<CustomPaint>(
+            find.descendant(of: plot, matching: find.byType(CustomPaint)),
+          )
+          .painter;
+      final dynamic volPainter = tester
+          .widget<CustomPaint>(
+            find.descendant(of: vol, matching: find.byType(CustomPaint)),
+          )
+          .painter;
+      expect(mainPainter.axisWidth, volPainter.axisWidth);
+      expect(mainPainter.axisWidth, lessThan(72));
+      await tester.ensureVisible(plot);
+      Offset pointer() => tester.getTopLeft(plot) + const Offset(330, 100);
+      int count() =>
+          tester.widget<CryptoTimeline>(find.byType(CryptoTimeline)).count;
+      final noCursor = count();
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: pointer(),
+          scrollDelta: const Offset(0, -120),
+          kind: PointerDeviceKind.mouse,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(count(), noCursor);
+      await tester.ensureVisible(plot);
+      await tester.tapAt(pointer());
+      await tester.pumpAndSettle();
+      final top = tester.getTopLeft(plot).dy;
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: pointer(),
+          scrollDelta: const Offset(0, -120),
+          kind: PointerDeviceKind.mouse,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(count(), lessThan(200));
+      expect(tester.getTopLeft(plot).dy, top);
+      final zoomed = count();
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: pointer(),
+          scrollDelta: const Offset(0, 120),
+          kind: PointerDeviceKind.mouse,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(count(), greaterThan(zoomed));
+      final handle = find.byKey(const Key('crypto-resize-vol'));
+      await tester.ensureVisible(handle);
+      await tester.drag(handle, const Offset(0, 80));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(vol).height, greaterThan(cryptoPaneHeight));
+      expect(tester.getSize(macd).height, cryptoPaneHeight);
+      expect(tester.getSize(plot).height, cryptoPriceHeight);
+      await tester.ensureVisible(handle);
+      await tester.drag(handle, const Offset(0, -600));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(vol).height, 64);
+      await tester.ensureVisible(handle);
+      await tester.drag(handle, const Offset(0, 600));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(vol).height, 400);
+      expect(loads, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'left edge never auto loads; manual button pages once, preserves viewport and retained history through live refresh',
     (tester) async {
       fixture.setSize(tester, const Size(1280, 1000));

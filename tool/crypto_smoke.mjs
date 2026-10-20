@@ -157,7 +157,7 @@ async function activate(label, p = page) {
   })()`);
   let point=await locate();
   for(let i=0;i<4 && (point.y<0 || point.y>point.viewport);i++) {
-    await p.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:point.x,y:point.viewport/2,deltaX:0,deltaY:point.y-point.viewport/2});
+    await p.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:point.viewport/2,deltaX:0,deltaY:point.y-point.viewport/2});
     await delay(400);point=await locate();
   }
   assert.ok(point.y>=0 && point.y<=point.viewport,`Control not visible: ${label}`);
@@ -177,7 +177,7 @@ async function dragPrice(older = true, touch = false) {
     })()`);
   }
   let rect=await bounds();
-  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:200,y:500,deltaX:0,deltaY:rect.y-150});
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:500,deltaX:0,deltaY:rect.y-150});
   await delay(400); rect=await bounds();
   const left=rect.x+20, right=rect.x+rect.width-90, y=rect.y+rect.height/2;
   const from=older?left:right, to=older?right:left;
@@ -245,6 +245,7 @@ try {
   })()`);
   assert.equal(chartGeometry.main.height,320,'main price plot retains 320px');
   assert.equal(chartGeometry.volume.height,150,'volume pane retains 150px');
+  assert.ok(chartGeometry.volume.y-chartGeometry.main.bottom<40,'subchart connects directly below main chart');
   assert.ok(chartGeometry.main.y>=46 && chartGeometry.main.bottom<=900,'full main plot fits desktop first screen');
   assert.ok(chartGeometry.volume.bottom<=900,'first subchart fits desktop first screen');
   await page.screenshot('13-crypto-detail-desktop.png');
@@ -280,13 +281,20 @@ try {
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});
   await delay(600);
-  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:500,deltaX:0,deltaY:-10000}); await delay(500);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:500,deltaX:0,deltaY:-10000}); await delay(500);
   await activate('回到最新');
   assert.equal(await visibleRange(),latestRange);
   const pinchRect=await page.evaluate(`(() => {
     const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('K 线主图，'));
     const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height*.75};
   })()`);
+  if (!(await labels()).some(e=>e.label?.includes('十字线已锁定'))) await click(pinchRect.x,pinchRect.y);
+  const beforeWheel=await visibleRange();
+  const rangeSpan=range=>{const dates=range.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g);return Date.parse(dates[1].replace(' ','T')+'+08:00')-Date.parse(dates[0].replace(' ','T')+'+08:00');};
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:pinchRect.x,y:pinchRect.y,deltaX:0,deltaY:-120}); await delay(350);
+  assert.ok(rangeSpan(await visibleRange())<rangeSpan(beforeWheel),'wheel zooms active main crosshair');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:pinchRect.x,y:pinchRect.y,deltaX:0,deltaY:120}); await delay(350);
+  passed('mouse wheel zooms the main chart with its crosshair active');
   const beforePinch=await visibleRange();
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:true});
   const touches=distance=>[{id:1,x:pinchRect.x-distance,y:pinchRect.y},{id:2,x:pinchRect.x+distance,y:pinchRect.y}];
@@ -304,6 +312,23 @@ try {
   await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await delay(350);
   assert.ok(!(await labels()).some(e=>e.label?.includes('十字线已锁定')),'tap again dismisses crosshair');
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
+  const resizePoint=await page.evaluate(`(() => {
+    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').endsWith('调整 VOL 成交量 副图高度'));
+    if(!e)throw new Error('Resize handle missing');const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
+  })()`);
+  await page.send('Input.dispatchMouseEvent',{type:'mousePressed',...resizePoint,button:'left',clickCount:1});
+  for(let i=1;i<=8;i++) {
+    await page.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:resizePoint.x,y:resizePoint.y+i*10,button:'left',buttons:1}); await delay(30);
+  }
+  await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:resizePoint.x,y:resizePoint.y+80,button:'left',clickCount:1}); await delay(350);
+  const resized=await page.evaluate(`(() => {
+    const nodes=(${deepQuery})('flt-semantics, [aria-label]');
+    const height=prefix=>nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix)).getBoundingClientRect().height;
+    return {main:height('K 线主图，'),volume:height('VOL 成交量 副图，'),macd:height('MACD 副图，')};
+  })()`);
+  assert.equal(resized.main,320);assert.ok(resized.volume>150);assert.equal(resized.macd,150);
+  await page.screenshot('18-crypto-connected-resizable.png');
+  passed('dragging a subchart edge resizes only that pane within the connected chart');
   passed('two-finger zoom and persistent crosshair with second-tap dismissal');
   passed('mouse and touch pan real charts; manual button loads contiguous older candles and live pushes keep the viewport');
   // Flutter semantics represents the entire card as one tappable node.
@@ -328,7 +353,7 @@ try {
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   await delay(500); await page.screenshot('03-crypto-mobile.png');
   // Scroll the live Flutter viewport to inspect chart controls on a narrow screen.
-  await page.send('Input.dispatchMouseEvent', { type:'mouseWheel', x:200, y:650, deltaX:0, deltaY:900 });
+  await page.send('Input.dispatchMouseEvent', { type:'mouseWheel', x:2, y:650, deltaX:0, deltaY:900 });
   await delay(600); await page.screenshot('04-crypto-mobile-chart.png');
   // A fresh page restores a demanding 8+8 saved configuration.
   await page.evaluate(`(() => { const p=JSON.parse(timeNestDashboard.readPreferences());p.cryptoOverlays=['ma','ema','wma','boll','donchian','keltner','vwma','hma'];p.cryptoPanes=['vol','amount','macd','rsi','kdj','stoch','cci','adx'];p.cryptoInfoRight=true;timeNestDashboard.writePreferences(JSON.stringify(p)); })()`);
@@ -342,9 +367,9 @@ try {
   await activate('数字货币行情');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('主图 8/8 · 副图 8/8')), '8+8 chart settings restored');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'restored stream live');
-  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:620});await delay(500);await page.screenshot('05-crypto-eight-overlays.png');
-  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('06-crypto-eight-panes.png');
-  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('07-crypto-assessment.png');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:620});await delay(500);await page.screenshot('05-crypto-eight-overlays.png');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('06-crypto-eight-panes.png');
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('07-crypto-assessment.png');
   assert.ok((await labels()).some(item=>item.label?.includes('评分规则：六项')));
   passed('narrow screenshots captured; 8 overlays, 8 panes, right corner info and closed-bar assessment restore');
   const connectionCount=streamConnections.length, requestCount=requestEvents.length;
@@ -356,7 +381,7 @@ try {
   await waitFor(async()=>(await labels()).some(item=>item.label?.includes('评分规则：六项')),'assessment resumes after resync');
   await page.screenshot('08-crypto-reconnected.png');
   passed('closing a real Binance connection resubscribes, refetches history and restores assessment');
-  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:800,deltaX:0,deltaY:-10000});await delay(500);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:-10000});await delay(500);
   await activate('实时推送已开启');
   await waitFor(async()=>(await labels()).some(item=>item.label?.includes('推送已暂停，当前为暂停前的快照')),'manual pause visible');
   assert.ok(await page.evaluate('window.__cryptoSockets.every(s=>s.readyState!==WebSocket.OPEN)'));
