@@ -55,7 +55,7 @@ class _NewsPanelState extends State<NewsPanel> {
                 labelStyle: TextStyle(
                   color: feed == option.$1 ? _newsAccent : null,
                 ),
-                materialTapTargetSize: MaterialTapTargetSize.padded,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 onSelected: (_) => widget.onFeedChanged(option.$1),
               ),
           ],
@@ -97,16 +97,17 @@ class _NewsPanelState extends State<NewsPanel> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (var i = 0; i < count; i++) ...[
-                  if (i > 0)
-                    const Divider(height: 20, color: Color(0xFF30363A)),
-                  _NewsStory(
-                    client: widget.client,
-                    story: stories[i],
-                    rank: i + 1,
-                    chinese: chinese,
-                  ),
-                ],
+                DashboardColumns(
+                  children: [
+                    for (var i = 0; i < count; i++)
+                      _NewsStory(
+                        client: widget.client,
+                        story: stories[i],
+                        rank: i + 1,
+                        chinese: chinese,
+                      ),
+                  ],
+                ),
                 if (stories.length > 6)
                   TextButton.icon(
                     onPressed: () => setState(() => _expanded = !_expanded),
@@ -118,7 +119,7 @@ class _NewsPanelState extends State<NewsPanel> {
                     label: Text(
                       _expanded ? '收起列表' : '展开全部 ${stories.length} 条',
                     ),
-                    style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 32)),
                   ),
                 const SizedBox(height: 8),
               ],
@@ -170,7 +171,7 @@ class _NewsStory extends StatelessWidget {
         SizedBox(
           width: 28,
           child: Padding(
-            padding: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.only(top: 6),
             child: Text(
               rank.toString().padLeft(2, '0'),
               style: const TextStyle(color: Color(0xFF7E9299), fontSize: 12),
@@ -185,15 +186,15 @@ class _NewsStory extends StatelessWidget {
                 onPressed: () => client.openUrl(url),
                 style: TextButton.styleFrom(
                   foregroundColor: const Color(0xFFE5EDEE),
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  minimumSize: const Size(0, 32),
                   alignment: Alignment.centerLeft,
-                  tapTargetSize: MaterialTapTargetSize.padded,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 child: Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 13,
                     height: 1.45,
                     fontWeight: FontWeight.w500,
                   ),
@@ -235,7 +236,7 @@ class _NewsStory extends StatelessWidget {
                       onPressed: () => client.openUrl(discussion),
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 0),
-                        minimumSize: const Size(0, 48),
+                        minimumSize: const Size(0, 32),
                       ),
                       icon: const Icon(
                         Icons.chat_bubble_outline_rounded,

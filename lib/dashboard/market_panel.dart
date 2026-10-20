@@ -49,15 +49,15 @@ class _MarketPanelState extends State<MarketPanel> {
         ),
         const SizedBox(height: 12),
         const Text(
-          '先看大盘，再看不同市场。',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+          '大盘指数',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         const Text(
-          '免费版以收盘趋势观察为主，可查看日线、周线与月线。数据日期、延迟与市场状态以 TradingView 图内标注为准；刷新频率不等于交易所实时行情。',
-          style: TextStyle(color: dashboardMuted, height: 1.7),
+          '日线、周线与月线收盘参考。数据日期、延迟和市场状态以图内标注为准，不保证实时。',
+          style: TextStyle(color: dashboardMuted, height: 1.5, fontSize: 12),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 10),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -70,7 +70,7 @@ class _MarketPanelState extends State<MarketPanel> {
               ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 10),
         Text(
           '${selected.name} · ${selected.symbol}',
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
@@ -178,7 +178,7 @@ class _MarketPanelState extends State<MarketPanel> {
           '把日线切换到周线、月线，看上涨或下跌是否持续；再对照上证、深证与沪深300，观察走势是否一致。指数上涨不代表多数股票都上涨，单日涨跌也不足以判断整体“好坏”。',
           style: TextStyle(color: dashboardMuted, height: 1.8),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 10),
         const Text(
           '图表由 TradingView 免费官方组件提供。进入本页会连接其服务，并向其提供页面网址、组件类型、所选指数及 IP 地址。TradingView 声明组件不设置 Cookie。本应用不读取、保存或转发图表中的行情。仅供信息参考，不构成投资建议。',
           style: TextStyle(color: dashboardMuted, fontSize: 11, height: 1.7),

@@ -129,7 +129,8 @@ void main() {
           fixture.app(DashboardScreen(client: client), scale: viewport.$2),
         );
         await tester.pumpAndSettle();
-        expect(client.marketCalls, isEmpty);
+        expect(client.marketCalls, isNot(contains('cryptoCandles:BTCUSDT:1h')));
+        client.marketCalls.clear();
         await fixture.openModule(tester, 'crypto');
         expect(find.byType(CryptoChart), findsOneWidget);
         expect(find.text('100.25'), findsNWidgets(6));

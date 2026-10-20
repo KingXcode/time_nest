@@ -60,7 +60,8 @@ void main() {
           find.byWidgetPredicate((w) => w is MarketChart && !w.technical),
           findsNothing,
         );
-        expect(client.calls, isEmpty);
+        expect(client.calls, isNot(contains('cryptoCandles')));
+        client.calls.clear();
         await fixture.openModule(tester, 'market');
         expect(
           find.byWidgetPredicate((w) => w is MarketChart && !w.technical),
@@ -128,7 +129,8 @@ void main() {
           find.byWidgetPredicate((w) => w is MarketChart && !w.technical),
           findsNothing,
         );
-        expect(client.calls, isEmpty);
+        expect(client.calls, isNot(contains('cryptoCandles')));
+        client.calls.clear();
         await fixture.openModule(tester, 'market');
         expect(
           tester

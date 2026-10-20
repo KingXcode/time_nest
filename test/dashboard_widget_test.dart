@@ -162,36 +162,51 @@ void main() {
     const Size(736, 320),
     const Size(1280, 900),
   ]) {
-    testWidgets('home is an entry-only page with zero requests at $size', (
-      tester,
-    ) async {
-      setSize(tester, size);
-      final client = FixtureDashboardClient()
-        ..preferences = DashboardPreferences(
-          city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
-        ).encode();
-      await tester.pumpWidget(
-        app(DashboardScreen(client: client, now: () => testNow)),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('今天的事，一眼有数。'), findsOneWidget);
-      for (final id in dashboardModules) {
-        expect(find.byKey(ValueKey('dashboard-entry-$id')), findsOneWidget);
-      }
-      expect(find.byType(WeatherPanel), findsNothing);
-      expect(find.byType(ReleasesPanel), findsNothing);
-      expect(find.byType(NewsPanel), findsNothing);
-      expect(find.textContaining('假期'), findsNothing);
-      expect(client.calls, isEmpty);
-      await tester.drag(
-        find.byKey(const PageStorageKey('dashboard-scroll')),
-        const Offset(0, -1500),
-      );
-      await tester.pumpAndSettle();
-      expect(client.calls, isEmpty);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    });
+    testWidgets(
+      'home shows bounded snapshots without charts or streams at $size',
+      (tester) async {
+        setSize(tester, size);
+        final client = FixtureDashboardClient()
+          ..preferences = DashboardPreferences(
+            city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
+          ).encode();
+        await tester.pumpWidget(
+          app(DashboardScreen(client: client, now: () => testNow)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('数据总览'), findsOneWidget);
+        for (final id in dashboardModules) {
+          expect(find.byKey(ValueKey('dashboard-entry-$id')), findsOneWidget);
+        }
+        expect(find.byType(WeatherPanel), findsNothing);
+        expect(find.byType(ReleasesPanel), findsNothing);
+        expect(find.byType(NewsPanel), findsNothing);
+        expect(find.textContaining('假期'), findsNothing);
+        expect(client.calls.toSet(), {
+          'weather',
+          'news',
+          'releases',
+          'cryptoQuotes',
+        });
+        expect(client.calls.where((m) => m == 'releases'), hasLength(4));
+        expect(client.calls, hasLength(7));
+        await tester.drag(
+          find.byKey(const PageStorageKey('dashboard-scroll')),
+          const Offset(0, -1500),
+        );
+        await tester.pumpAndSettle();
+        expect(client.calls.toSet(), {
+          'weather',
+          'news',
+          'releases',
+          'cryptoQuotes',
+        });
+        expect(client.calls.where((m) => m == 'releases'), hasLength(4));
+        expect(client.calls, hasLength(7));
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
   }
 
   for (final viewport in [
@@ -213,7 +228,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(client.calls, isEmpty);
+      client.calls.clear();
       expect(tester.takeException(), isNull);
       for (final id in dashboardModules) {
         client.calls.clear();
@@ -240,7 +255,7 @@ void main() {
           find.byType(MarketPanel),
           id == 'market' ? findsOneWidget : findsNothing,
         );
-        expect(find.text('今天的事，一眼有数。'), findsNothing);
+        expect(find.text('数据总览'), findsNothing);
         expect(
           find.byType(WeatherPanel),
           id == 'weather' ? findsOneWidget : findsNothing,
@@ -263,14 +278,14 @@ void main() {
         client.calls.clear();
         await tester.tap(find.byType(BackButton));
         await tester.pumpAndSettle();
-        expect(find.text('今天的事，一眼有数。'), findsOneWidget);
+        expect(find.text('数据总览'), findsOneWidget);
         expect(client.calls, isEmpty);
       }
       await tester.pumpWidget(const SizedBox());
     });
   }
 
-  testWidgets('favorites and ordering persist without loading modules', (
+  testWidgets('favorites and ordering persist while snapshots stay bounded', (
     tester,
   ) async {
     final client = FixtureDashboardClient();
@@ -302,13 +317,15 @@ void main() {
     expect(DashboardPreferences.decode(client.preferences).favorites, [
       'releases',
     ]);
-    expect(client.calls, isEmpty);
+    expect(client.calls, isNot(contains('cryptoCandles')));
+    expect(client.calls, isNot(contains('searchCities')));
     await tester.pumpWidget(const SizedBox());
     await tester.pumpWidget(app(DashboardScreen(client: client)));
     await tester.pumpAndSettle();
     expect(find.text('已收藏 1'), findsOneWidget);
     expect(find.byTooltip('取消收藏项目更新'), findsOneWidget);
-    expect(client.calls, isEmpty);
+    expect(client.calls, isNot(contains('cryptoCandles')));
+    expect(client.calls, isNot(contains('searchCities')));
     expect(tester.takeException(), isNull);
   });
 
@@ -320,6 +337,7 @@ void main() {
       app(DashboardScreen(client: client, now: () => testNow)),
     );
     await tester.pumpAndSettle();
+    client.calls.clear();
     await openModule(tester, 'weather');
     expect(client.calls, isEmpty);
     await tester.enterText(find.byType(TextField), '上海');
@@ -367,7 +385,7 @@ void main() {
     await tester.pumpAndSettle();
     await openModule(tester, 'news');
     expect(client.requests.last['feed'], 'new');
-    expect(client.calls.toSet(), {'news'});
+    expect(client.calls, isNot(contains('cryptoCandles')));
     expect(tester.takeException(), isNull);
   });
 
@@ -402,13 +420,15 @@ void main() {
     final gate = Completer<void>();
     final client = FixtureDashboardClient()..pending = gate;
     await tester.pumpWidget(app(DashboardScreen(client: client)));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    client.calls.clear();
     final news = find.descendant(
       of: find.byKey(const ValueKey('dashboard-entry-news')),
       matching: find.text('科技资讯'),
     );
     await tester.ensureVisible(news);
-    await tester.pumpAndSettle();
+    await tester.pump();
     await tester.tap(news);
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
@@ -416,8 +436,9 @@ void main() {
     expect(find.text('正在获取最新数据…'), findsOneWidget);
     expect(client.calls, ['news']);
     await tester.tap(find.byType(BackButton));
-    await tester.pumpAndSettle();
-    expect(find.text('今天的事，一眼有数。'), findsOneWidget);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('数据总览'), findsOneWidget);
     gate.complete();
     await tester.pumpAndSettle();
     expect(client.calls, ['news']);
@@ -437,8 +458,8 @@ void main() {
       ..persistent = false;
     await tester.pumpWidget(app(DashboardScreen(client: client)));
     await tester.pumpAndSettle();
-    expect(find.text('重试'), findsNothing);
-    expect(client.calls, isEmpty);
+    expect(find.text('重试'), findsWidgets);
+    client.calls.clear();
     await openModule(tester, 'news');
     expect(find.text('重试'), findsOneWidget);
     client.fail = false;
@@ -451,7 +472,7 @@ void main() {
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(find.text('浏览器存储不可用。当前选择仍可使用，刷新后可能丢失。'), findsOneWidget);
-    expect(client.calls.toSet(), {'news'});
+    expect(client.calls, isNot(contains('cryptoCandles')));
     expect(tester.takeException(), isNull);
   });
 
@@ -464,7 +485,7 @@ void main() {
     final settings = browser.settings, timer = browser.timer;
     await tester.tap(find.byTooltip('每日看板').hitTestable());
     await tester.pumpAndSettle();
-    expect(find.text('今天的事，一眼有数。'), findsOneWidget);
+    expect(find.text('数据总览'), findsOneWidget);
     await tester.tap(find.byType(BackButton));
     await tester.pump(const Duration(milliseconds: 500));
     expect(browser.settings, settings);

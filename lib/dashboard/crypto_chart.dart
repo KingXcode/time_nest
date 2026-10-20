@@ -126,6 +126,8 @@ class _CryptoChartState extends State<CryptoChart> {
   Widget _settings() => Material(
     color: Colors.transparent,
     child: ExpansionTile(
+      dense: true,
+      minTileHeight: 40,
       key: const PageStorageKey('crypto-indicator-settings'),
       tilePadding: EdgeInsets.zero,
       title: const Text('指标设置'),
@@ -487,7 +489,7 @@ class _CryptoChartState extends State<CryptoChart> {
                 ),
               ),
             ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 14),
         _assessmentPanel(),
       ],
     );

@@ -147,18 +147,27 @@ class _ReleasesPanelState extends State<ReleasesPanel> {
             padding: EdgeInsets.symmetric(vertical: 18),
             child: Text('添加你关注的 GitHub 仓库，查看最新发布。'),
           ),
-        for (var i = 0; i < visible.length; i++) ...[
-          if (i > 0) const Divider(height: 32, color: Color(0xFF30363A)),
-          _RepositoryRelease(
-            key: ValueKey(visible[i]),
-            client: widget.client,
-            repo: visible[i],
-            onRemove: () => widget.onReposChanged([
-              for (final repo in widget.repos)
-                if (repo != visible[i]) repo,
-            ]),
-          ),
-        ],
+        DashboardColumns(
+          children: [
+            for (var i = 0; i < visible.length; i++)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  border: Border.all(color: dashboardBorder),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: _RepositoryRelease(
+                  key: ValueKey(visible[i]),
+                  client: widget.client,
+                  repo: visible[i],
+                  onRemove: () => widget.onReposChanged([
+                    for (final repo in widget.repos)
+                      if (repo != visible[i]) repo,
+                  ]),
+                ),
+              ),
+          ],
+        ),
         const SizedBox(height: 12),
         const Text(
           'Release 是仓库发布记录，可能包含预发布或子组件，不一定是软件当前稳定版。',
@@ -189,7 +198,7 @@ class _ReleasesPanelState extends State<ReleasesPanel> {
                 tooltip: '添加仓库',
                 onPressed: _addRepo,
                 icon: const Icon(Icons.add_rounded, color: _releaseAccent),
-                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
             ),
           ),
@@ -243,7 +252,7 @@ class _RepositoryRelease extends StatelessWidget {
             tooltip: '移除 $repo',
             onPressed: onRemove,
             icon: const Icon(Icons.close_rounded, size: 18),
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           ),
         ],
       ),
@@ -274,7 +283,7 @@ class _RepositoryRelease extends StatelessWidget {
                     onPressed: () => client.openUrl('https://github.com/$repo'),
                     icon: const Icon(Icons.open_in_new_rounded, size: 15),
                     label: const Text('查看仓库'),
-                    style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 32)),
                   ),
                 ],
               ),
@@ -293,7 +302,7 @@ class _RepositoryRelease extends StatelessWidget {
                 tag.isNotEmpty ? tag : (name.isNotEmpty ? name : '最新发布'),
                 style: const TextStyle(
                   color: _releaseAccent,
-                  fontSize: 28,
+                  fontSize: 20,
                   fontWeight: FontWeight.w600,
                   height: 1.3,
                 ),
@@ -323,7 +332,7 @@ class _RepositoryRelease extends StatelessWidget {
               const SizedBox(height: 12),
               Text(
                 body.isEmpty ? '该版本未提供发布说明。' : body,
-                maxLines: 4,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Color(0xFFD4DCDD), height: 1.6),
               ),
@@ -333,7 +342,7 @@ class _RepositoryRelease extends StatelessWidget {
                 ),
                 icon: const Icon(Icons.open_in_new_rounded, size: 15),
                 label: const Text('完整发布说明'),
-                style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+                style: TextButton.styleFrom(minimumSize: const Size(0, 32)),
               ),
             ],
           );

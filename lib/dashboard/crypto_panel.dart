@@ -463,7 +463,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       children: [
         const Text(
           '数字货币市场',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 6),
         const Text('币安现货 · USDT 计价', style: TextStyle(color: dashboardAccent)),
@@ -514,18 +514,22 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         _status(_quoteData, _quoteError, _quotesBusy),
         LayoutBuilder(
           builder: (context, box) {
-            final columns = box.maxWidth >= 620
+            final width =
+                box.maxWidth / MediaQuery.textScalerOf(context).scale(1);
+            final columns = width >= 1000
+                ? 6
+                : width >= 560
                 ? 3
-                : box.maxWidth >= 340
+                : width >= 250
                 ? 2
                 : 1;
             return Wrap(
-              spacing: 10,
-              runSpacing: 10,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 for (final asset in cryptoAssets.entries)
                   SizedBox(
-                    width: (box.maxWidth - (columns - 1) * 10) / columns,
+                    width: (box.maxWidth - (columns - 1) * 8) / columns,
                     child: _quoteCard(
                       asset.key,
                       _quotes.where((q) => q.symbol == asset.key).firstOrNull,
@@ -535,10 +539,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             );
           },
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 12),
         Text(
           '${cryptoAssets[widget.symbol]!.$1} / USDT',
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
         ),
         if (selected != null) ...[
           const SizedBox(height: 12),
@@ -561,7 +565,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             style: const TextStyle(color: dashboardMuted, fontSize: 11),
           ),
         ],
-        const SizedBox(height: 18),
+        const SizedBox(height: 10),
         Wrap(
           spacing: 8,
           runSpacing: 4,
@@ -643,19 +647,17 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     return Semantics(
       selected: active,
       child: Material(
-        color: active ? const Color(0xFF16332D) : const Color(0xFF101617),
+        color: active ? const Color(0xFF263D5B) : dashboardBackground,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: active ? dashboardAccent : const Color(0xFF2A3434),
-          ),
+          borderRadius: BorderRadius.circular(7),
+          side: BorderSide(color: active ? dashboardAccent : dashboardBorder),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: ValueKey('crypto-select-$symbol'),
           onTap: () => widget.onChanged(symbol, widget.interval),
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -663,11 +665,11 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                   '${asset.$1} · ${asset.$2}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 5),
                 Text(
                   quote == null ? '暂无报价' : cryptoPrice(quote.price),
                   style: const TextStyle(
-                    fontSize: 21,
+                    fontSize: 17,
                     fontWeight: FontWeight.w600,
                   ),
                 ),

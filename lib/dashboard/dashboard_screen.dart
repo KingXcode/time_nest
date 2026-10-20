@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
+import 'dashboard_overview.dart';
 import 'dashboard_widgets.dart';
 import 'crypto_panel.dart';
 import 'market_panel.dart';
@@ -32,21 +33,6 @@ const _icons = {
 };
 const _storageWarning = '浏览器存储不可用。当前选择仍可使用，刷新后可能丢失。';
 
-ThemeData _dashboardTheme(ThemeData theme) => theme.copyWith(
-  colorScheme: theme.colorScheme.copyWith(
-    primary: dashboardAccent,
-    onPrimary: const Color(0xFF082F27),
-    surface: const Color(0xFF151C1D),
-  ),
-  scaffoldBackgroundColor: const Color(0xFF0B1112),
-  inputDecorationTheme: InputDecorationTheme(
-    filled: true,
-    fillColor: const Color(0xFF101617),
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-  ),
-);
-
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key, this.client, this.now});
   final DashboardClient? client;
@@ -63,12 +49,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   );
   bool _favoritesOnly = false;
   bool _saved = true;
+  bool _detailOpen = false;
 
   bool _save(VoidCallback change) {
-    setState(() {
+    void apply() {
       change();
       _saved = _client.writePreferences(_preferences.encode());
-    });
+    }
+
+    if (_detailOpen) {
+      apply();
+    } else {
+      setState(apply);
+    }
     return _saved;
   }
 
@@ -81,8 +74,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   });
 
-  void _openModule(String id) {
-    Navigator.of(context).push<void>(
+  Future<void> _openModule(String id) async {
+    _detailOpen = true;
+    await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (context) => _DashboardModuleScreen(
           id: id,
@@ -94,6 +88,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
+    _detailOpen = false;
+    if (mounted) setState(() {});
   }
 
   Future<void> _organize() async {
@@ -197,64 +193,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _entry(String id) => Material(
-    color: const Color(0xFF151C1D),
+    color: dashboardSurface,
     shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(24),
-      side: const BorderSide(color: Color(0xFF2A3434)),
+      borderRadius: BorderRadius.circular(7),
+      side: const BorderSide(color: dashboardBorder),
     ),
     clipBehavior: Clip.antiAlias,
     child: InkWell(
       key: ValueKey('dashboard-entry-$id'),
       onTap: () => _openModule(id),
       child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.only(left: 10, right: 2, top: 2, bottom: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                Icon(_icons[id], size: 26, color: dashboardAccent),
-                const Spacer(),
-                IconButton(
-                  tooltip:
-                      '${_preferences.favorites.contains(id) ? '取消收藏' : '收藏'}${_titles[id]}',
-                  isSelected: _preferences.favorites.contains(id),
-                  onPressed: () => _toggleFavorite(id),
-                  icon: const Icon(Icons.star_outline_rounded, size: 21),
-                  selectedIcon: const Icon(
-                    Icons.star_rounded,
-                    color: dashboardAccent,
-                    size: 21,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
+            Icon(_icons[id], size: 16, color: dashboardAccent),
+            const SizedBox(width: 7),
             Text(
               _titles[id]!,
-              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             ),
-            const SizedBox(height: 8),
-            Text(
-              _subtitles[id]!,
-              style: const TextStyle(
-                fontSize: 13,
-                color: dashboardMuted,
-                height: 1.6,
+            const SizedBox(width: 5),
+            IconButton(
+              tooltip:
+                  '${_preferences.favorites.contains(id) ? '取消收藏' : '收藏'}${_titles[id]}',
+              isSelected: _preferences.favorites.contains(id),
+              onPressed: () => _toggleFavorite(id),
+              icon: const Icon(Icons.star_outline_rounded, size: 15),
+              selectedIcon: const Icon(
+                Icons.star_rounded,
+                color: dashboardAccent,
+                size: 15,
               ),
-            ),
-            const SizedBox(height: 18),
-            const Row(
-              children: [
-                Expanded(
-                  child: Text('打开', style: TextStyle(color: dashboardAccent)),
-                ),
-                Icon(
-                  Icons.arrow_forward_rounded,
-                  size: 20,
-                  color: dashboardAccent,
-                ),
-              ],
             ),
           ],
         ),
@@ -269,12 +239,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .where((id) => !_favoritesOnly || _preferences.favorites.contains(id))
         .toList();
     return Theme(
-      data: _dashboardTheme(Theme.of(context)),
+      data: dashboardTheme(Theme.of(context)),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('此刻 / 每日看板', style: TextStyle(fontSize: 16)),
-          backgroundColor: const Color(0xFF0B1112),
-          surfaceTintColor: Colors.transparent,
+          title: const Text('每日看板'),
           leading: BackButton(onPressed: () => Navigator.maybePop(context)),
           actions: [
             IconButton(
@@ -288,44 +256,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body: SafeArea(
           child: SingleChildScrollView(
             key: const PageStorageKey('dashboard-scroll'),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 36),
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1100),
+                constraints: const BoxConstraints(maxWidth: 1440),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      '${today.year} 年 ${today.month} 月 ${today.day} 日',
-                      style: const TextStyle(
-                        color: dashboardAccent,
-                        fontSize: 13,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      '今天的事，一眼有数。',
-                      style: TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      '选择一个功能，打开独立页面。\n你的选择只保存在这台设备的浏览器里。',
-                      style: TextStyle(
-                        color: dashboardMuted,
-                        height: 1.7,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: 12,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
+                        const Text(
+                          '数据总览',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          '${today.year} 年 ${today.month} 月 ${today.day} 日',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: dashboardMuted,
+                          ),
+                        ),
                         ChoiceChip(
                           label: const Text('全部功能'),
                           selected: !_favoritesOnly,
@@ -338,50 +294,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           onSelected: (_) =>
                               setState(() => _favoritesOnly = true),
                         ),
-                        ActionChip(
-                          avatar: const Icon(Icons.swap_vert_rounded, size: 16),
-                          label: const Text('调整顺序'),
-                          onPressed: _organize,
-                        ),
                       ],
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [for (final id in modules) _entry(id)],
                     ),
                     if (!_saved)
                       const Padding(
-                        padding: EdgeInsets.only(top: 12),
+                        padding: EdgeInsets.only(top: 8),
                         child: Text(
                           _storageWarning,
-                          style: TextStyle(color: dashboardMuted),
+                          style: TextStyle(color: dashboardMuted, fontSize: 11),
                         ),
                       ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 12),
                     if (modules.isEmpty)
                       const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 40),
+                        padding: EdgeInsets.symmetric(vertical: 20),
                         child: Text('还没有收藏。在全部功能里点一下星标吧。'),
                       ),
-                    LayoutBuilder(
-                      builder: (context, box) {
-                        final columns = box.maxWidth >= 700 ? 2 : 1;
-                        final width =
-                            (box.maxWidth - (columns - 1) * 20) / columns;
-                        return Wrap(
-                          spacing: 20,
-                          runSpacing: 20,
-                          children: [
-                            for (final id in modules)
-                              SizedBox(width: width, child: _entry(id)),
-                          ],
-                        );
-                      },
+                    DashboardOverview(
+                      client: _client,
+                      preferences: _preferences,
+                      modules: modules,
+                      onOpen: _openModule,
+                      now: widget.now,
                     ),
-                    const SizedBox(height: 26),
                     const Text(
-                      '进入功能后才会加载对应数据。公开数据有缓存和来源；第三方服务可能延迟或暂时不可用。',
-                      style: TextStyle(
-                        color: dashboardMuted,
-                        fontSize: 11,
-                        height: 1.7,
-                      ),
+                      '首页为按需加载的数据快照，展开可查看完整数据与实时图表。',
+                      style: TextStyle(color: dashboardMuted, fontSize: 11),
                     ),
                   ],
                 ),
@@ -394,8 +338,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-/// A route owns only its selected panel. Other modules stay unmounted, avoiding
-/// their network requests and preserving the dashboard as a lightweight entry.
+/// Detail routes own their chart subscriptions; overview snapshots have no timers.
 class _DashboardModuleScreen extends StatefulWidget {
   const _DashboardModuleScreen({
     required this.id,
@@ -474,22 +417,20 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
 
   @override
   Widget build(BuildContext context) => Theme(
-    data: _dashboardTheme(Theme.of(context)),
+    data: dashboardTheme(Theme.of(context)),
     child: Scaffold(
       key: ValueKey('dashboard-page-${widget.id}'),
       appBar: AppBar(
         title: Text(_titles[widget.id]!),
-        backgroundColor: const Color(0xFF0B1112),
-        surfaceTintColor: Colors.transparent,
         leading: const BackButton(),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           key: PageStorageKey('dashboard-${widget.id}-scroll'),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 36),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 920),
+              constraints: const BoxConstraints(maxWidth: 1440),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -501,13 +442,13 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
                       height: 1.6,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 8),
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF151C1D),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: const Color(0xFF2A3434)),
+                      color: dashboardSurface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: dashboardBorder),
                     ),
                     child: _panel(),
                   ),

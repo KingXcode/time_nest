@@ -191,7 +191,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
                   alignment: Alignment.centerLeft,
                   padding: const EdgeInsets.all(12),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(7),
                   ),
                 ),
                 onPressed: () => _choose(candidate),
@@ -314,7 +314,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
                 Text(
                   '${(current.temperature ?? current.feels).round()}°',
                   style: const TextStyle(
-                    fontSize: 48,
+                    fontSize: 34,
                     height: 1.15,
                     fontWeight: FontWeight.w500,
                     color: _accent,
@@ -351,7 +351,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
             ),
           ],
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 10),
         const Text('逐小时预报', style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 10),
         SingleChildScrollView(
@@ -435,7 +435,7 @@ class _HourCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF151D22),
         border: Border.all(color: Colors.white.withValues(alpha: .06)),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(7),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -456,7 +456,7 @@ class _HourCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             '${(hour.temperature ?? hour.feels).round()}°',
-            style: const TextStyle(fontSize: 24),
+            style: const TextStyle(fontSize: 21),
           ),
           Text(
             hour.temperature == null ? '体感温度' : '体感 ${hour.feels.round()}°',

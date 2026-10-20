@@ -4,8 +4,136 @@ import 'package:flutter/material.dart';
 
 import 'dashboard_client.dart';
 
-const dashboardAccent = Color(0xFF67D8C2);
-const dashboardMuted = Color(0xFFA0AAA9);
+const dashboardAccent = Color(0xFF85B6FF);
+const dashboardMuted = Color(0xFF9BACBF);
+const dashboardBackground = Color(0xFF101824);
+const dashboardSurface = Color(0xFF182332);
+const dashboardBorder = Color(0xFF2C3B4E);
+
+ThemeData dashboardTheme(ThemeData base) {
+  final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(7));
+  final button = TextButton.styleFrom(
+    minimumSize: const Size(0, 32),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    shape: shape,
+    textStyle: const TextStyle(fontFamily: 'ShikeSans', fontSize: 12),
+  );
+  return base.copyWith(
+    colorScheme: base.colorScheme.copyWith(
+      primary: dashboardAccent,
+      onPrimary: dashboardBackground,
+      surface: dashboardSurface,
+      onSurface: const Color(0xFFE7EEF8),
+      outline: dashboardBorder,
+    ),
+    scaffoldBackgroundColor: dashboardBackground,
+    visualDensity: VisualDensity.compact,
+    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    textTheme: base.textTheme
+        .apply(fontFamily: 'ShikeSans')
+        .copyWith(
+          bodyMedium: const TextStyle(
+            fontFamily: 'ShikeSans',
+            fontSize: 13,
+            height: 1.4,
+            color: Color(0xFFE7EEF8),
+          ),
+          bodySmall: const TextStyle(
+            fontFamily: 'ShikeSans',
+            fontSize: 11,
+            height: 1.4,
+            color: dashboardMuted,
+          ),
+          titleMedium: const TextStyle(
+            fontFamily: 'ShikeSans',
+            fontSize: 15,
+            color: Color(0xFFE7EEF8),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: dashboardBackground,
+      surfaceTintColor: Colors.transparent,
+      toolbarHeight: 46,
+      titleTextStyle: TextStyle(
+        fontFamily: 'ShikeSans',
+        fontSize: 16,
+        color: Color(0xFFE7EEF8),
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(style: button),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: button),
+    filledButtonTheme: FilledButtonThemeData(style: button),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        minimumSize: const Size(32, 32),
+        padding: const EdgeInsets.all(6),
+        iconSize: 17,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    ),
+    chipTheme: base.chipTheme.copyWith(
+      shape: shape,
+      side: const BorderSide(color: dashboardBorder),
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 5),
+      labelStyle: const TextStyle(
+        fontFamily: 'ShikeSans',
+        fontSize: 12,
+        color: Color(0xFFE7EEF8),
+      ),
+      selectedColor: const Color(0xFF2C4364),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      isDense: true,
+      filled: true,
+      fillColor: dashboardBackground,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(7),
+        borderSide: const BorderSide(color: dashboardBorder),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+    ),
+    dividerTheme: const DividerThemeData(
+      color: dashboardBorder,
+      space: 16,
+      thickness: 1,
+    ),
+  );
+}
+
+class DashboardColumns extends StatelessWidget {
+  const DashboardColumns({
+    super.key,
+    required this.children,
+    this.minWidth = 450,
+  });
+  final List<Widget> children;
+  final double minWidth;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final columns =
+          (box.maxWidth /
+                  (minWidth * MediaQuery.textScalerOf(context).scale(1)))
+              .floor()
+              .clamp(1, 2);
+      return Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          for (final child in children)
+            SizedBox(
+              width: (box.maxWidth - (columns - 1) * 12) / columns,
+              child: child,
+            ),
+        ],
+      );
+    },
+  );
+}
 
 /// One asynchronous result at a time. Request generations keep fast input
 /// changes from letting an older network response replace the current result.
@@ -18,6 +146,7 @@ class ApiSection extends StatefulWidget {
     required this.builder,
     this.sourceLabel,
     this.sourceUrl,
+    this.compact = false,
   });
 
   final DashboardClient client;
@@ -26,6 +155,7 @@ class ApiSection extends StatefulWidget {
   final Widget Function(BuildContext, DashboardData) builder;
   final String? sourceLabel;
   final String? sourceUrl;
+  final bool compact;
 
   @override
   State<ApiSection> createState() => _ApiSectionState();
@@ -93,9 +223,9 @@ class _ApiSectionState extends State<ApiSection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_loading && result == null)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
-            child: Row(
+          Padding(
+            padding: EdgeInsets.symmetric(vertical: widget.compact ? 10 : 20),
+            child: const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 SizedBox(
@@ -137,7 +267,7 @@ class _ApiSectionState extends State<ApiSection> {
               ),
             ),
           ),
-        const SizedBox(height: 12),
+        SizedBox(height: widget.compact ? 3 : 8),
         Wrap(
           spacing: 8,
           runSpacing: 4,
@@ -181,7 +311,10 @@ class _ApiSectionState extends State<ApiSection> {
               ),
               style: TextButton.styleFrom(
                 textStyle: const TextStyle(fontSize: 12),
-                minimumSize: const Size(64, 44),
+                minimumSize: Size(
+                  widget.compact ? 0 : 54,
+                  widget.compact ? 26 : 32,
+                ),
                 padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
             ),
