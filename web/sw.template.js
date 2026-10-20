@@ -71,7 +71,7 @@ async function installBuild() {
   await cache.put(markerURL, new Response(JSON.stringify(BUILD), {
     headers: { 'Content-Type': 'application/json' },
   }));
-  // No skipWaiting here: updating an open presentation requires user consent.
+  // The page bridge decides when to activate, after UI readiness/visibility.
 }
 self.addEventListener('install', (event) => event.waitUntil(installBuild()));
 
@@ -182,7 +182,7 @@ self.addEventListener('message', (event) => {
   const source = event.source;
   if (!source?.id || !source.url || !inScope(new URL(source.url))) return;
   if (event.data?.type === 'SKIP_WAITING') {
-    // The only skipWaiting path. The bridge sends it exclusively on applyUpdate.
+    // The bridge accepts only fully installed releases, automatically or manually.
     event.waitUntil(self.skipWaiting());
   } else if (event.data?.type === 'SHIKE_STATUS' && event.ports?.[0]) {
     event.waitUntil((async () => {

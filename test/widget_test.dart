@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:time_nest/app_version.dart';
 import 'package:time_nest/clock/clock_settings.dart';
 import 'package:time_nest/main.dart';
 import 'package:time_nest/platform/browser_client.dart';
@@ -64,6 +65,34 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets(
+    'small version sits below the clock title and follows its visibility',
+    (tester) async {
+      await launch(tester, TestBrowser(), size: const Size(320, 568));
+      await tester.tapAt(const Offset(100, 100));
+      await tester.pump();
+      final version = find.byKey(const Key('home-version'));
+      expect(find.text('版本 $appVersion'), findsOneWidget);
+      final titleRect = tester.getRect(find.text('此刻'));
+      final versionRect = tester.getRect(version);
+      expect(versionRect.top, greaterThanOrEqualTo(titleRect.bottom));
+      expect(versionRect.left, titleRect.left);
+      expect(tester.widget<Text>(version).style!.fontSize, 9);
+      await tester.pump(const Duration(seconds: 5));
+      expect(version.hitTestable(), findsNothing);
+      await tester.tapAt(const Offset(100, 100));
+      await tester.pump();
+      await tester.tap(find.byTooltip('切换模式'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('倒计时'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(version, findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   for (final size in [
     const Size(414, 736),

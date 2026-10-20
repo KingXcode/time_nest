@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_version.dart';
 import '../clock/clock_settings.dart';
 import '../platform/browser_client.dart';
 
@@ -243,12 +244,14 @@ class SettingsPanel extends StatelessWidget {
                       ],
                     ),
                     const _Note('刷新页面会先检查服务器更新，加载新版后重新打开；保留已保存的设置和计时。'),
-                    if (state.updateAvailable)
-                      const _Note('新版本已就绪。仅在你确认后刷新，当前展示不会被中断。'),
+                    const _Note('网页会自动检查并加载完整新版；也可以使用上方按钮手动更新。'),
                     if (state.updateError)
                       const _Note('更新检查或加载失败，当前版本仍可使用。请联网后重试。'),
                     const _Section('关于此刻'),
-                    const Text('此刻 1.1.0', style: TextStyle(fontSize: 14)),
+                    const Text(
+                      '此刻 $appVersion',
+                      style: TextStyle(fontSize: 14),
+                    ),
                     const SizedBox(height: 6),
                     const _Note('使用设备系统时间与本地时区，不进行网络校时，也不保证毫秒级精度。'),
                     const _Note('长期展示注意散热和电池健康；发现鼓包或异常发热应停止充电使用。'),

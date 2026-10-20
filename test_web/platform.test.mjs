@@ -189,8 +189,8 @@ test('failed empty registration is registered again on explicit retry', async ()
   b.api.dispose();
 });
 
-test('old tab keeps a confirmation action after another tab activates the update', async () => {
-  const options = { sw: true };
+test('hidden old tab retains manual update after another tab activates the update', async () => {
+  const options = { sw: true, hidden: true };
   const b = browser(options);
   await settle();
   options.activeVersion = 'two';
@@ -412,8 +412,8 @@ test('installing is checking, installed+activated is ready; claim alone never re
   b.api.dispose();
 });
 
-test('only explicit applyUpdate sends skipWaiting and reloads accepting tab once', async () => {
-  const b = browser({ sw: true });
+test('manual applyUpdate remains available while automatic updates are paused', async () => {
+  const b = browser({ sw: true, hidden: true });
   await settle();
   const waiting = b.worker('installed');
   b.reg.waiting = waiting;
@@ -448,7 +448,7 @@ test('manual update check is immediate, deduplicated and reports failures', asyn
   b.api.dispose();
 });
 
-test('a visible page discovers updates every five minutes and waits for user acceptance', async () => {
+test('a visible page checks every five minutes and automatically applies a complete release', async () => {
   const options = { sw: true };
   const b = browser(options);
   await settle();
@@ -463,16 +463,15 @@ test('a visible page discovers updates every five minutes and waits for user acc
   next.state = 'installed'; next.emit('statechange');
   assert.equal(b.state().updateAvailable, true);
   assert.equal(b.reloads(), 0);
-  assert.equal(next.messages.some(m => m.type === 'SKIP_WAITING'), false);
-  options.updateRequest = undefined;
-  await b.advance(300000);
-  assert.equal(b.calls.filter(c => c === 'update').length, 2);
-  assert.equal(b.reloads(), 0);
-  b.api.refreshPage(); await settle();
   assert.equal(next.messages.filter(m => m.type === 'SKIP_WAITING').length, 1);
+  b.api.applyUpdate(); b.reg.emit('updatefound');
+  assert.equal(next.messages.filter(m => m.type === 'SKIP_WAITING').length, 1);
+  b.api.writeSettings('saved settings'); b.api.writeTimer('saved timer');
   b.sw.controller = next; b.sw.emit('controllerchange');
   assert.equal(b.reloads(), 1);
   assert.equal(b.timers.size, 0);
+  assert.equal(b.api.readSettings(), 'saved settings');
+  assert.equal(b.api.readTimer(), 'saved timer');
   b.api.dispose();
 });
 
@@ -519,6 +518,70 @@ test('automatic check failures are quiet and recover on the next scheduled check
   await b.advance(300000);
   assert.equal(b.state().updateAvailable, true);
   assert.equal(b.reloads(), 0);
+  assert.equal(b.reg.waiting.messages[0].type, 'SKIP_WAITING');
+  b.api.dispose();
+});
+
+test('a complete update found on startup waits until the hidden page is visible', async () => {
+  const b = browser({ sw: true, hidden: true, existing: true });
+  const next = b.worker('installed'); b.reg.waiting = next;
+  await settle();
+  assert.equal(b.state().updateAvailable, true);
+  assert.equal(next.messages.length, 0);
+  b.show(); await settle();
+  assert.equal(next.messages[0].type, 'SKIP_WAITING');
+  b.hide();
+  b.reg.waiting = null; b.reg.active = next; next.state = 'activated';
+  b.sw.controller = next; b.sw.emit('controllerchange');
+  assert.equal(b.reloads(), 0, 'do not reload a hidden page during activation');
+  b.show(); await settle();
+  assert.equal(b.reloads(), 1);
+  b.api.dispose();
+});
+
+test('a visible old tab automatically reloads once after another tab activates a complete release', async () => {
+  const options = { sw: true };
+  const b = browser(options); await settle();
+  options.activeVersion = 'two';
+  b.sw.emit('controllerchange'); await settle();
+  b.sw.emit('controllerchange'); await settle();
+  assert.equal(b.reloads(), 1);
+  b.api.dispose();
+});
+
+test('an already active but incomplete release never triggers an automatic reload', async () => {
+  const b = browser({ sw: true, ready: false, activeVersion: 'two' });
+  await settle();
+  assert.equal(b.reloads(), 0);
+  assert.equal(b.state().offlineStatus, 'failed');
+  b.api.dispose();
+});
+
+test('the transient waiting state of a first install never accepts or reloads', async () => {
+  const b = browser({ sw: true, noActive: true }); await settle();
+  const first = b.worker('installed');
+  b.reg.waiting = first; b.reg.emit('updatefound'); await settle();
+  assert.equal(first.messages.length, 0);
+  b.reg.waiting = null; b.reg.active = first; first.state = 'activated';
+  b.sw.controller = first; b.sw.emit('controllerchange'); await settle();
+  assert.equal(b.reloads(), 0);
+  b.api.dispose();
+});
+
+test('automatic activation timeout is bounded and the manual flow can retry', async () => {
+  const b = browser({ sw: true }); await settle();
+  const next = b.worker('installed'); b.reg.waiting = next;
+  b.reg.emit('updatefound'); await settle();
+  assert.equal(next.messages.length, 1);
+  await b.advance(90000);
+  assert.equal(b.state().refreshing, false);
+  assert.equal(b.state().updateError, true);
+  b.reg.emit('updatefound'); await settle();
+  assert.equal(next.messages.length, 1, 'no immediate automatic retry loop');
+  b.api.refreshPage(); await settle();
+  assert.equal(next.messages.length, 2);
+  b.sw.controller = next; b.sw.emit('controllerchange');
+  assert.equal(b.reloads(), 1);
   b.api.dispose();
 });
 
@@ -614,7 +677,7 @@ test('manual refresh waits for installation and the accepted controller before r
 
 test('manual refresh accepts an already downloaded update or one activated in another tab', async () => {
   for (const alreadyActive of [false, true]) {
-    const b = browser({ sw: true, activeVersion: alreadyActive ? 'two' : 'one' });
+    const b = browser({ sw: true, hidden: true, activeVersion: alreadyActive ? 'two' : 'one' });
     await settle();
     const next = b.worker('installed');
     if (!alreadyActive) b.reg.waiting = next;

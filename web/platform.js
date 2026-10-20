@@ -59,6 +59,8 @@
   let reloading = false;
   let refreshTimer = null;
   let refreshWorker = null;
+  let automaticRefresh = false;
+  const automaticallyAcceptedWorkers = new WeakSet();
   const updateCheckInterval = 5 * 60 * 1000;
   const resumeCheckInterval = 60 * 1000;
   let updateCheckTimer = null;
@@ -208,10 +210,12 @@
     timer = win.setTimeout(() => finish('failed'), 4000);
     channel.port1.onmessage = (event) => {
       if (event.data?.type === 'SHIKE_STATUS') {
+        if (serial !== readySerial || paused || disposed) { finish(null); return; }
         activeUpdateAvailable = Boolean(event.data.version && event.data.activeVersion
           && event.data.version !== event.data.activeVersion);
         patch({ updateAvailable: activeUpdateAvailable || Boolean(registration?.waiting && ownsWorker(registration.waiting)) });
         finish(event.data.ready === true ? 'ready' : 'failed');
+        maybeAutoUpdate();
       }
     };
     try { registration.active.postMessage({ type: 'SHIKE_STATUS' }, [channel.port2]); }
@@ -230,6 +234,7 @@
       if (registration.active.state === 'activated') queryReady();
     }
     continueRefresh();
+    maybeAutoUpdate();
   }
   function observeWorker(worker) {
     if (!ownsWorker(worker) || observedWorkers.has(worker)) return;
@@ -295,7 +300,7 @@
       // BFCache can restore before an aborted probe settles. Resume once for
       // that lifecycle epoch, never retry ordinary network/install failures.
       if (!disposed && !paused && epoch !== swEpoch) setupSW();
-      else if (!updatePending) scheduleUpdateCheck();
+      else if (!updatePending) { maybeAutoUpdate(); scheduleUpdateCheck(); }
     });
     setupPending = task;
     return task;
@@ -319,6 +324,9 @@
   }
   function resumeUpdateChecks() {
     if (!canCheckAutomatically()) { stopUpdateChecks(); return; }
+    controllerChanged();
+    maybeAutoUpdate();
+    if (reloading) return;
     // Visibility/pageshow/online often arrive together. Limit those checks to
     // once a minute; manual actions always remain available immediately.
     if (!setupPending && Date.now() - lastUpdateCheckAt >= resumeCheckInterval) checkForUpdate(true);
@@ -345,13 +353,18 @@
       }
       if (cancelled()) return;
       await registration.update();
-      if (!cancelled()) refreshRegistration();
+      if (!cancelled()) {
+        patch({ updateError: false });
+        if (registration.waiting) automaticallyAcceptedWorkers.delete(registration.waiting);
+        refreshRegistration();
+      }
     })().catch(() => {
       if (!cancelled() && (!automatic || state.refreshing)) patch({ updateError: true });
     }).finally(() => {
       if (updatePending !== operation) return;
       updatePending = null;
       continueRefresh();
+      maybeAutoUpdate();
       scheduleUpdateCheck();
     });
   }
@@ -362,6 +375,7 @@
     refreshTimer = null;
     if (refreshWorker && acceptedWorker === refreshWorker) acceptedWorker = null;
     refreshWorker = null;
+    automaticRefresh = false;
     patch({ refreshing: false, ...(failed ? { updateError: true } : {}) });
     if (wasRefreshing) scheduleUpdateCheck();
   }
@@ -402,6 +416,27 @@
     refreshTimer = win.setTimeout(() => finishRefresh(true), 90000);
     checkForUpdate();
   }
+  function maybeAutoUpdate() {
+    if (!canCheckAutomatically() || !state.updateAvailable || state.updateError
+        || state.refreshing || updatePending || acceptedWorker || setupPending) return;
+    const waiting = registration?.waiting;
+    if (ownsWorker(waiting) && waiting.state === 'installed' && ownsWorker(sw.controller)) {
+      // Installed means the worker verified and cached the entire release.
+      // One attempt per worker/check avoids an activation failure retry loop.
+      if (automaticallyAcceptedWorkers.has(waiting)) return;
+      automaticallyAcceptedWorkers.add(waiting);
+      automaticRefresh = true;
+      refreshWorker = waiting;
+      patch({ refreshing: true, updateError: false });
+      refreshTimer = win.setTimeout(() => finishRefresh(true), 90000);
+      applyUpdate();
+      if (state.updateError) finishRefresh(true);
+    } else if (activeUpdateAvailable && state.offlineStatus === 'ready') {
+      // Another tab activated a complete release; this document is still pinned
+      // to its old build. Navigation switches it atomically to the active build.
+      reloadPage();
+    }
+  }
   function applyUpdate() {
     if (disposed || paused || acceptedWorker || reloading) return;
     if (!registration?.waiting) {
@@ -418,8 +453,10 @@
   }
   function controllerChanged() {
     if (disposed || paused) return;
-    // Initial clients.claim and another tab's acceptance MUST NOT reload us.
-    if (acceptedWorker && sw.controller === acceptedWorker && !reloading) {
+    // Initial clients.claim is not an update. Automatic activation in a hidden
+    // document is completed when that document returns to the foreground.
+    if (acceptedWorker && sw.controller === acceptedWorker && !reloading
+        && (!automaticRefresh || state.visible)) {
       reloadPage();
       return;
     }

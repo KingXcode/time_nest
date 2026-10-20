@@ -164,8 +164,10 @@ try {
   await missingLoader.navigate(origin + '/no-loading/'); await ready(missingLoader);
   passed('missing optional startup script does not block the complete app');
   page = await connect();
+  await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `sessionStorage.setItem('smoke-loads', String(Number(sessionStorage.getItem('smoke-loads') || 0) + 1));` });
   await page.navigate(origin + '/');
   await ready(); await offlineReady();
+  assert.equal(await page.evaluate('sessionStorage.getItem("smoke-loads")'), '1', 'first precache must not reload the document');
   assert.match(await page.evaluate('document.title'), /此刻/);
   const offlineProgress = await page.evaluate('JSON.parse(shike.getState())');
   assert.ok(offlineProgress.offlineTotal > 0);
@@ -181,7 +183,7 @@ try {
   await page.screenshot('02-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 736, height: 414, deviceScaleFactor: 1, mobile: false });
   await delay(400); await page.screenshot('03-landscape.png');
-  await click(100, 100); await delay(250); await click(690, 36); await delay(500);
+  await showToolbar(); await activate('展示设置');
   await page.screenshot('04-settings.png');
   await writeFile(path.join(output, 'semantics.json'), JSON.stringify(await labels(), null, 2));
   await page.evaluate(`(${deepQuery})('[role="switch"]').find(e => e.getAttribute('aria-label') === '显示秒').click()`);
@@ -254,24 +256,53 @@ try {
   await page.screenshot('06-offline.png');
   passed('offline reload renders Flutter and retains settings');
   await page.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
-  // Two documents stay on consistent versions. Neither reloads just for discovery.
+  // Complete releases update automatically. Hidden tabs retain a coherent old
+  // build until visible; saved settings/timers survive both automatic and manual updates.
   const other = await connect(); await other.navigate(origin + '/'); await ready(other); await offlineReady(other);
-  await other.evaluate('window.__sameDocument = true');
+  await page.send('Page.bringToFront');
+  await other.evaluate(`Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});
+    document.dispatchEvent(new Event('visibilitychange')); window.__sameDocument = true;`);
   await page.evaluate('window.__sameDocument = true');
   version = 2;
-  await page.evaluate('shike.checkForUpdate()');
-  await waitFor(() => page.evaluate('JSON.parse(shike.getState()).updateAvailable'), 'waiting update');
-  assert.equal(await page.evaluate('window.__sameDocument'), true);
-  await page.evaluate('shike.applyUpdate()');
-  await waitFor(() => page.evaluate('window.__sameDocument === undefined && Boolean(window.shike)'), 'accepted reload');
+  await page.evaluate('navigator.serviceWorker.getRegistration().then(r=>r.update())');
+  await waitFor(() => page.evaluate('window.__sameDocument === undefined && Boolean(window.shike)'), 'automatic reload without acceptance');
   await ready(); await offlineReady();
+  assert.match(await page.evaluate('fetch("index.html").then(r=>r.text())'), /smoke-version-2/);
+  assert.deepEqual(await page.evaluate('JSON.parse(shike.readSettings())'), custom);
+  assert.equal(await page.evaluate('JSON.parse(shike.readTimer()).focus.status'), 'paused');
   assert.equal(await other.evaluate('window.__sameDocument'), true);
-  await waitFor(() => other.evaluate('JSON.parse(shike.getState()).updateAvailable'), 'old tab retains update action');
+  await waitFor(() => other.evaluate('JSON.parse(shike.getState()).updateAvailable'), 'hidden old tab update detection');
   assert.match(await other.evaluate('fetch("index.html").then(r=>r.text())'), /smoke-version-1/);
-  await other.evaluate('shike.applyUpdate()');
-  await waitFor(() => other.evaluate('window.__sameDocument === undefined && Boolean(window.shike)'), 'second tab confirmation');
-  await ready(other);
-  passed('update waits for confirmation; second tab stays old and can confirm later');
+  await other.send('Page.bringToFront');
+  await other.evaluate(`Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});
+    document.dispatchEvent(new Event('visibilitychange'));`);
+  await waitFor(() => other.evaluate('window.__sameDocument === undefined && Boolean(window.shike)'), 'automatic second tab update on resume');
+  await ready(other); await offlineReady(other);
+  passed('complete updates load automatically; hidden tabs update on resume and retain settings/timers');
+  await page.send('Page.bringToFront');
+  await page.evaluate(`Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});
+    document.dispatchEvent(new Event('visibilitychange')); window.__sameDocument = true;`);
+  version = 3;
+  await page.evaluate('shike.checkForUpdate()');
+  await waitFor(() => page.evaluate('JSON.parse(shike.getState()).updateAvailable'), 'manual check still discovers update');
+  assert.equal(await page.evaluate('window.__sameDocument'), true);
+  await page.evaluate('shike.refreshPage()');
+  await waitFor(() => page.evaluate('window.__sameDocument === undefined && Boolean(window.shike)'), 'manual refresh loads latest release');
+  await ready(); await offlineReady();
+  assert.match(await page.evaluate('fetch("index.html").then(r=>r.text())'), /smoke-version-3/);
+  assert.deepEqual(await page.evaluate('JSON.parse(shike.readSettings())'), custom);
+  passed('manual check and refresh remain available and preserve saved settings');
+  const release = JSON.parse(await readFile(path.join(root,'build/web/version.json'),'utf8'));
+  await page.send('Page.bringToFront');
+  await enableSemantics();
+  await key('Shift', 'ShiftLeft', 16); await showToolbar();
+  await page.screenshot('12-home-version.png');
+  // CanvasKit paints the tiny label; widget tests check its content/layout and
+  // this screenshot is inspected visually. The compiled constant must agree
+  // with Flutter's release metadata, even when the popup merges its semantics.
+  assert.ok(files.find(file => file.path === 'main.dart.js').bytes.includes(
+    Buffer.from(`${release.version}+${release.build_number}`)), 'compiled display version matches metadata');
+  passed('homepage small version matches release metadata');
   // Partial eviction should recover only hash-matching bytes while online.
   await page.evaluate(`(async()=>{for(const name of await caches.keys()) if(name.includes(':version:')) {
     const cache=await caches.open(name); await cache.delete(new URL('index.html',document.baseURI).href);

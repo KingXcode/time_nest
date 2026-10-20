@@ -14,7 +14,7 @@ cd -- "${PROJECT_ROOT}"
 # such as --base-href=/clock/, --dart-define=..., and --no-pub pass through.
 for argument in "$@"; do
   case "${argument}" in
-    --output|--output=*|--output-dir|--output-dir=*|-o|-o?*|--debug|--profile|--wasm|--web-resources-cdn|--web-resources-cdn=*|--pwa-strategy|--pwa-strategy=*)
+    --output|--output=*|--output-dir|--output-dir=*|-o|-o?*|--debug|--profile|--wasm|--web-resources-cdn|--web-resources-cdn=*|--pwa-strategy|--pwa-strategy=*|--build-name|--build-name=*|--build-number|--build-number=*|--dart-define=APP_VERSION=*|--dart-define-from-file|--dart-define-from-file=*)
       printf 'This release/offline wrapper does not allow: %s\n' "${argument}" >&2
       exit 2
       ;;
@@ -32,5 +32,9 @@ if [[ -n "${FLUTTER_BIN:-}" ]]; then
 else
   flutter_command=(fvm flutter)
 fi
-"${flutter_command[@]}" build web --release --no-web-resources-cdn --pwa-strategy=none "$@"
+release_version="$(node tool/release_version.mjs)"
+printf 'Building 此刻 %s\n' "${release_version}"
+"${flutter_command[@]}" build web --release --no-web-resources-cdn --pwa-strategy=none "$@" \
+  --build-name="${release_version%%+*}" --build-number="${release_version##*+}" \
+  --dart-define="APP_VERSION=${release_version}"
 node tool/generate_sw.mjs build/web

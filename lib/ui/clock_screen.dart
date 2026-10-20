@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../app_version.dart';
 import '../clock/clock_controller.dart';
 import '../clock/clock_settings.dart';
 import '../clock/timer_controller.dart';
@@ -373,15 +374,33 @@ class _ClockScreenState extends State<ClockScreen>
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text(
-                                            switch (_timer.mode) {
-                                              'countdown' => '倒计时',
-                                              'focus' => '番茄钟',
-                                              _ => '此刻',
-                                            },
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                            ),
+                                          Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                switch (_timer.mode) {
+                                                  'countdown' => '倒计时',
+                                                  'focus' => '番茄钟',
+                                                  _ => '此刻',
+                                                },
+                                                style: const TextStyle(
+                                                  fontSize: 16,
+                                                ),
+                                              ),
+                                              if (_timer.mode == 'clock')
+                                                const Text(
+                                                  '版本 $appVersion',
+                                                  key: Key('home-version'),
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    height: 1.4,
+                                                    color: Color(0xFF8995A5),
+                                                    letterSpacing: 0.2,
+                                                  ),
+                                                ),
+                                            ],
                                           ),
                                           const Icon(
                                             Icons.expand_more_rounded,
