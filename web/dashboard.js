@@ -2,7 +2,7 @@
 // Provider documentation: open-meteo.com/en/docs,
 // developers.binance.com/docs/binance-spot-api-docs/faqs/market_data_only,
 // github.com/HackerNews/API,
-// docs.github.com/en/rest/releases/releases, sspai.com/post/24194 (official RSS).
+// sspai.com/post/24194 (official RSS).
 (() => {
   'use strict';
   const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
@@ -17,7 +17,6 @@
   const settings = {
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
-    releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
     cryptoBookRules: { ttl: 8 * HOUR, retain: Infinity, gap: MINUTE, label: '价格档位' },
     cryptoConversion: { ttl: 5 * MINUTE, retain: DAY, gap: MINUTE, label: '折算汇率' },
     cryptoQuotes: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币报价' },
@@ -93,11 +92,6 @@
       case 'weather':
         requireValue(finite(args.latitude) && Math.abs(args.latitude) <= 90 && finite(args.longitude) && Math.abs(args.longitude) <= 180, '城市坐标无效，请重新选择城市。');
         return { latitude: Math.round(args.latitude * 10000) / 10000, longitude: Math.round(args.longitude * 10000) / 10000 };
-      case 'releases': {
-        const repo = text(args.repo, 201).trim();
-        requireValue(/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?\/[a-zA-Z0-9_.-]{1,100}$/.test(repo) && !['.', '..'].includes(repo.split('/')[1]), '仓库格式应为 owner/repo，例如 flutter/flutter。');
-        return { repo: repo.toLowerCase() };
-      }
       case 'cryptoBookRules':
       case 'cryptoConversion':
       case 'cryptoQuotes': return {};
@@ -115,7 +109,6 @@
     switch (module) {
       case 'searchCities': return Array.isArray(data.cities) && data.cities.length <= 10 && data.cities.every(c => object(c) && typeof c.name === 'string' && finite(c.latitude) && Math.abs(c.latitude) <= 90 && finite(c.longitude) && Math.abs(c.longitude) <= 180);
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
-      case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
       case 'cryptoBookRules': return Array.isArray(data.rules) && data.rules.length === cryptoSymbols.length && new Set(data.rules.map(r => r?.symbol)).size === cryptoSymbols.length && data.rules.every(validBookRule);
       case 'cryptoConversion': return data.base === 'USDT' && ['USD', 'CNY'].every(k => finite(data[k]) && data[k] > 0);
       case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
@@ -154,12 +147,12 @@
   }
   function cleanLimits() {
     const now = Date.now();
-    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com', 'api.coinbase.com', binanceHost].includes(key) && finite(value) && value > now && value <= now + (key === binanceHost ? 3 : 2) * DAY));
+    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com', 'api.coinbase.com', binanceHost].includes(key) && finite(value) && value > now && value <= now + (key === binanceHost ? 3 : 2) * DAY));
     saveObject(LIMIT_KEY, limits);
   }
   function blockedMessage(host, until) {
     const minutes = Math.max(1, Math.ceil((until - Date.now()) / MINUTE));
-    return `${host === 'api.github.com' ? 'GitHub' : host === binanceHost ? '币安行情' : '数据服务'}请求受限，请约 ${minutes} 分钟后重试。`;
+    return `${host === binanceHost ? '币安行情' : '数据服务'}请求受限，请约 ${minutes} 分钟后重试。`;
   }
   function blockHost(host, response) {
     let until = Date.now() + (host === binanceHost && response.status === 418 && !response.headers.get('retry-after') ? 3 * DAY : MINUTE);
@@ -171,53 +164,31 @@
     }
     const reset = Number(response.headers.get('x-ratelimit-reset'));
     if (finite(reset) && reset > 0) until = Math.max(until, reset * 1000 + 1000);
-    else if (!retry && host === 'api.github.com') until = Date.now() + 15 * MINUTE;
     limits[host] = Math.min(until, Date.now() + (host === binanceHost ? 3 : 1) * DAY);
     cleanLimits();
     return new Error(blockedMessage(host, limits[host]));
   }
-  // Persist a conservative anonymous GitHub budget across refreshes/tabs.
-  function reserveGithubRequest() {
-    const key = 'shike.dashboard.github-budget.v1', now = Date.now();
-    let recent = [];
-    try { recent = JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) { /* memory fallback below */ }
-    if (!Array.isArray(recent)) recent = [];
-    recent = recent.filter(t => finite(t) && t > now - HOUR && t <= now);
-    githubBudget = [...new Set([...recent, ...githubBudget.filter(t => t > now - HOUR)])].sort((a, b) => a - b);
-    if (githubBudget.length >= 40) {
-      limits['api.github.com'] = githubBudget[0] + HOUR;
-      cleanLimits();
-      throw new Error(blockedMessage('api.github.com', limits['api.github.com']));
-    }
-    // Keep equal timestamps as distinct requests in this runtime.
-    githubBudget.push(now + (githubBudget.includes(now) ? 0.001 * githubBudget.length : 0));
-    try { localStorage.setItem(key, JSON.stringify(githubBudget)); } catch (_) { /* still protected in memory */ }
-  }
-  let githubBudget = [];
   async function jsonFetch(url, { xml = false, signal } = {}) {
     const host = new URL(url).host;
     const persisted = readObject(LIMIT_KEY);
     if (finite(persisted[host])) limits[host] = Math.max(limits[host] || 0, persisted[host]);
     cleanLimits();
     if (limits[host] > Date.now()) throw new Error(blockedMessage(host, limits[host]));
-    if (host === 'api.github.com') reserveGithubRequest();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     const cancel = () => { clearTimeout(timer); controller.abort(); };
     if (signal?.aborted) cancel();
     else signal?.addEventListener('abort', cancel, { once: true });
     try {
-      const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', headers: { Accept: host === 'api.github.com' ? 'application/vnd.github+json' : xml ? 'application/rss+xml, application/xml, text/xml' : 'application/json' } });
-      if (response.status === 429 || (host === binanceHost && response.status === 418) || (host === 'api.github.com' && response.status === 403)) throw blockHost(host, response);
+      const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', headers: { Accept: xml ? 'application/rss+xml, application/xml, text/xml' : 'application/json' } });
+      if (response.status === 429 || (host === binanceHost && response.status === 418)) throw blockHost(host, response);
       if (!response.ok) {
         if (host === binanceHost && [403, 451].includes(response.status)) {
           limits[host] = Date.now() + 10 * MINUTE; cleanLimits();
           throw new Error('币安行情在当前网络或地区不可用，请稍后重试或打开官方来源。');
         }
-        if (host === 'api.github.com' && response.status === 404) throw new Error('找不到公开仓库，请检查 owner/repo；私有仓库不受支持。');
         throw new Error(`数据服务暂时不可用（HTTP ${response.status}），请稍后重试。`);
       }
-      if (host === 'api.github.com' && response.headers.get('x-ratelimit-remaining') === '0') blockHost(host, response);
       const type = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
       requireValue(xml
         ? ['application/rss+xml', 'application/xml', 'text/xml'].includes(type)
@@ -312,15 +283,6 @@
         const hours = h.time.map((time, i) => ({ time, temperature: h.temperature_2m[i], feels: h.apparent_temperature[i], rain: h.precipitation_probability[i], wind: h.wind_speed_10m[i], code: h.weather_code[i] }));
         requireValue(hours.some(row => finite(row.feels)), '天气服务暂未提供有效预报，请稍后重试。');
         return { data: { hours, timezone: raw.timezone, utcOffsetSeconds: raw.utc_offset_seconds } };
-      }
-      case 'releases': {
-        const raw = await jsonFetch(`https://api.github.com/repos/${args.repo}/releases?per_page=1`);
-        requireValue(Array.isArray(raw));
-        const releases = raw.slice(0, 1).map(r => {
-          requireValue(object(r) && typeof r.tag_name === 'string' && typeof r.published_at === 'string' && Number.isFinite(Date.parse(r.published_at)) && !!safeUrl(r.html_url));
-          return { name: text(r.name, 240) || text(r.tag_name, 240), tag: text(r.tag_name, 240), publishedAt: r.published_at, url: safeUrl(r.html_url), body: text(r.body, 6000), ...(r.prerelease === true ? { prerelease: true } : {}) };
-        });
-        return { data: { repo: args.repo, releases, noReleases: releases.length === 0 } };
       }
       case 'news': {
         if (args.feed === 'sspai') {

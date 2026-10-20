@@ -10,7 +10,6 @@ import 'package:time_nest/dashboard/dashboard_client.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/dashboard_screen.dart';
 import 'package:time_nest/dashboard/news_panel.dart';
-import 'package:time_nest/dashboard/releases_panel.dart';
 import 'package:time_nest/dashboard/weather_panel.dart';
 import 'package:time_nest/main.dart';
 import 'package:time_nest/platform/browser_client_stub.dart';
@@ -102,19 +101,6 @@ class FixtureDashboardClient implements DashboardClient {
             },
         ],
       },
-      'releases' => {
-        'repo': args['repo'],
-        'noReleases': false,
-        'releases': [
-          {
-            'name': 'Stable release',
-            'tag': '3.47.5',
-            'publishedAt': '2026-10-17T12:00:00Z',
-            'url': 'https://github.com/flutter/flutter/releases',
-            'body': 'Test release with improvements.',
-          },
-        ],
-      },
       'news' => {
         'feed': args['feed'],
         'stories': [
@@ -166,12 +152,7 @@ Widget app(Widget child, {double scale = 1}) => MaterialApp(
   home: child,
 );
 
-const titles = {
-  'weather': '天气',
-  'releases': '项目更新',
-  'news': '科技资讯',
-  'crypto': '数字货币行情',
-};
+const titles = {'weather': '天气', 'news': '科技资讯', 'crypto': '数字货币行情'};
 final testNow = DateTime.utc(2026, 10, 18, 1);
 
 void setSize(WidgetTester tester, Size size) {
@@ -215,24 +196,22 @@ void main() {
           expect(find.byKey(ValueKey('dashboard-entry-$id')), findsOneWidget);
         }
         expect(find.byType(WeatherPanel), findsNothing);
-        expect(find.byType(ReleasesPanel), findsNothing);
         expect(find.byType(NewsPanel), findsNothing);
         expect(find.textContaining('假期'), findsNothing);
         expect(find.textContaining('A股'), findsNothing);
+        expect(find.text('项目更新'), findsNothing);
+        expect(
+          find.byKey(const ValueKey('dashboard-entry-releases')),
+          findsNothing,
+        );
         expect(
           find.byKey(const ValueKey('dashboard-entry-market')),
           findsNothing,
         );
-        expect(client.calls.toSet(), {
-          'weather',
-          'news',
-          'releases',
-          'cryptoQuotes',
-        });
-        expect(client.calls.where((m) => m == 'releases'), hasLength(4));
-        expect(client.calls, hasLength(7));
+        expect(client.calls.toSet(), {'weather', 'news', 'cryptoQuotes'});
+        expect(client.calls, hasLength(3));
         if (size.width >= 760) {
-          for (final ids in [('weather', 'crypto'), ('news', 'releases')]) {
+          for (final ids in [('weather', 'crypto')]) {
             final left = tester.getRect(
               find.byKey(ValueKey('dashboard-summary-${ids.$1}')),
             );
@@ -260,14 +239,8 @@ void main() {
           const Offset(0, -1500),
         );
         await tester.pumpAndSettle();
-        expect(client.calls.toSet(), {
-          'weather',
-          'news',
-          'releases',
-          'cryptoQuotes',
-        });
-        expect(client.calls.where((m) => m == 'releases'), hasLength(4));
-        expect(client.calls, hasLength(7));
+        expect(client.calls.toSet(), {'weather', 'news', 'cryptoQuotes'});
+        expect(client.calls, hasLength(3));
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },
@@ -313,20 +286,12 @@ void main() {
           client.calls
               .where((m) => m != 'cryptoConversion' && m != 'cryptoBookRules')
               .length,
-          id == 'crypto'
-              ? 2
-              : id == 'releases'
-              ? 4
-              : 1,
+          id == 'crypto' ? 2 : 1,
         );
         expect(find.text('数据总览'), findsNothing);
         expect(
           find.byType(WeatherPanel),
           id == 'weather' ? findsOneWidget : findsNothing,
-        );
-        expect(
-          find.byType(ReleasesPanel),
-          id == 'releases' ? findsOneWidget : findsNothing,
         );
         expect(
           find.byType(NewsPanel),
@@ -352,13 +317,17 @@ void main() {
   for (final favorites in [
     <String>['market'],
     <String>['market', 'crypto'],
+    <String>['releases'],
+    <String>['market', 'releases'],
+    <String>['releases', 'crypto', 'market'],
   ]) {
     testWidgets(
-      'retired A-share entries stay absent after migration: $favorites',
+      'retired module entries stay absent after migration: $favorites',
       (tester) async {
         final client = FixtureDashboardClient()
           ..preferences = jsonEncode({
             'version': 4,
+            'repos': ['flutter/flutter'],
             'marketIndex': 'shenzhen',
             'marketInterval': 'W',
             'order': ['market', 'crypto', 'news', 'weather', 'releases'],
@@ -373,7 +342,12 @@ void main() {
           findsNothing,
         );
         expect(find.textContaining('A股'), findsNothing);
-        final count = favorites.length - 1;
+        expect(find.text('项目更新'), findsNothing);
+        expect(
+          find.byKey(const ValueKey('dashboard-entry-releases')),
+          findsNothing,
+        );
+        final count = favorites.where(dashboardModules.contains).length;
         await tester.tap(find.text('已收藏 $count'));
         await tester.pumpAndSettle();
         if (count == 0) {
@@ -390,11 +364,17 @@ void main() {
         await tester.tap(find.byTooltip('调整入口顺序'));
         await tester.pumpAndSettle();
         expect(find.textContaining('A股'), findsNothing);
+        expect(find.text('项目更新'), findsNothing);
+        expect(
+          find.byKey(const ValueKey('dashboard-entry-releases')),
+          findsNothing,
+        );
         expect(find.byTooltip('上移数字货币行情'), findsOneWidget);
         await tester.tap(find.text('保存'));
         await tester.pumpAndSettle();
         final saved = jsonDecode(client.preferences!) as Map<String, dynamic>;
-        expect(saved['order'], ['crypto', 'news', 'weather', 'releases']);
+        expect(saved['order'], ['crypto', 'news', 'weather']);
+        expect(saved.containsKey('repos'), isFalse);
         expect(saved['favorites'], count == 0 ? <String>[] : ['crypto']);
         expect(saved['cryptoSymbol'], 'ETHUSDT');
         expect(saved['cryptoInterval'], '4h');
@@ -433,30 +413,25 @@ void main() {
     expect(find.text('还没有收藏。在全部功能里点一下星标吧。'), findsOneWidget);
     await tester.tap(find.text('全部功能'));
     await tester.pumpAndSettle();
-    final favorite = find.byTooltip('收藏项目更新');
+    final favorite = find.byTooltip('收藏科技资讯');
     await tester.ensureVisible(favorite);
     await tester.tap(favorite);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('调整入口顺序'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('上移项目更新'));
+    await tester.tap(find.byTooltip('上移科技资讯'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
-    expect(
-      DashboardPreferences.decode(client.preferences).order.first,
-      'releases',
-    );
-    expect(DashboardPreferences.decode(client.preferences).favorites, [
-      'releases',
-    ]);
+    expect(DashboardPreferences.decode(client.preferences).order.first, 'news');
+    expect(DashboardPreferences.decode(client.preferences).favorites, ['news']);
     expect(client.calls, isNot(contains('cryptoCandles')));
     expect(client.calls, isNot(contains('searchCities')));
     await tester.pumpWidget(const SizedBox());
     await tester.pumpWidget(app(DashboardScreen(client: client)));
     await tester.pumpAndSettle();
     expect(find.text('已收藏 1'), findsOneWidget);
-    expect(find.byTooltip('取消收藏项目更新'), findsOneWidget);
+    expect(find.byTooltip('取消收藏科技资讯'), findsOneWidget);
     expect(client.calls, isNot(contains('cryptoCandles')));
     expect(client.calls, isNot(contains('searchCities')));
     expect(tester.takeException(), isNull);
@@ -519,31 +494,6 @@ void main() {
     await openModule(tester, 'news');
     expect(client.requests.last['feed'], 'new');
     expect(client.calls, isNot(contains('cryptoCandles')));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('repository removal survives back and reopening', (tester) async {
-    final client = FixtureDashboardClient()
-      ..preferences = DashboardPreferences(
-        repos: ['flutter/flutter', 'dart-lang/sdk'],
-      ).encode();
-    await tester.pumpWidget(app(DashboardScreen(client: client)));
-    await tester.pumpAndSettle();
-    await openModule(tester, 'releases');
-    await tester.tap(find.byTooltip('移除 flutter/flutter'));
-    await tester.pumpAndSettle();
-    expect(find.text('flutter/flutter'), findsNothing);
-    expect(DashboardPreferences.decode(client.preferences).repos, [
-      'dart-lang/sdk',
-    ]);
-    await tester.tap(find.byType(BackButton));
-    await tester.pumpAndSettle();
-    client.requests.clear();
-    await openModule(tester, 'releases');
-    expect(client.requests, [
-      {'module': 'releases', 'repo': 'dart-lang/sdk'},
-    ]);
-    expect(find.text('已关注 1 个项目'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

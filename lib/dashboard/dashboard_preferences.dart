@@ -4,36 +4,8 @@ import 'crypto_market.dart';
 import 'crypto_indicators.dart';
 import 'crypto_view_settings.dart';
 
-const dashboardModules = ['weather', 'releases', 'news', 'crypto'];
+const dashboardModules = ['weather', 'news', 'crypto'];
 
-// Curated popular projects, not a live star ranking. No authentication required.
-const defaultDashboardRepos = [
-  'flutter/flutter',
-  'ollama/ollama',
-  'langgenius/dify',
-  'microsoft/vscode',
-  'open-webui/open-webui',
-  'n8n-io/n8n',
-  'huggingface/transformers',
-  'langchain-ai/langchain',
-  'ggml-org/llama.cpp',
-  'Comfy-Org/ComfyUI',
-  'react/react',
-  'vuejs/core',
-  'vercel/next.js',
-  'sveltejs/svelte',
-  'vitejs/vite',
-  'tailwindlabs/tailwindcss',
-  'microsoft/TypeScript',
-  'nodejs/node',
-  'denoland/deno',
-  'oven-sh/bun',
-  'rust-lang/rust',
-  'astral-sh/uv',
-  'kubernetes/kubernetes',
-  'react/react-native',
-];
-const maxDashboardRepos = 50;
 const dashboardFeeds = ['sspai', 'top', 'new', 'show'];
 
 const cryptoMinPaneHeight = 64.0, cryptoMaxPaneHeight = 400.0;
@@ -71,7 +43,6 @@ Map<String, double> cleanCryptoBookSteps(Object? raw) {
 class DashboardPreferences {
   DashboardPreferences({
     this.city,
-    this.repos = defaultDashboardRepos,
     this.feed = 'sspai',
     this.cryptoSymbol = 'BTCUSDT',
     this.cryptoInterval = '1h',
@@ -88,7 +59,6 @@ class DashboardPreferences {
   });
 
   Map<String, dynamic>? city;
-  List<String> repos;
   String feed;
   String cryptoSymbol;
   String cryptoInterval;
@@ -114,26 +84,6 @@ class DashboardPreferences {
           (city['latitude'] as num).abs() <= 90 &&
           (city['longitude'] as num).abs() <= 180) {
         prefs.city = city;
-      }
-      if (json['repos'] is List) {
-        prefs.repos = (json['repos'] as List)
-            .whereType<String>()
-            .where(
-              (repo) =>
-                  RegExp(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$').hasMatch(repo),
-            )
-            .map((repo) => repo.toLowerCase())
-            .toSet()
-            .take(maxDashboardRepos)
-            .toList();
-      }
-      // Upgrade only the exact old shipped default. Custom and empty lists stay
-      // intact; versioned preferences never silently re-follow removed projects.
-      if (json['version'] == null &&
-          json['repos'] is List &&
-          (json['repos'] as List).length == 1 &&
-          (json['repos'] as List).first == 'flutter/flutter') {
-        prefs.repos = List.of(defaultDashboardRepos);
       }
       if (dashboardFeeds.contains(json['feed'])) {
         prefs.feed = json['feed'] as String;
@@ -193,7 +143,6 @@ class DashboardPreferences {
   String encode() => jsonEncode({
     'version': 4,
     'city': city,
-    'repos': repos,
     'feed': feed,
     'cryptoSymbol': cryptoSymbol,
     'cryptoInterval': cryptoInterval,

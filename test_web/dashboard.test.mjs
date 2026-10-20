@@ -52,7 +52,6 @@ const weather = () => ({
     wind_speed_10m: [10, 12], weather_code: [0, 3],
   },
 });
-const release = (tag = 'v1.0') => ({ tag_name: tag, name: 'Release', published_at: '2026-10-17T10:00:00Z', html_url: `https://github.com/flutter/flutter/releases/tag/${tag}`, body: 'Release notes' });
 
 test('weather requests 24 city-local hours and normalizes probability, km/h and timezone', async () => {
   const h = harness(() => response(weather()));
@@ -119,67 +118,92 @@ test('expired stale data beyond retention is not shown as current information', 
 test('parallel identical requests deduplicate; repeated refresh cannot bypass throttle', async () => {
   let finish;
   const h = harness(() => new Promise(resolve => { finish = resolve; }));
-  const a = h.request('releases', { repo: 'Flutter/Flutter' });
-  const b = h.request('releases', { repo: 'flutter/flutter' }, true);
+  const a = h.request('weather', { latitude: 31.222222, longitude: 121.45806 });
+  const b = h.request('weather', { latitude: 31.2222, longitude: 121.4581 }, true);
   assert.equal(h.calls.length, 1);
-  finish(response([release()]));
+  finish(response(weather()));
   const [one, two] = await Promise.all([a, b]);
   assert.deepEqual(one, two);
-  const three = await h.request('releases', { repo: 'flutter/flutter' }, true);
+  const three = await h.request('weather', { latitude: 31.2222, longitude: 121.4581 }, true);
   assert.equal(three.cached, true);
   assert.match(three.warning, /频繁/);
   assert.equal(h.calls.length, 1);
 });
 
-test('GitHub release contracts distinguish no releases from missing repo', async () => {
-  const h = harness(() => response([release()]));
-  const data = (await h.request('releases', { repo: 'flutter/flutter' })).data;
-  assert.deepEqual(data, { repo: 'flutter/flutter', noReleases: false, releases: [{ name: 'Release', tag: 'v1.0', publishedAt: '2026-10-17T10:00:00Z', url: 'https://github.com/flutter/flutter/releases/tag/v1.0', body: 'Release notes' }] });
-  const empty = harness(() => response([]));
-  assert.deepEqual((await empty.request('releases', { repo: 'owner/repo' })).data, { repo: 'owner/repo', releases: [], noReleases: true });
-  const missing = harness(() => response({ message: 'Not Found' }, 404));
-  await assert.rejects(missing.request('releases', { repo: 'owner/repo' }), /找不到公开仓库/);
-});
-
-test('GitHub rate limits use reset and Retry-After; cross-repo refresh and reload honor backoff', async () => {
-  const shared = storage();
-  const h = harness(() => response({}, 403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String((START + 10 * minute) / 1000), 'retry-after': '120' }), { storage: shared });
-  await assert.rejects(h.request('releases', { repo: 'a/b' }), /GitHub请求受限/);
-  await assert.rejects(h.request('releases', { repo: 'c/d' }, true), /GitHub请求受限/);
-  assert.equal(h.calls.length, 1);
-  const reload = harness(() => response([]), { storage: shared });
-  await assert.rejects(reload.request('releases', { repo: 'e/f' }, true), /GitHub请求受限/);
-  assert.equal(reload.calls.length, 0);
-  reload.advance(11 * minute);
-  assert.equal((await reload.request('releases', { repo: 'e/f' }, true)).data.noReleases, true);
-});
-
-test('rate-limited refresh returns stale GitHub data instead of hiding saved release', async () => {
-  let limited = false;
-  const h = harness(() => limited ? response({}, 429, { 'retry-after': '60' }) : response([release()]));
-  await h.request('releases', { repo: 'flutter/flutter' });
-  limited = true; h.advance(hour + 1);
-  const result = await h.request('releases', { repo: 'flutter/flutter' }, true);
-  assert.equal(result.stale, true);
-  assert.equal(result.data.releases[0].tag, 'v1.0');
-  assert.match(result.warning, /GitHub请求受限/);
-});
-
-test('a successful GitHub response with zero remaining prevents the next request', async () => {
-  const h = harness(() => response([], 200, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String((START + hour) / 1000) }));
-  assert.equal((await h.request('releases', { repo: 'a/b' })).data.noReleases, true);
-  await assert.rejects(h.request('releases', { repo: 'c/d' }), /GitHub请求受限/);
-  assert.equal(h.calls.length, 1);
-});
-
-test('anonymous GitHub rolling budget stays below the public quota', async () => {
-  const h = harness(() => response([]));
-  for (let i = 0; i < 40; i++) {
-    await h.request('releases', { repo: `owner/repo-${i}` });
-    h.advance(1);
+test('Retry-After seconds and dates protect cross-city refreshes and survive reload', async () => {
+  for (const retryAfter of ['120', new Date(START + 2 * minute).toUTCString()]) {
+    const shared = storage();
+    const h = harness(() => response({}, 429, { 'retry-after': retryAfter }), { storage: shared });
+    await assert.rejects(h.request('weather', { latitude: 1, longitude: 2 }), /数据服务请求受限/);
+    await assert.rejects(h.request('weather', { latitude: 3, longitude: 4 }, true), /数据服务请求受限/);
+    assert.equal(h.calls.length, 1);
+    const reload = harness(() => response(weather()), { storage: shared });
+    await assert.rejects(reload.request('weather', { latitude: 5, longitude: 6 }, true), /数据服务请求受限/);
+    assert.equal(reload.calls.length, 0);
+    reload.advance(3 * minute);
+    assert.equal((await reload.request('weather', { latitude: 5, longitude: 6 }, true)).cached, false);
+    assert.equal(reload.calls.length, 1);
   }
-  await assert.rejects(h.request('releases', { repo: 'owner/next' }), /GitHub请求受限/);
-  assert.equal(h.calls.length, 40);
+});
+
+test('rate-limited refresh retains stale weather with its original fetch time', async () => {
+  let limited = false;
+  const h = harness(() => limited ? response({}, 429, { 'retry-after': '60' }) : response(weather()));
+  const original = await h.request('weather', { latitude: 1, longitude: 2 });
+  limited = true; h.advance(15 * minute + 1);
+  const result = await h.request('weather', { latitude: 1, longitude: 2 }, true);
+  assert.equal(result.stale, true);
+  assert.equal(result.fetchedAt, original.fetchedAt);
+  assert.deepEqual(result.data, original.data);
+  assert.match(result.warning, /数据服务请求受限/);
+});
+
+test('removed releases API and cache stay inactive without disturbing active data or settings', async () => {
+  const shared = storage();
+  const initial = harness(() => response(weather()), { storage: shared });
+  const original = await initial.request('weather', { latitude: 1, longitude: 2 });
+  const cache = JSON.parse(shared.getItem(CACHE_KEY));
+  cache['releases:{"repo":"owner/repo"}'] = {
+    at: START,
+    data: { repo: 'owner/repo', releases: [], noReleases: true },
+  };
+  shared.setItem(CACHE_KEY, JSON.stringify(cache));
+  const limitKey = 'shike.dashboard.limits.v1';
+  const budgetKey = 'shike.dashboard.github-budget.v1';
+  shared.setItem(limitKey, JSON.stringify({
+    'api.github.com': START + hour,
+    'api.coinbase.com': START + minute,
+  }));
+  shared.setItem(budgetKey, JSON.stringify(Array.from({ length: 40 }, (_, i) => START - i)));
+  const preserved = {
+    'shike.dashboard.preferences.v1': JSON.stringify({ version: 4, repos: ['owner/repo'], feed: 'show', cryptoSymbol: 'ETHUSDT' }),
+    'shike.crypto.rules.v2': JSON.stringify({ retained: 'independent rules cache' }),
+    'shike.settings.v1': JSON.stringify({ brightness: .7 }),
+    'shike.timer.v1': JSON.stringify({ remaining: 120 }),
+  };
+  for (const [key, value] of Object.entries(preserved)) shared.setItem(key, value);
+  const budgetAccess = [];
+  const getItem = shared.getItem, setItem = shared.setItem;
+  shared.getItem = key => { if (key === budgetKey) budgetAccess.push('read'); return getItem(key); };
+  shared.setItem = (key, value) => { if (key === budgetKey) budgetAccess.push('write'); return setItem(key, value); };
+  const h = harness(() => response({}), { storage: shared });
+  for (const refresh of [false, true]) {
+    await assert.rejects(h.request('releases', { repo: 'owner/repo' }, refresh), /不支持/);
+  }
+  assert.equal(h.calls.length, 0, 'retired requests must not reach any provider');
+  assert.deepEqual(JSON.parse(shared.getItem(limitKey)), { 'api.coinbase.com': START + minute });
+  const retained = await h.request('weather', { latitude: 1, longitude: 2 });
+  assert.equal(retained.cached, true);
+  assert.equal(retained.fetchedAt, original.fetchedAt);
+  assert.deepEqual(retained.data, original.data);
+  assert.equal(h.calls.length, 0);
+  await h.request('searchCities', { query: 'NoSuchCity' });
+  const saved = JSON.parse(shared.getItem(CACHE_KEY));
+  assert.equal(Object.keys(saved).some(key => key.startsWith('releases:')), false);
+  assert.deepEqual(saved['weather:{"latitude":1,"longitude":2}'], cache['weather:{"latitude":1,"longitude":2}']);
+  for (const [key, value] of Object.entries(preserved)) assert.equal(shared.getItem(key), value);
+  assert.deepEqual(budgetAccess, [], 'retired GitHub budget must no longer be read or written');
+  assert.ok(h.calls.every(call => new URL(call.url).hostname !== 'api.github.com'));
 });
 
 test('HN news bounds concurrency, maps 12 stories, and safely falls back to discussion URLs', async () => {
@@ -225,8 +249,7 @@ test('input validation rejects arbitrary requests before reaching the network', 
   const h = harness(() => { throw new Error('must not fetch'); });
   for (const [module, args] of [
     ['__proto__', {}], ['constructor', {}], ['weather', { latitude: 91, longitude: 1 }],
-    ['weather', { latitude: '31', longitude: 1 }], ['releases', { repo: 'a/../../b' }],
-    ['releases', { repo: 'https://github.com/a/b' }], ['releases', { repo: 'a/..' }],
+    ['weather', { latitude: '31', longitude: 1 }], ['releases', { repo: 'owner/repo' }],
     ['holidays', { year: 2026 }], ['searchCities', { query: 'a' }],
     ['searchCities', { query: 'a\nb' }], ['fx', { base: 'USD', quote: 'CNY' }],
   ]) await assert.rejects(h.request(module, args));
@@ -241,7 +264,7 @@ test('HTML, malformed JSON and oversized responses are rejected without cache', 
     () => response(' '.repeat(1_000_001)),
   ]) {
     const h = harness(res);
-    await assert.rejects(h.request('releases', { repo: 'a/b' }), /JSON|响应过大/);
+    await assert.rejects(h.request('weather', { latitude: 1, longitude: 2 }), /JSON|响应过大/);
   }
 });
 
@@ -249,7 +272,7 @@ test('request timeout aborts fetch and returns an actionable Chinese error', asy
   const h = harness((url, init) => new Promise((resolve, reject) => {
     init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
   }), { setTimeout: callback => { queueMicrotask(callback); return 1; }, clearTimeout: () => {} });
-  await assert.rejects(h.request('releases', { repo: 'a/b' }), /超时/);
+  await assert.rejects(h.request('weather', { latitude: 1, longitude: 2 }), /超时/);
 });
 
 test('storage denial keeps live modules working and preference writes report failure', async () => {

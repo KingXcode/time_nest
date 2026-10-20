@@ -101,73 +101,40 @@ void main() {
     expect(DashboardPreferences.decode('[]').city, isNull);
   });
 
-  test('popular defaults and Chinese news are provided on first launch', () {
+  test('active modules and Chinese news are provided on first launch', () {
     final read = DashboardPreferences.decode(null);
-    expect(read.repos, defaultDashboardRepos);
-    expect(read.repos, hasLength(24));
     expect(read.feed, 'sspai');
-    expect(read.order, ['weather', 'releases', 'news', 'crypto']);
+    expect(read.order, ['weather', 'news', 'crypto']);
     expect(read.favorites, ['weather']);
   });
 
-  test(
-    'old untouched defaults migrate, custom lists and chosen feeds survive',
-    () {
-      final old = DashboardPreferences.decode(
-        '{"repos":["flutter/flutter"],"feed":"top"}',
-      );
-      expect(old.repos, defaultDashboardRepos);
-      expect(old.feed, 'sspai');
-      final custom = DashboardPreferences.decode(
-        '{"repos":["owner/project"],"feed":"show"}',
-      );
-      expect(custom.repos, ['owner/project']);
-      expect(custom.feed, 'show');
-      expect(DashboardPreferences.decode('{"repos":[]}').repos, isEmpty);
-    },
-  );
-
-  test('removed defaults and intentional single-repo lists stay removed', () {
-    final saved = DashboardPreferences(repos: ['flutter/flutter'], feed: 'top');
-    expect(DashboardPreferences.decode(saved.encode()).repos, [
-      'flutter/flutter',
-    ]);
-    expect(DashboardPreferences.decode(saved.encode()).feed, 'top');
-    saved.repos = [];
-    expect(DashboardPreferences.decode(saved.encode()).repos, isEmpty);
+  test('old news defaults migrate and chosen feeds survive', () {
+    final old = DashboardPreferences.decode(
+      '{"repos":["flutter/flutter"],"feed":"top"}',
+    );
+    expect(old.feed, 'sspai');
+    final custom = DashboardPreferences.decode(
+      '{"repos":["owner/project"],"feed":"show"}',
+    );
+    expect(custom.feed, 'show');
   });
 
-  test(
-    'saved repositories are deduplicated case-insensitively up to capacity',
-    () {
-      final saved = DashboardPreferences.decode(
-        jsonEncode({
-          'version': 2,
-          'repos': [
-            'Owner/Project',
-            'owner/project',
-            for (var i = 0; i < 60; i++) 'owner/repo$i',
-          ],
-        }),
-      );
-      expect(saved.repos, hasLength(maxDashboardRepos));
-      expect(saved.repos.first, 'owner/project');
-    },
-  );
+  test('versioned news selection stays unchanged', () {
+    final saved = DashboardPreferences(feed: 'top');
+    expect(DashboardPreferences.decode(saved.encode()).feed, 'top');
+  });
 
   test('all selections round trip and missing modules are restored', () {
     final settings = DashboardPreferences(
       city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
-      repos: ['dart-lang/sdk'],
       feed: 'show',
       order: ['news', 'crypto'],
       favorites: ['news'],
     );
     final read = DashboardPreferences.decode(settings.encode());
     expect(read.city?['name'], '上海');
-    expect(read.repos, ['dart-lang/sdk']);
     expect(read.feed, 'show');
-    expect(read.order, ['news', 'crypto', 'weather', 'releases']);
+    expect(read.order, ['news', 'crypto', 'weather']);
     expect(read.favorites, ['news']);
   });
 
@@ -187,16 +154,24 @@ void main() {
           'marketInterval': 'W',
           'leaveDays': 5,
           'order': ['holidays', 'market', 'news', 'weather', 'fx', 'releases'],
-          'favorites': ['holidays', 'market', 'fx', 'news', 'weather'],
+          'favorites': [
+            'holidays',
+            'market',
+            'releases',
+            'fx',
+            'news',
+            'weather',
+          ],
         }),
       );
-      expect(read.order, ['news', 'weather', 'releases', 'crypto']);
+      expect(read.order, ['news', 'weather', 'crypto']);
       expect(read.favorites, ['news', 'weather']);
       expect(read.city?['name'], '上海');
-      expect(read.repos, ['owner/project']);
       expect(read.feed, 'top');
       final encoded = jsonDecode(read.encode()) as Map<String, dynamic>;
       expect(encoded['version'], 4);
+      expect(encoded.containsKey('repos'), isFalse);
+      expect(read.encode(), isNot(contains('releases')));
       expect(encoded.containsKey('marketIndex'), isFalse);
       expect(encoded.containsKey('marketInterval'), isFalse);
       expect(encoded.containsKey('leaveDays'), isFalse);
@@ -207,57 +182,62 @@ void main() {
       expect(read.encode(), isNot(contains('"fx"')));
       expect(DashboardPreferences.decode(read.encode()).order, read.order);
       expect(
-        DashboardPreferences.decode('{"favorites":["holidays","fx","market"]}')
-            .favorites,
+        DashboardPreferences.decode(
+          '{"favorites":["holidays","fx","market","releases"]}',
+        ).favorites,
         isEmpty,
       );
     },
   );
 
-  test(
-    'A-share migration preserves every active setting across repeated saves',
-    () {
-      final active = jsonDecode(
-        DashboardPreferences(
-          city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
-          repos: const [],
-          feed: 'show',
-          cryptoSymbol: 'XRPUSDT',
-          cryptoInterval: '4h',
-          cryptoOverlays: const ['ema', 'boll'],
-          cryptoPanes: const ['rsi', 'vol'],
-          cryptoInfoRight: true,
-          cryptoCurrency: 'CNY',
-          cryptoBookLevels: 10,
-          cryptoBookSteps: const {'XRPUSDT': .001, 'BTCUSDT': 10},
-          cryptoPaneHeights: const {'rsi': 240, 'vol': 180},
-          order: const ['crypto', 'news', 'weather', 'releases'],
-          favorites: const ['crypto', 'news'],
-        ).encode(),
-      ) as Map<String, dynamic>;
-      active['cryptoView'] = {
-        'orderBook': false,
-        'trades': false,
-        'timeline': false,
-        'indicatorValues': false,
-        'assessment': false,
-        'tradeRows': 100,
-      };
-      final legacy = {
-        ...active,
-        'marketIndex': 'shenzhen',
-        'marketInterval': 'W',
-        'order': ['market', 'crypto', 'news', 'weather', 'market', 'releases'],
-        'favorites': ['market', 'crypto', 'news', 'market'],
-      };
-      final migrated = DashboardPreferences.decode(jsonEncode(legacy));
-      expect(jsonDecode(migrated.encode()), active);
-      expect(
-        jsonDecode(DashboardPreferences.decode(migrated.encode()).encode()),
-        active,
-      );
-    },
-  );
+  test('retired module migration preserves every active setting across repeated saves', () {
+    final active = jsonDecode(
+      DashboardPreferences(
+        city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
+        feed: 'show',
+        cryptoSymbol: 'XRPUSDT',
+        cryptoInterval: '4h',
+        cryptoOverlays: const ['ema', 'boll'],
+        cryptoPanes: const ['rsi', 'vol'],
+        cryptoInfoRight: true,
+        cryptoCurrency: 'CNY',
+        cryptoBookLevels: 10,
+        cryptoBookSteps: const {'XRPUSDT': .001, 'BTCUSDT': 10},
+        cryptoPaneHeights: const {'rsi': 240, 'vol': 180},
+        order: const ['crypto', 'news', 'weather'],
+        favorites: const ['crypto', 'news'],
+      ).encode(),
+    ) as Map<String, dynamic>;
+    active['cryptoView'] = {
+      'orderBook': false,
+      'trades': false,
+      'timeline': false,
+      'indicatorValues': false,
+      'assessment': false,
+      'tradeRows': 100,
+    };
+    final legacy = {
+      ...active,
+      'repos': ['owner/project'],
+      'marketIndex': 'shenzhen',
+      'marketInterval': 'W',
+      'order': ['market', 'crypto', 'news', 'weather', 'market', 'releases'],
+      'favorites': [
+        'market',
+        'releases',
+        'crypto',
+        'news',
+        'market',
+        'releases',
+      ],
+    };
+    final migrated = DashboardPreferences.decode(jsonEncode(legacy));
+    expect(jsonDecode(migrated.encode()), active);
+    expect(
+      jsonDecode(DashboardPreferences.decode(migrated.encode()).encode()),
+      active,
+    );
+  });
 
   test('invalid saved values cannot make unsupported API requests', () {
     final read = DashboardPreferences.decode(
@@ -270,7 +250,6 @@ void main() {
       }),
     );
     expect(read.city, isNull);
-    expect(read.repos, ['flutter/flutter']);
     expect(read.feed, 'sspai');
     expect(read.order.toSet(), dashboardModules.toSet());
     expect(read.favorites, isEmpty);

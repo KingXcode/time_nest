@@ -309,93 +309,6 @@ class DashboardOverview extends StatelessWidget {
     ),
   );
 
-  Widget _releases() => _frame(
-    'releases',
-    '项目更新',
-    Icons.code_rounded,
-    '已关注 ${preferences.repos.length} 个 / 首页显示前 4 个',
-    preferences.repos.isEmpty
-        ? TextButton(
-            onPressed: () => onOpen('releases'),
-            child: const Text('添加关注项目'),
-          )
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              for (final repo in preferences.repos.take(4))
-                Padding(
-                  key: ValueKey(repo),
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: ApiSection(
-                    client: client,
-                    module: 'releases',
-                    args: {'repo': repo},
-                    compact: true,
-                    builder: (context, result) {
-                      final releases = (result.data['releases'] as List? ?? [])
-                          .whereType<Map>();
-                      final release = releases.firstOrNull;
-                      final date = DateTime.tryParse(
-                        '${release?['publishedAt']}',
-                      );
-                      return InkWell(
-                        onTap: () => client.openUrl(
-                          release?['url'] as String? ??
-                              'https://github.com/$repo/releases',
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 2, bottom: 2),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      repo,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    Text(
-                                      date == null
-                                          ? '暂无发布记录'
-                                          : '${date.month}/${date.day} 发布',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: dashboardMuted,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  release?['tag'] as String? ?? '—',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: dashboardAccent,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-            ],
-          ),
-  );
-
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
@@ -466,14 +379,8 @@ class DashboardOverview extends StatelessWidget {
             firstFlex: 3,
             secondFlex: 7,
           ),
-          pair(
-            'news',
-            _news(),
-            'releases',
-            _releases(),
-            firstFlex: 6,
-            secondFlex: 4,
-          ),
+          if (modules.contains('news'))
+            Padding(padding: const EdgeInsets.only(bottom: 12), child: _news()),
         ],
       );
     },

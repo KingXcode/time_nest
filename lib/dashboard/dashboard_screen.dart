@@ -6,24 +6,16 @@ import 'dashboard_overview.dart';
 import 'dashboard_widgets.dart';
 import 'crypto_panel.dart';
 import 'news_panel.dart';
-import 'releases_panel.dart';
 import 'weather_panel.dart';
 
-const _titles = {
-  'weather': '天气',
-  'releases': '项目更新',
-  'news': '科技资讯',
-  'crypto': '数字货币行情',
-};
+const _titles = {'weather': '天气', 'news': '科技资讯', 'crypto': '数字货币行情'};
 const _subtitles = {
   'weather': '查看城市天气与逐小时预报',
-  'releases': '关注热门开源项目的最新发布',
   'news': '中文科技资讯，也可切换 HN 英文',
   'crypto': 'BTC、ETH 等主流币行情与 K 线',
 };
 const _icons = {
   'weather': Icons.wb_sunny_outlined,
-  'releases': Icons.code_rounded,
   'news': Icons.auto_awesome_outlined,
   'crypto': Icons.currency_bitcoin_rounded,
 };
@@ -371,11 +363,6 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         city: preferences.city,
         onCityChanged: (city) => _save(() => preferences.city = city),
         now: widget.now,
-      ),
-      'releases' => ReleasesPanel(
-        client: widget.client,
-        repos: preferences.repos,
-        onReposChanged: (repos) => _save(() => preferences.repos = repos),
       ),
       'crypto' => CryptoPanel(
         client: widget.client,

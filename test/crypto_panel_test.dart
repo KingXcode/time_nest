@@ -86,7 +86,7 @@ void main() {
           'feed': 'show',
         }),
       );
-      expect(old.order, ['news', 'weather', 'releases', 'crypto']);
+      expect(old.order, ['news', 'weather', 'crypto']);
       expect(old.favorites, isEmpty);
       expect(old.cryptoSymbol, 'BTCUSDT');
       expect(old.cryptoInterval, '1h');
