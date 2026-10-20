@@ -241,11 +241,12 @@ try {
   const chartGeometry=await page.evaluate(`(() => {
     const nodes=(${deepQuery})('flt-semantics, [aria-label]');
     const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix));if(!e)throw new Error('Missing plot '+prefix);const r=e.getBoundingClientRect();return {y:r.y,height:r.height,bottom:r.bottom};};
-    return {main:rect('K 线主图，'),volume:rect('VOL 成交量 副图，')};
+    return {main:rect('K 线主图，'),volume:rect('VOL 成交量 副图，'),timeline:rect('历史时间轴')};
   })()`);
   assert.equal(chartGeometry.main.height,320,'main price plot retains 320px');
   assert.equal(chartGeometry.volume.height,150,'volume pane retains 150px');
-  assert.ok(chartGeometry.volume.y-chartGeometry.main.bottom<40,'subchart connects directly below main chart');
+  assert.ok(chartGeometry.timeline.y>chartGeometry.main.bottom && chartGeometry.timeline.bottom<chartGeometry.volume.y,'timeline sits between main chart and first subchart');
+  assert.ok(chartGeometry.volume.y-chartGeometry.main.bottom<140,'timeline and connected plots stay compact');
   assert.ok(chartGeometry.main.y>=46 && chartGeometry.main.bottom<=900,'full main plot fits desktop first screen');
   assert.ok(chartGeometry.volume.bottom<=900,'first subchart fits desktop first screen');
   await page.screenshot('13-crypto-detail-desktop.png');

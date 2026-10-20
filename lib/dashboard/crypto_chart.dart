@@ -607,6 +607,76 @@ class _CryptoChartState extends State<CryptoChart> {
                 legend(overlays, right: widget.infoRight),
                 const SizedBox(height: 6),
                 plot(),
+                SizedBox(
+                  height: 22,
+                  child: CustomPaint(
+                    painter: _TimeAxisPainter(rows, axisWidth),
+                  ),
+                ),
+                Row(
+                  children: [
+                    IconButton(
+                      key: const Key('crypto-load-older'),
+                      style: IconButton.styleFrom(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      constraints: const BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
+                      ),
+                      padding: EdgeInsets.zero,
+                      tooltip: widget.loadingOlder
+                          ? '正在加载历史…'
+                          : widget.historyError != null
+                          ? '重试加载历史'
+                          : widget.hasMoreHistory
+                          ? '加载更多历史'
+                          : '已到最早数据',
+                      onPressed:
+                          widget.loadingOlder ||
+                              !widget.hasMoreHistory ||
+                              widget.onLoadOlder == null
+                          ? null
+                          : _loadOlder,
+                      icon: Icon(
+                        widget.loadingOlder
+                            ? Icons.hourglass_top
+                            : widget.historyError != null
+                            ? Icons.refresh
+                            : Icons.history,
+                        size: 18,
+                      ),
+                    ),
+                    Expanded(
+                      child: CryptoTimeline(
+                        candles: all,
+                        start: offset,
+                        count: rows.length,
+                        onRangeChanged: _range,
+                      ),
+                    ),
+                  ],
+                ),
+                Semantics(
+                  label:
+                      '显示区间：${cryptoTime(rows.first.time)} 至 ${cryptoTime(rows.last.time)}',
+                  excludeSemantics: true,
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    spacing: 16,
+                    runSpacing: 4,
+                    children: [
+                      Text(
+                        cryptoTime(rows.first.time),
+                        key: const Key('crypto-range-start'),
+                      ),
+                      Text(
+                        cryptoTime(rows.last.time),
+                        key: const Key('crypto-range-end'),
+                      ),
+                    ],
+                  ),
+                ),
                 for (final id in widget.panes)
                   if (_studies[id] case final study?) ...[
                     Container(
@@ -634,74 +704,6 @@ class _CryptoChartState extends State<CryptoChart> {
                   ],
               ],
             ),
-          ),
-        ),
-        SizedBox(
-          height: 22,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: CustomPaint(painter: _TimeAxisPainter(rows, axisWidth)),
-          ),
-        ),
-        Row(
-          children: [
-            IconButton(
-              key: const Key('crypto-load-older'),
-              style: IconButton.styleFrom(
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-              padding: EdgeInsets.zero,
-              tooltip: widget.loadingOlder
-                  ? '正在加载历史…'
-                  : widget.historyError != null
-                  ? '重试加载历史'
-                  : widget.hasMoreHistory
-                  ? '加载更多历史'
-                  : '已到最早数据',
-              onPressed:
-                  widget.loadingOlder ||
-                      !widget.hasMoreHistory ||
-                      widget.onLoadOlder == null
-                  ? null
-                  : _loadOlder,
-              icon: Icon(
-                widget.loadingOlder
-                    ? Icons.hourglass_top
-                    : widget.historyError != null
-                    ? Icons.refresh
-                    : Icons.history,
-                size: 18,
-              ),
-            ),
-            Expanded(
-              child: CryptoTimeline(
-                candles: all,
-                start: offset,
-                count: rows.length,
-                onRangeChanged: _range,
-              ),
-            ),
-          ],
-        ),
-        Semantics(
-          label:
-              '显示区间：${cryptoTime(rows.first.time)} 至 ${cryptoTime(rows.last.time)}',
-          excludeSemantics: true,
-          child: Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            spacing: 16,
-            runSpacing: 4,
-            children: [
-              Text(
-                cryptoTime(rows.first.time),
-                key: const Key('crypto-range-start'),
-              ),
-              Text(
-                cryptoTime(rows.last.time),
-                key: const Key('crypto-range-end'),
-              ),
-            ],
           ),
         ),
         const SizedBox(height: 8),

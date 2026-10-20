@@ -321,11 +321,15 @@ void main() {
       final timeline = find.byKey(const Key('crypto-timeline'));
       expect(
         tester.getTopLeft(vol).dy - tester.getBottomLeft(plot).dy,
-        lessThan(40),
+        lessThan(140),
       );
       expect(
         tester.getTopLeft(timeline).dy,
-        greaterThan(tester.getBottomLeft(macd).dy),
+        greaterThan(tester.getBottomLeft(plot).dy),
+      );
+      expect(
+        tester.getBottomLeft(timeline).dy,
+        lessThan(tester.getTopLeft(vol).dy),
       );
       final dynamic mainPainter = tester
           .widget<CustomPaint>(
