@@ -147,13 +147,14 @@ void main() {
           tester.widget<CryptoChart>(find.byType(CryptoChart)).asset,
           'ETH',
         );
-        final slider = find.byKey(const Key('crypto-candle-slider'));
-        await tester.ensureVisible(slider);
+        final plot = find.byKey(const Key('crypto-price-plot'));
+        await tester.ensureVisible(plot);
         final calls = client.marketCalls.length;
-        tester.widget<Slider>(slider).onChanged!(0);
+        await tester.ensureVisible(plot);
+        await tester.tapAt(tester.getTopLeft(plot) + const Offset(5, 40));
         await tester.pumpAndSettle();
         expect(client.marketCalls.length, calls);
-        expect(find.textContaining('2026-10-17 08:00 UTC+8'), findsOneWidget);
+        expect(find.textContaining('2026-10-17 08:00\nUTC+8'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.tap(find.byType(BackButton));
         await tester.pumpAndSettle();

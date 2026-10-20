@@ -217,7 +217,7 @@ try {
   passed('compact overview shows real multi-source snapshots and responsive layout; favorites filter has no chart subscriptions');
   await activate('数字货币行情');
   await waitFor(async () => (await labels()).some(item => item.label?.includes('报价截至')), 'live UI quote timestamp');
-  await waitFor(async () => (await labels()).some(item => item.label?.includes('点击图表或拖动滑杆')), 'live UI candles');
+  await waitFor(async () => (await labels()).some(item => item.label?.includes('点击查看十字线')), 'live UI candles');
   assert.ok([...requests].some(url => url.includes('data-api.binance.vision/api/v3/ticker/24hr')));
   assert.ok([...requests].some(url => url.includes('data-api.binance.vision/api/v3/klines')));
   // Read through the production bridge, including browser CORS and validation.
@@ -259,8 +259,10 @@ try {
   assert.ok(latestRange);
   await dragPrice();
   assert.notEqual(await visibleRange(),latestRange,'mouse drag changes the visible time window');
-  for(let i=0;i<8 && ![...requests].some(url=>url.includes('/klines') && url.includes('endTime='));i++) await dragPrice();
-  await waitFor(async()=>(await labels()).some(item=>item.label==='已加载 1000 根'),'dragging left edge loads another 500 bars');
+  for(let i=0;i<5;i++) await dragPrice();
+  assert.ok(![...requests].some(url=>url.includes('/klines') && url.includes('endTime=')), 'left edge must not load automatically');
+  await activate('加载更多历史');
+  await waitFor(async()=>(await labels()).some(item=>item.label==='已加载 1000 根'),'manual timeline button loads another 500 bars');
   const historyUrl=new URL([...requests].find(url=>url.includes('/klines') && url.includes('endTime=')));
   assert.equal(Number(historyUrl.searchParams.get('endTime')),btc.data.candles[0].time-1);
   const olderPage=await page.evaluate(`timeNestDashboard.request('cryptoCandles',JSON.stringify({symbol:'BTCUSDT',interval:'1h',endTime:${btc.data.candles[0].time-1}})).then(JSON.parse)`);
@@ -281,7 +283,29 @@ try {
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:500,y:500,deltaX:0,deltaY:-10000}); await delay(500);
   await activate('回到最新');
   assert.equal(await visibleRange(),latestRange);
-  passed('mouse and touch pan real charts; left edge loads contiguous older candles and live pushes keep the viewport');
+  const pinchRect=await page.evaluate(`(() => {
+    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('K 线主图，'));
+    const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height*.75};
+  })()`);
+  const beforePinch=await visibleRange();
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:true});
+  const touches=distance=>[{id:1,x:pinchRect.x-distance,y:pinchRect.y},{id:2,x:pinchRect.x+distance,y:pinchRect.y}];
+  await page.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:touches(60)});
+  for(let i=1;i<=8;i++) {
+    await page.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:touches(60+i*10)}); await delay(40);
+  }
+  await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await delay(350);
+  const afterPinch=await visibleRange();
+  const span=range=>{const dates=range.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g);return Date.parse(dates[1].replace(' ','T')+'+08:00')-Date.parse(dates[0].replace(' ','T')+'+08:00');};
+  assert.ok(span(afterPinch)<span(beforePinch),'two-finger pinch zooms the time window');
+  assert.ok((await labels()).some(e=>e.label?.includes('十字线已锁定')),'crosshair persists after fingers lift');
+  await page.screenshot('17-crypto-timeline-crosshair.png');
+  await page.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...pinchRect}]});
+  await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await delay(350);
+  assert.ok(!(await labels()).some(e=>e.label?.includes('十字线已锁定')),'tap again dismisses crosshair');
+  await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
+  passed('two-finger zoom and persistent crosshair with second-tap dismissal');
+  passed('mouse and touch pan real charts; manual button loads contiguous older candles and live pushes keep the viewport');
   // Flutter semantics represents the entire card as one tappable node.
   const ethPoint = await page.evaluate(`(() => {
     const node = (${deepQuery})('flt-semantics, [aria-label]').find(e => (e.getAttribute('aria-label') || e.textContent || '').startsWith('ETH · 以太坊'));

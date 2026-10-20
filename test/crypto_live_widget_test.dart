@@ -202,17 +202,18 @@ void main() {
           tester.widget<CryptoChart>(find.byType(CryptoChart)).infoRight,
           isTrue,
         );
-        expect(find.textContaining('成交额 '), findsWidgets);
+        expect(find.text('成交额'), findsWidgets);
         final saved = DashboardPreferences.decode(client.preferences);
         expect(saved.cryptoInfoRight, isTrue);
         expect(saved.cryptoOverlays, hasLength(8));
         expect(saved.cryptoPanes, hasLength(8));
-        final slider = find.byKey(const Key('crypto-candle-slider'));
-        tester.widget<Slider>(slider).onChanged!(0);
+        final plot = find.byKey(const Key('crypto-price-plot'));
+        await tester.ensureVisible(plot);
+        await tester.tapAt(tester.getTopLeft(plot) + const Offset(5, 40));
         await tester.pumpAndSettle();
         expect(
           find.textContaining(
-            cryptoTime(CryptoCandle.fromJson(client.rows[130]).time),
+            cryptoTime(CryptoCandle.fromJson(client.rows[50]).time),
           ),
           findsWidgets,
         );
@@ -264,7 +265,13 @@ void main() {
       CryptoChart chart() =>
           tester.widget<CryptoChart>(find.byType(CryptoChart));
       expect(chart().candles.last.close, 150);
-      expect(find.text('150.00'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('crypto-quote-strip')),
+          matching: find.text('150.00'),
+        ),
+        findsOneWidget,
+      );
       expect(chart().canAdvise, isTrue);
       feed.send(candleEvent({...row, 'close': 149.0}, at - 1));
       await tester.pumpAndSettle();

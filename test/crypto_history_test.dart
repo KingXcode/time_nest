@@ -137,7 +137,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(rangeStart(tester), cryptoTime(bar(1380)['time'] as int));
+        expect(rangeStart(tester), cryptoTime(bar(1300)['time'] as int));
         final plot = find.byKey(const Key('crypto-price-plot'));
         await tester.ensureVisible(plot);
         final width = tester.getSize(plot).width;
@@ -145,7 +145,7 @@ void main() {
         await tester.pumpAndSettle();
         final older = rangeStart(tester);
         expect(
-          older.compareTo(cryptoTime(bar(1380)['time'] as int)),
+          older.compareTo(cryptoTime(bar(1300)['time'] as int)),
           lessThan(0),
         );
         expect(tester.getSize(plot).height, cryptoPriceHeight);
@@ -161,17 +161,107 @@ void main() {
         await tester.pumpAndSettle();
         expect(rangeStart(tester).compareTo(older), greaterThan(0));
         await press(tester, 'crypto-latest');
-        expect(rangeStart(tester), cryptoTime(bar(1381)['time'] as int));
+        expect(rangeStart(tester), cryptoTime(bar(1301)['time'] as int));
         update(() => rows = [...rows, CryptoCandle.fromJson(bar(1501))]);
         await tester.pumpAndSettle();
-        expect(rangeStart(tester), cryptoTime(bar(1382)['time'] as int));
+        expect(rangeStart(tester), cryptoTime(bar(1302)['time'] as int));
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  for (final width in [320.0, 1000.0]) {
+    testWidgets(
+      '200-bar viewport, persistent touch crosshair, pinch and timeline selection at $width',
+      (tester) async {
+        fixture.setSize(tester, Size(width, 1100));
+        var loads = 0;
+        await tester.pumpWidget(
+          fixture.app(
+            Scaffold(
+              body: SingleChildScrollView(
+                child: CryptoChart(
+                  candles: candles(0, 500),
+                  asset: 'BTC',
+                  fetchedAt: DateTime.utc(2026, 2),
+                  onLoadOlder: () => loads++,
+                  hasMoreHistory: true,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        CryptoTimeline timeline() =>
+            tester.widget<CryptoTimeline>(find.byType(CryptoTimeline));
+        expect(timeline().count, 200);
+        expect(timeline().start, 300);
+        final plot = find.byKey(const Key('crypto-price-plot'));
+        await tester.ensureVisible(plot);
+        final rect = tester.getRect(plot);
+        final finger = await tester.startGesture(rect.center, pointer: 1);
+        await tester.pump();
+        expect(find.byKey(const Key('crypto-crosshair')), findsOneWidget);
+        final selected = tester
+            .widget<Text>(find.byKey(const Key('crypto-candle-time')))
+            .data;
+        await finger.up();
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('crypto-crosshair')), findsOneWidget);
+        expect(
+          tester.widget<Text>(find.byKey(const Key('crypto-candle-time'))).data,
+          selected,
+        );
+        await tester.tapAt(rect.center);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('crypto-crosshair')), findsNothing);
+        final one = await tester.startGesture(
+          rect.center - const Offset(60, 0),
+          pointer: 2,
+        );
+        final two = await tester.startGesture(
+          rect.center + const Offset(60, 0),
+          pointer: 3,
+        );
+        await tester.pump();
+        for (var i = 1; i <= 5; i++) {
+          await one.moveTo(rect.center - Offset(60 + i * 14, 0));
+          await two.moveTo(rect.center + Offset(60 + i * 14, 0));
+          await tester.pump();
+        }
+        await one.up();
+        await two.up();
+        await tester.pumpAndSettle();
+        expect(timeline().count, lessThan(200));
+        expect(timeline().count, greaterThanOrEqualTo(20));
+        final nav = find.byKey(const Key('crypto-timeline'));
+        await tester.ensureVisible(nav);
+        await tester.tapAt(tester.getTopLeft(nav) + const Offset(5, 20));
+        await tester.pumpAndSettle();
+        expect(timeline().start, 0);
+        final oldCount = timeline().count;
+        final navRect = tester.getRect(nav);
+        final edge =
+            navRect.topLeft + Offset(navRect.width * oldCount / 500, 16);
+        final handle = await tester.startGesture(edge);
+        // Cross the gesture slop, then resize the right edge.
+        await handle.moveBy(const Offset(22, 0));
+        await tester.pump();
+        await handle.moveBy(Offset(navRect.width * .12, 0));
+        await handle.up();
+        await tester.pumpAndSettle();
+        expect(timeline().count, greaterThan(oldCount));
+        expect(timeline().start, 0);
+        expect(loads, 0);
+        await press(tester, 'crypto-load-older');
+        expect(loads, 1);
         expect(tester.takeException(), isNull);
       },
     );
   }
 
   testWidgets(
-    'left edge pages once, preserves viewport and retained history through live refresh',
+    'left edge never auto loads; manual button pages once, preserves viewport and retained history through live refresh',
     (tester) async {
       fixture.setSize(tester, const Size(1280, 1000));
       final client = HistoryClient(), feed = Feed();
@@ -181,6 +271,8 @@ void main() {
       for (var i = 0; i < 4; i++) {
         await press(tester, 'crypto-pan-older');
       }
+      expect(client.olderCalls, isEmpty);
+      await press(tester, 'crypto-load-older');
       expect(client.olderCalls, hasLength(1));
       expect(client.olderCalls.single['endTime'], startTime + 1000 * hour - 1);
       final pinned = rangeStart(tester);
@@ -280,7 +372,7 @@ void main() {
         expect(chart.asset, 'ETH');
         expect(chart.candles, hasLength(500));
         expect(chart.loadingOlder, isFalse);
-        expect(rangeStart(tester), cryptoTime(bar(1380)['time'] as int));
+        expect(rangeStart(tester), cryptoTime(bar(1300)['time'] as int));
       }
       client.olderPending = Completer<DashboardData>();
       await press(tester, 'crypto-load-older');
