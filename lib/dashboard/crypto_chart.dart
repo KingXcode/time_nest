@@ -1,11 +1,13 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/gestures.dart';
 
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
 import 'dashboard_widgets.dart';
+import 'dashboard_preferences.dart';
 
 const cryptoUp = Color(0xFF67D8AB);
 const cryptoDown = Color(0xFFFF8A92);
@@ -31,6 +33,8 @@ class CryptoChart extends StatefulWidget {
     this.overlays = defaultCryptoOverlays,
     this.panes = defaultCryptoPanes,
     this.infoRight = false,
+    this.paneHeights = const {},
+    this.onPaneHeightsChanged,
     this.onSettingsChanged,
     this.canAdvise = false,
     this.onLoadOlder,
@@ -43,6 +47,8 @@ class CryptoChart extends StatefulWidget {
   final DateTime fetchedAt;
   final List<String> overlays, panes;
   final bool infoRight, canAdvise;
+  final Map<String, double> paneHeights;
+  final ValueChanged<Map<String, double>>? onPaneHeightsChanged;
   final void Function(List<String>, List<String>, bool)? onSettingsChanged;
   final VoidCallback? onLoadOlder;
   final bool loadingOlder, hasMoreHistory;
@@ -62,7 +68,9 @@ class _CryptoChartState extends State<CryptoChart> {
   int _visibleCount = 200, _scaleCount = 200, _scaleStart = 0;
   double _scaleAnchor = .5, _pointerY = .5;
   String? _pointerPane;
-  final _paneHeights = <String, double>{};
+  late Map<String, double> _paneHeights = cleanCryptoPaneHeights(
+    widget.paneHeights,
+  );
 
   void _range(int start, int count) {
     final rows = widget.candles;
@@ -116,6 +124,9 @@ class _CryptoChartState extends State<CryptoChart> {
   @override
   void didUpdateWidget(CryptoChart old) {
     super.didUpdateWidget(old);
+    if (!mapEquals(old.paneHeights, widget.paneHeights)) {
+      _paneHeights = cleanCryptoPaneHeights(widget.paneHeights);
+    }
     if (old.candles != widget.candles || old.fetchedAt != widget.fetchedAt) {
       _studies = calculateCryptoIndicators(widget.candles);
       _assessment = assessCrypto(
@@ -706,13 +717,24 @@ class _CryptoChartState extends State<CryptoChart> {
 
   Widget _resizeHandle(String id) {
     final height = _paneHeights[id] ?? cryptoPaneHeight;
-    void resize(double value) =>
-        setState(() => _paneHeights[id] = value.clamp(64.0, 400.0));
+    void save() => widget.onPaneHeightsChanged?.call(Map.of(_paneHeights));
+    void resize(double value, {bool persist = true}) {
+      setState(
+        () => _paneHeights[id] = value.clamp(
+          cryptoMinPaneHeight,
+          cryptoMaxPaneHeight,
+        ),
+      );
+      if (persist) save();
+    }
+
     return Semantics(
       label: '调整 ${cryptoIndicators[id]!.name} 副图高度',
       value: '${height.round()} 像素',
-      increasedValue: '${(height + 20).clamp(64, 400).round()} 像素',
-      decreasedValue: '${(height - 20).clamp(64, 400).round()} 像素',
+      increasedValue:
+          '${(height + 20).clamp(cryptoMinPaneHeight, cryptoMaxPaneHeight).round()} 像素',
+      decreasedValue:
+          '${(height - 20).clamp(cryptoMinPaneHeight, cryptoMaxPaneHeight).round()} 像素',
       onIncrease: () => resize(height + 20),
       onDecrease: () => resize(height - 20),
       child: MouseRegion(
@@ -722,8 +744,12 @@ class _CryptoChartState extends State<CryptoChart> {
           child: GestureDetector(
             key: ValueKey('crypto-resize-$id'),
             behavior: HitTestBehavior.opaque,
-            onVerticalDragUpdate: (e) =>
-                resize((_paneHeights[id] ?? cryptoPaneHeight) + e.delta.dy),
+            onVerticalDragUpdate: (e) => resize(
+              (_paneHeights[id] ?? cryptoPaneHeight) + e.delta.dy,
+              persist: false,
+            ),
+            onVerticalDragEnd: (_) => save(),
+            onVerticalDragCancel: save,
             child: const SizedBox(
               height: 10,
               child: Center(

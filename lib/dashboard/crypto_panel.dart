@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 
 import 'crypto_chart.dart';
 import 'crypto_feed.dart';
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
 import 'dashboard_client.dart';
+import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
 
 class CryptoPanel extends StatefulWidget {
@@ -21,6 +23,8 @@ class CryptoPanel extends StatefulWidget {
     this.overlays = defaultCryptoOverlays,
     this.panes = defaultCryptoPanes,
     this.infoRight = false,
+    this.paneHeights = const {},
+    this.onPaneHeightsChanged,
     this.onChartChanged,
   });
   final DashboardClient client;
@@ -28,6 +32,8 @@ class CryptoPanel extends StatefulWidget {
   final CryptoFeed? feed;
   final List<String> overlays, panes;
   final bool infoRight;
+  final Map<String, double> paneHeights;
+  final ValueChanged<Map<String, double>>? onPaneHeightsChanged;
   final void Function(
     List<String> overlays,
     List<String> panes,
@@ -63,6 +69,9 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   late List<String> _overlays = List.of(widget.overlays),
       _panes = List.of(widget.panes);
   late bool _infoRight = widget.infoRight;
+  late Map<String, double> _paneHeights = cleanCryptoPaneHeights(
+    widget.paneHeights,
+  );
 
   @override
   void initState() {
@@ -80,6 +89,9 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(CryptoPanel old) {
     super.didUpdateWidget(old);
+    if (!mapEquals(old.paneHeights, widget.paneHeights)) {
+      _paneHeights = cleanCryptoPaneHeights(widget.paneHeights);
+    }
     if (old.overlays != widget.overlays) _overlays = List.of(widget.overlays);
     if (old.panes != widget.panes) _panes = List.of(widget.panes);
     if (old.infoRight != widget.infoRight) _infoRight = widget.infoRight;
@@ -596,6 +608,11 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             overlays: _overlays,
             panes: _panes,
             infoRight: _infoRight,
+            paneHeights: _paneHeights,
+            onPaneHeightsChanged: (heights) {
+              setState(() => _paneHeights = cleanCryptoPaneHeights(heights));
+              widget.onPaneHeightsChanged?.call(Map.of(_paneHeights));
+            },
             onSettingsChanged: _chartChanged,
             onLoadOlder: _loadOlder,
             loadingOlder: _olderBusy,

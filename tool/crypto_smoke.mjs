@@ -327,6 +327,8 @@ try {
     return {main:height('K 线主图，'),volume:height('VOL 成交量 副图，'),macd:height('MACD 副图，')};
   })()`);
   assert.equal(resized.main,320);assert.ok(resized.volume>150);assert.equal(resized.macd,150);
+  const storedHeight=await page.evaluate('JSON.parse(timeNestDashboard.readPreferences()).cryptoPaneHeights.vol');
+  assert.equal(storedHeight,resized.volume,'drag end stores the pane height');
   await page.screenshot('18-crypto-connected-resizable.png');
   passed('dragging a subchart edge resizes only that pane within the connected chart');
   passed('two-finger zoom and persistent crosshair with second-tap dismissal');
@@ -363,10 +365,17 @@ try {
   // Reopening a route is covered in widget tests at 320 px and 2x text.
   const restored = await page.evaluate(`JSON.parse(timeNestDashboard.readPreferences())`);
   assert.equal(restored.cryptoSymbol, 'ETHUSDT'); assert.equal(restored.cryptoInterval, '1d');
+  assert.equal(restored.cryptoPaneHeights.vol,storedHeight);
   assert.ok(!restored.order?.includes('fx'));
   await activate('数字货币行情');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('主图 8/8 · 副图 8/8')), '8+8 chart settings restored');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'restored stream live');
+  const restoredHeight=await page.evaluate(`(() => {
+    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('VOL 成交量 副图，'));
+    return e.getBoundingClientRect().height;
+  })()`);
+  assert.equal(restoredHeight,storedHeight,'fresh page restores custom height after symbol, interval and indicator changes');
+  passed('device-local subchart heights persist across series changes and full page reload');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:620});await delay(500);await page.screenshot('05-crypto-eight-overlays.png');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('06-crypto-eight-panes.png');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('07-crypto-assessment.png');

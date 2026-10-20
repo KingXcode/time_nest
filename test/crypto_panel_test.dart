@@ -116,6 +116,71 @@ void main() {
     expect(cryptoPrice(12345.67), '12,345.67');
   });
 
+  testWidgets(
+    'resized pane heights persist locally across series, routes and fresh screens',
+    (tester) async {
+      fixture.setSize(tester, const Size(1000, 1200));
+      final client = MarketClient();
+      await tester.pumpWidget(fixture.app(DashboardScreen(client: client)));
+      await tester.pumpAndSettle();
+      await fixture.openModule(tester, 'crypto');
+      final pane = find.byKey(const Key('crypto-pane-vol'));
+      final handle = find.byKey(const Key('crypto-resize-vol'));
+      await tester.ensureVisible(handle);
+      final before = client.preferences;
+      final drag = await tester.startGesture(tester.getCenter(handle));
+      await drag.moveBy(const Offset(0, 22));
+      await tester.pump();
+      await drag.moveBy(const Offset(0, 60));
+      await tester.pump();
+      final height = tester.getSize(pane).height;
+      expect(height, greaterThan(cryptoPaneHeight));
+      expect(
+        client.preferences,
+        before,
+        reason: 'drag updates the chart without writing storage every frame',
+      );
+      await drag.up();
+      await tester.pumpAndSettle();
+      expect(
+        DashboardPreferences.decode(client.preferences)
+            .cryptoPaneHeights['vol'],
+        height,
+      );
+      final eth = find.byKey(const ValueKey('crypto-select-ETHUSDT'));
+      await tester.ensureVisible(eth);
+      await tester.tap(eth);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(pane).height, height);
+      final daily = find.widgetWithText(ChoiceChip, '日线');
+      await tester.ensureVisible(daily);
+      await tester.tap(daily);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(pane).height, height);
+      expect(
+        tester.getSize(find.byKey(const Key('crypto-pane-macd'))).height,
+        cryptoPaneHeight,
+      );
+      await tester.ensureVisible(find.byType(BackButton));
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await fixture.openModule(tester, 'crypto');
+      expect(tester.getSize(pane).height, height);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(fixture.app(DashboardScreen(client: client)));
+      await tester.pumpAndSettle();
+      await fixture.openModule(tester, 'crypto');
+      expect(tester.getSize(pane).height, height);
+      expect(tester.widget<CryptoChart>(find.byType(CryptoChart)).asset, 'ETH');
+      expect(
+        DashboardPreferences.decode(client.preferences).cryptoInterval,
+        '1d',
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final viewport in [
     (const Size(320, 900), 2.0),
     (const Size(1280, 900), 1.0),

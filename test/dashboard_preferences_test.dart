@@ -4,6 +4,49 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 
 void main() {
+  test(
+    'pane height cache migrates, validates and survives preference round trips',
+    () {
+      expect(
+        DashboardPreferences.decode('{"cryptoSymbol":"ETHUSDT"}')
+            .cryptoPaneHeights,
+        isEmpty,
+      );
+      final p = DashboardPreferences.decode(
+        jsonEncode({
+          'cryptoSymbol': 'ETHUSDT',
+          'cryptoInterval': '1d',
+          'cryptoPaneHeights': {
+            'vol': 224.5,
+            'macd': 999,
+            'rsi': -5,
+            'ma': 240,
+            'unknown': 180,
+            'atr': '200',
+          },
+        }),
+      );
+      expect(p.cryptoPaneHeights, {'vol': 224.5, 'macd': 400.0, 'rsi': 64.0});
+      final restored = DashboardPreferences.decode(p.encode());
+      expect(restored.cryptoPaneHeights, p.cryptoPaneHeights);
+      expect(restored.cryptoSymbol, 'ETHUSDT');
+      expect(restored.cryptoInterval, '1d');
+      expect(
+        cleanCryptoPaneHeights({
+          'vol': double.nan,
+          'macd': double.infinity,
+          'rsi': 180,
+        }),
+        {'rsi': 180.0},
+      );
+      expect(
+        DashboardPreferences.decode('{"cryptoPaneHeights":[]}')
+            .cryptoPaneHeights,
+        isEmpty,
+      );
+    },
+  );
+
   test('defaults and corrupt storage remain usable', () {
     expect(DashboardPreferences.decode(null).order, dashboardModules);
     expect(DashboardPreferences.decode('{bad').order, dashboardModules);
