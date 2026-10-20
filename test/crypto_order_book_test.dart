@@ -666,7 +666,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('金额(USDT)'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CryptoOrderBook),
+          matching: find.text('金额(USDT)'),
+        ),
+        findsOneWidget,
+      );
       expect(feed.controllers.length, subscriptions);
       expect(client.rateCalls, inInclusiveRange(1, 2));
       await tester.pumpWidget(const SizedBox());

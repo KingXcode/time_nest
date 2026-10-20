@@ -201,7 +201,7 @@ class CryptoBookLayout extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             SizedBox(
-              width: (box.maxWidth * .19).clamp(210.0, 260.0),
+              width: (box.maxWidth * .24).clamp(320.0, 340.0),
               child: trades,
             ),
           ],

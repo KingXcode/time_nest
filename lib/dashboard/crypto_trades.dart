@@ -20,7 +20,8 @@ class CryptoTrade {
         !['price', 'quantity'].every(
           (k) =>
               raw[k] is num && (raw[k] as num).isFinite && (raw[k] as num) > 0,
-        )) {
+        ) ||
+        !((raw['price'] as num) * (raw['quantity'] as num)).isFinite) {
       throw const FormatException('Invalid market trade');
     }
     id = raw['id'] as int;
@@ -32,6 +33,7 @@ class CryptoTrade {
   late final int id, time;
   late final double price, quantity;
   late final bool buyerMaker;
+  double get amount => price * quantity;
 }
 
 class CryptoTrades extends StatefulWidget {
@@ -62,6 +64,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
   bool _ruleError = false;
   List<CryptoTrade>? _frozen;
   final _scroll = ScrollController();
+  final _horizontal = ScrollController();
 
   @override
   void initState() {
@@ -137,6 +140,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
     _updates?.cancel();
     _timer?.cancel();
     _scroll.dispose();
+    _horizontal.dispose();
     super.dispose();
   }
 
@@ -174,39 +178,61 @@ class _CryptoTradesState extends State<CryptoTrades> {
       fontSize: 11,
       fontFeatures: [FontFeature.tabularFigures()],
     );
-    Widget cells(String price, String quantity, String time, {Color? color}) =>
-        Row(
-          children: [
-            Expanded(
-              flex: 4,
-              child: Text(
-                price,
-                style: numeric.copyWith(color: color),
-                maxLines: 1,
-              ),
+    Widget cells(
+      String price,
+      String quantity,
+      String amount,
+      String time, {
+      Color? color,
+      String? exactAmount,
+      Key? amountKey,
+    }) => Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: Text(
+            price,
+            style: numeric.copyWith(color: color),
+            maxLines: 1,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          flex: 3,
+          child: Text(
+            quantity,
+            style: numeric,
+            textAlign: TextAlign.right,
+            maxLines: 1,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 4,
+          child: Tooltip(
+            message: exactAmount == null ? '金额 (USDT)' : '$exactAmount USDT',
+            excludeFromSemantics: true,
+            child: Text(
+              amount,
+              key: amountKey,
+              style: numeric,
+              textAlign: TextAlign.right,
+              maxLines: 1,
             ),
-            const SizedBox(width: 6),
-            Expanded(
-              flex: 3,
-              child: Text(
-                quantity,
-                style: numeric,
-                textAlign: TextAlign.right,
-                maxLines: 1,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 3,
-              child: Text(
-                time,
-                style: numeric,
-                textAlign: TextAlign.right,
-                maxLines: 1,
-              ),
-            ),
-          ],
-        );
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 3,
+          child: Text(
+            time,
+            style: numeric,
+            textAlign: TextAlign.right,
+            maxLines: 1,
+          ),
+        ),
+      ],
+    );
     return Semantics(
       label: '最新成交面板',
       container: true,
@@ -279,96 +305,124 @@ class _CryptoTradesState extends State<CryptoTrades> {
               builder: (context, box) {
                 final scale = MediaQuery.textScalerOf(context).scale(11) / 11;
                 final rowHeight = math.max(22.0, 20 * scale);
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: math.max(box.maxWidth, 210 * scale),
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 6,
+                return Scrollbar(
+                  controller: _horizontal,
+                  thumbVisibility: box.maxWidth < 312 * scale,
+                  child: SingleChildScrollView(
+                    controller: _horizontal,
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: math.max(box.maxWidth, 312 * scale),
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
+                            child: DefaultTextStyle.merge(
+                              style: const TextStyle(color: dashboardMuted),
+                              child: cells(
+                                '价格(USDT)',
+                                '数量($asset)',
+                                '金额(USDT)',
+                                '时间',
+                              ),
+                            ),
                           ),
-                          child: DefaultTextStyle.merge(
-                            style: const TextStyle(color: dashboardMuted),
-                            child: cells('价格(USDT)', '数量($asset)', '时间'),
-                          ),
-                        ),
-                        if (rows.isEmpty)
-                          SizedBox(
-                            height: 220,
-                            child: Center(
-                              child: Text(
-                                widget.status == 'paused'
-                                    ? '实时推送已暂停'
-                                    : '等待最新成交…',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: dashboardMuted,
+                          if (rows.isEmpty)
+                            SizedBox(
+                              height: 220,
+                              child: Center(
+                                child: Text(
+                                  widget.status == 'paused'
+                                      ? '实时推送已暂停'
+                                      : '等待最新成交…',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: dashboardMuted,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            SizedBox(
+                              height: math.min(rows.length, 20) * rowHeight,
+                              child: Scrollbar(
+                                controller: _scroll,
+                                child: ListView.builder(
+                                  key: const Key('crypto-trades-list'),
+                                  controller: _scroll,
+                                  padding: EdgeInsets.zero,
+                                  itemExtent: rowHeight,
+                                  itemCount: rows.length,
+                                  itemBuilder: (context, i) {
+                                    final trade = rows[i], rule = _rule;
+                                    final price = rule == null
+                                        ? '—'
+                                        : number(
+                                            trade.price,
+                                            rule.decimals,
+                                            commas: true,
+                                          );
+                                    final quantity = rule == null
+                                        ? '—'
+                                        : number(
+                                            trade.quantity,
+                                            rule.quantityDecimals,
+                                          );
+                                    final exactAmount = rule == null
+                                        ? '—'
+                                        : number(
+                                            trade.amount,
+                                            rule.amountDecimals,
+                                          );
+                                    final amount = rule == null
+                                        ? '—'
+                                        : trade.amount >= 1000000
+                                        ? '${(trade.amount / 1000000).toStringAsFixed(2)}M'
+                                        : trade.amount >= 1000
+                                        ? '${(trade.amount / 1000).toStringAsFixed(2)}K'
+                                        : exactAmount;
+                                    final time = cryptoTime(
+                                      trade.time,
+                                      seconds: true,
+                                    ).split(' ').last;
+                                    return Semantics(
+                                      label:
+                                          '成交 ${trade.id}，${trade.buyerMaker ? '主动卖出' : '主动买入'}，价格 $price，数量 $quantity，金额 $exactAmount USDT，时间 $time',
+                                      child: Tooltip(
+                                        message:
+                                            '${cryptoTime(trade.time, seconds: true)} UTC+8',
+                                        child: Padding(
+                                          key: ValueKey(
+                                            'crypto-trade-${trade.id}',
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                          ),
+                                          child: cells(
+                                            price,
+                                            quantity,
+                                            amount,
+                                            time,
+                                            exactAmount: exactAmount,
+                                            amountKey: ValueKey(
+                                              'crypto-trade-amount-${trade.id}',
+                                            ),
+                                            color: trade.buyerMaker
+                                                ? cryptoDown
+                                                : cryptoUp,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),
-                          )
-                        else
-                          SizedBox(
-                            height: math.min(rows.length, 20) * rowHeight,
-                            child: Scrollbar(
-                              controller: _scroll,
-                              child: ListView.builder(
-                                key: const Key('crypto-trades-list'),
-                                controller: _scroll,
-                                padding: EdgeInsets.zero,
-                                itemExtent: rowHeight,
-                                itemCount: rows.length,
-                                itemBuilder: (context, i) {
-                                  final trade = rows[i], rule = _rule;
-                                  final price = rule == null
-                                      ? '—'
-                                      : number(
-                                          trade.price,
-                                          rule.decimals,
-                                          commas: true,
-                                        );
-                                  final quantity = rule == null
-                                      ? '—'
-                                      : number(
-                                          trade.quantity,
-                                          rule.quantityDecimals,
-                                        );
-                                  final time = cryptoTime(
-                                    trade.time,
-                                    seconds: true,
-                                  ).split(' ').last;
-                                  return Semantics(
-                                    label:
-                                        '成交 ${trade.id}，${trade.buyerMaker ? '主动卖出' : '主动买入'}，价格 $price，数量 $quantity，时间 $time',
-                                    child: Tooltip(
-                                      message:
-                                          '${cryptoTime(trade.time, seconds: true)} UTC+8',
-                                      child: Padding(
-                                        key: ValueKey(
-                                          'crypto-trade-${trade.id}',
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                        ),
-                                        child: cells(
-                                          price,
-                                          quantity,
-                                          time,
-                                          color: trade.buyerMaker
-                                              ? cryptoDown
-                                              : cryptoUp,
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );

@@ -5,9 +5,11 @@ import 'package:time_nest/dashboard/crypto_panel.dart';
 import 'package:time_nest/dashboard/crypto_order_book.dart';
 import 'package:time_nest/dashboard/crypto_trades.dart';
 import 'package:time_nest/dashboard/crypto_view_settings.dart';
+import 'package:time_nest/dashboard/dashboard_client.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 
 import 'crypto_live_widget_test.dart' show Client, Feed;
+import 'crypto_order_book_test.dart' show RulesClient, precisionRules;
 import 'dashboard_widget_test.dart' as fixture;
 
 Map<String, dynamic> trade(int id, {bool maker = false}) => {
@@ -92,6 +94,14 @@ void main() {
       () => CryptoTrade.fromJson({...trade(1), 'id': -1}),
       throwsFormatException,
     );
+    expect(
+      () => CryptoTrade.fromJson({
+        ...trade(1),
+        'price': 1e308,
+        'quantity': 1e308,
+      }),
+      throwsFormatException,
+    );
   });
 
   testWidgets(
@@ -111,6 +121,11 @@ void main() {
       );
       expect(
         find.descendant(of: row, matching: find.text('0.00050')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('crypto-trade-amount-102')), findsOneWidget);
+      expect(
+        find.descendant(of: row, matching: find.text('40.73600500')),
         findsOneWidget,
       );
       expect(
@@ -148,6 +163,88 @@ void main() {
       expect(feed.selections, hasLength(1));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'trade amounts use the raw price times quantity, retain tiny amounts and shorten large amounts with exact tooltips',
+    (tester) async {
+      fixture.setSize(tester, const Size(1440, 1000));
+      final client = Client(), feed = Feed();
+      await tester.pumpWidget(page(client, feed));
+      await tester.pumpAndSettle();
+      feed.send({
+        'type': 'trades',
+        'symbol': 'BTCUSDT',
+        'trades': [
+          trade(204),
+          {...trade(203), 'quantity': 1},
+          {...trade(202), 'quantity': 20},
+          {...trade(201), 'price': .01, 'quantity': .00001},
+          {...trade(200), 'price': 1, 'quantity': 999.99999999},
+        ],
+      });
+      await tester.pumpAndSettle();
+      for (final entry in {
+        204: '40.73600500',
+        203: '81.47K',
+        202: '1.63M',
+        201: '0.00000010',
+        200: '999.99999999',
+      }.entries) {
+        expect(
+          tester
+              .widget<Text>(find.byKey(Key('crypto-trade-amount-${entry.key}')))
+              .data,
+          entry.value,
+        );
+      }
+      expect(find.byTooltip('81472.01000000 USDT'), findsOneWidget);
+      expect(find.byTooltip('1629440.20000000 USDT'), findsOneWidget);
+      expect(feed.selections, hasLength(1));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'cached quote precision renders immediately and a refreshed rule reformats the amount column',
+    (tester) async {
+      final now = DateTime.utc(2026, 10, 20);
+      final client = RulesClient()
+        ..savedRules = DashboardData(
+          data: precisionRules(),
+          fetchedAt: now,
+          cached: true,
+          stale: true,
+        );
+      final feed = Feed();
+      await tester.pumpWidget(page(client, feed));
+      await tester.pumpAndSettle();
+      feed.send(fills(100));
+      await tester.pumpAndSettle();
+      String amount() => tester
+          .widget<Text>(find.byKey(const Key('crypto-trade-amount-100')))
+          .data!;
+      expect(amount(), '40.73600500');
+      client.updates.add(
+        DashboardData(
+          data: precisionRules(quote: 6),
+          fetchedAt: now.add(const Duration(hours: 9)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(amount(), '40.736005');
+      client.updates.add(client.savedRules!);
+      await tester.pumpAndSettle();
+      expect(
+        amount(),
+        '40.736005',
+        reason: 'late cached rules never revert the new precision',
+      );
+      expect(feed.selections, hasLength(1));
+      await tester.pumpWidget(const SizedBox());
+      await client.updates.close();
     },
   );
 
@@ -339,6 +436,25 @@ void main() {
       final tape = find.byKey(const Key('crypto-trades-panel')),
           book = find.byKey(const Key('crypto-order-book'));
       final plot = find.byKey(const Key('crypto-price-plot'));
+      final amount = find.byKey(const Key('crypto-trade-amount-100'));
+      expect(amount, findsOneWidget);
+      final tradeRow = find.byKey(const Key('crypto-trade-100'));
+      final quantity = find.descendant(
+        of: tradeRow,
+        matching: find.text('0.00050'),
+      );
+      final time = find.descendant(
+        of: tradeRow,
+        matching: find.text('19:21:20'),
+      );
+      expect(
+        tester.getTopLeft(amount).dx,
+        greaterThan(tester.getTopLeft(quantity).dx),
+      );
+      expect(
+        tester.getTopLeft(time).dx,
+        greaterThan(tester.getTopLeft(amount).dx),
+      );
       if (size.width >= 1180) {
         expect(
           tester.getTopLeft(tape).dx,

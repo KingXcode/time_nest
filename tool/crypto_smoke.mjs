@@ -267,11 +267,27 @@ try {
   const initialFills=await tapeRows(), fillIds=initialFills.map(e=>Number(e.label.match(/成交 (\d+)，/)[1]));
   assert.equal(new Set(fillIds).size,fillIds.length,'displayed fills never duplicate trade IDs');
   assert.ok(fillIds.every((id,i)=>i===0 || id<fillIds[i-1]),'newest executions appear first');
-  assert.ok(initialFills.every(e=>/数量 [\d,]+\.\d{5}，时间 \d{2}:\d{2}:\d{2}/.test(e.label)),'BTC quantities use exchange precision and UTC+8 times');
+  assert.ok(initialFills.every(e=>/数量 [\d,]+\.\d{5}，金额 [\d.]+ USDT，时间 \d{2}:\d{2}:\d{2}/.test(e.label)),'BTC quantities use exchange precision and UTC+8 times');
   const matched=initialFills.map(row=>({row,frame:streamFrames.find(f=>f.data?.e==='trade' && f.data.t===Number(row.label.match(/成交 (\d+)，/)[1]))})).filter(item=>item.frame);
   assert.ok(matched.length>0,'displayed IDs match the actual raw stream');
   for(const {row,frame} of matched) assert.ok(row.label.includes(frame.data.m?'主动卖出':'主动买入'));
   passed('recent public fills bootstrap from REST and raw same-socket trades render newest-first with unique IDs, exchange precision and correct aggressor direction');
+  const tradeRules=await page.evaluate(`timeNestDashboard.request('cryptoBookRules','{}').then(JSON.parse)`);
+  const amountDigits=tradeRules.data.rules.find(r=>r.symbol==='BTCUSDT').quoteAssetPrecision;
+  for(const {row,frame} of matched) {
+    const displayed=row.label.match(/，金额 ([\d.]+) USDT，/)[1];
+    assert.equal(displayed,(Number(frame.data.p)*Number(frame.data.q)).toFixed(amountDigits),'trade amount uses raw execution price and size with the cached quote precision');
+  }
+  const amountColumns=await page.evaluate(`(() => {
+    const nodes=(${deepQuery})('flt-semantics, [aria-label]'), label=e=>e.getAttribute('aria-label')||e.textContent||'';
+    const panel=nodes.find(e=>label(e)==='最新成交面板').getBoundingClientRect();
+    return ['价格(USDT)','数量(BTC)','金额(USDT)','时间'].map(name=>{
+      const e=nodes.find(e=>{const r=e.getBoundingClientRect();return label(e)===name && r.x>=panel.x && r.right<=panel.right;});
+      if(!e)throw new Error('Trade column missing: '+name);return e.getBoundingClientRect().x;
+    });
+  })()`);
+  assert.ok(amountColumns.every((x,i)=>i===0 || x>amountColumns[i-1]),'price, quantity, USDT amount and time are four visible ordered columns');
+  passed('latest executions show a separate USDT amount column whose full precision matches actual raw price times quantity');
   const conversion = await page.evaluate(`timeNestDashboard.request('cryptoConversion','{}').then(JSON.parse)`);
   assert.equal(conversion.stale, false);
   assert.equal(conversion.data.base, 'USDT');
