@@ -209,17 +209,9 @@ void main() {
         );
         await tester.tap(find.text('完成'));
         await tester.pumpAndSettle();
-        final toggle = find.byKey(const Key('crypto-info-position'));
-        await tester.ensureVisible(toggle);
-        await tester.tap(toggle);
-        await tester.pumpAndSettle();
-        expect(
-          tester.widget<CryptoChart>(find.byType(CryptoChart)).infoRight,
-          isTrue,
-        );
+        expect(find.byKey(const Key('crypto-info-position')), findsNothing);
         expect(find.byKey(const Key('crypto-info-window')), findsNothing);
         final saved = DashboardPreferences.decode(client.preferences);
-        expect(saved.cryptoInfoRight, isTrue);
         expect(saved.cryptoOverlays, hasLength(8));
         expect(saved.cryptoPanes, hasLength(8));
         final plot = find.byKey(const Key('crypto-price-plot'));

@@ -126,6 +126,98 @@ Widget chartPage() => fixture.app(
 );
 
 void main() {
+  for (final scenario in [
+    (PointerDeviceKind.mouse, 1200.0, true),
+    (PointerDeviceKind.mouse, 320.0, false),
+    (PointerDeviceKind.touch, 390.0, false),
+    (PointerDeviceKind.touch, 844.0, true),
+  ]) {
+    testWidgets(
+      'information avoids the crosshair at $scenario including central candles and subchart tracking',
+      (tester) async {
+        fixture.setSize(tester, Size(scenario.$2, 1000));
+        await tester.pumpWidget(
+          fixture.app(
+            Scaffold(
+              body: SingleChildScrollView(
+                child: CryptoChart(
+                  candles: candles(0, 500),
+                  asset: 'BTC',
+                  fetchedAt: DateTime.utc(2026, 2),
+                  infoRight: scenario.$3,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final plot = find.byKey(const Key('crypto-price-plot'));
+        final info = find.byKey(const Key('crypto-info-window'));
+        await tester.ensureVisible(plot);
+        final bounds = tester.getRect(plot);
+        dynamic painter() => tester
+            .widget<CustomPaint>(
+              find
+                  .descendant(of: plot, matching: find.byType(CustomPaint))
+                  .first,
+            )
+            .painter;
+        final width = bounds.width - (painter().axisWidth as double) - 4;
+        Offset at(double fraction) =>
+            bounds.topLeft + Offset(4 + width * fraction, 300);
+        expect(info, findsNothing);
+        final gesture = await tester.createGesture(kind: scenario.$1);
+        if (scenario.$1 == PointerDeviceKind.mouse) {
+          await gesture.addPointer(location: at(.25));
+          await doubleClick(tester, at(.25));
+        } else {
+          await gesture.down(at(.25));
+          await tester.pump(const Duration(milliseconds: 450));
+        }
+        void check(bool right) {
+          final window = tester.getRect(info);
+          final candleX =
+              bounds.left +
+              4 +
+              ((painter().selected as int) + .5) /
+                  (painter().rows as List).length *
+                  width;
+          expect(window.left, greaterThanOrEqualTo(bounds.left));
+          expect(window.right, lessThanOrEqualTo(bounds.right));
+          if (right) {
+            expect(window.left, greaterThan(candleX));
+          } else {
+            expect(window.right, lessThan(candleX));
+          }
+          expect(
+            find.byKey(const Key('crypto-close-crosshair')),
+            findsOneWidget,
+          );
+        }
+
+        for (final fraction in [.25, .495, .505, .75, .25]) {
+          await gesture.moveTo(at(fraction));
+          await tester.pumpAndSettle();
+          check(fraction < .5);
+        }
+        if (scenario.$1 == PointerDeviceKind.touch) await gesture.up();
+        await gesture.removePointer();
+        // Tracking in a subchart must move the main window using the same candle.
+        final vol = find.byKey(const Key('crypto-pane-vol'));
+        await tester.ensureVisible(vol);
+        final sub = tester.getRect(vol);
+        await tester.longPressAt(sub.topLeft + Offset(4 + width * .75, 80));
+        await tester.pumpAndSettle();
+        expect(
+          tester.getRect(info).left,
+          closeTo(tester.getRect(plot).left + 8, .01),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
   testWidgets(
     'mouse double click controls information; Shift/button select at least ten bars, Escape cancels and undo restores',
     (tester) async {

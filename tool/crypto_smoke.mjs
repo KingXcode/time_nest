@@ -296,7 +296,7 @@ try {
     };
   })()`);
   await waitFor(()=>page.evaluate('window.__bookRefetchWaiting===true'),'a dropped real diff triggers REST rebootstrap');
-  assert.ok((await labels()).some(item=>item.label?.includes('同步中 · 旧快照')),'gap must label the frozen copy as stale while REST is pending');
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('同步中 · 旧快照')),'gap labels the frozen copy after Flutter paints the pending REST state');
   assert.ok((await labels()).some(item=>item.label?.includes('● 币安实时推送')),'price/candle connection remains live during book rebootstrap');
   await page.screenshot('22-orderbook-resynchronizing.png');
   await page.evaluate('window.__holdBookSnapshot=false;window.__releaseBookSnapshot()');
@@ -477,6 +477,33 @@ try {
   await activate('恢复上次视图');assert.equal(await visibleRange(),beforeSelection);
   passed('desktop single click stays hidden; double click toggles tracking; Shift and compact tool select ranges and undo restores the viewport');
   await doubleClick(pinchRect.x,pinchRect.y);
+  async function verifyInfoPosition(touch) {
+    const plot=await page.evaluate(`(() => {
+      const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('K 线主图，'));
+      const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};
+    })()`);
+    const point=fraction=>({x:plot.x+4+(plot.width-80)*fraction,y:plot.y+plot.height*.85});
+    if(touch) {
+      await page.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...point(.2)}]});
+      await delay(450);
+    }
+    for(const fraction of [.2,.75]) {
+      const position=point(fraction);
+      await page.send(touch?'Input.dispatchTouchEvent':'Input.dispatchMouseEvent',touch
+        ? {type:'touchMove',touchPoints:[{id:1,...position}]}
+        : {type:'mouseMoved',...position});
+      await delay(200);
+      const window=await page.evaluate(`(() => {
+        const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>e.getAttribute('aria-label')==='K 线信息窗口');
+        if(!e)throw new Error('Information window missing');const r=e.getBoundingClientRect();return {left:r.left,right:r.right};
+      })()`);
+      assert.ok(window.left>=plot.x && window.right<=plot.x+plot.width,'information stays inside the plot');
+      assert.ok(fraction<.5 ? window.left>position.x : window.right<position.x,'information moves to the opposite side of the selected candle');
+      if(touch) await page.screenshot(fraction<.5?'31-mobile-info-right.png':'32-mobile-info-left.png');
+    }
+    if(touch) await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  }
+  await verifyInfoPosition(false);
   const beforeWheel=await visibleRange();
   const rangeSpan=range=>{const dates=range.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g);return Date.parse(dates[1].replace(' ','T')+'+08:00')-Date.parse(dates[0].replace(' ','T')+'+08:00');};
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:pinchRect.x,y:pinchRect.y,deltaX:0,deltaY:-120}); await delay(350);
@@ -507,6 +534,12 @@ try {
   assert.equal(await visibleRange(),beforeTouchTracking,'long press and slide move the crosshair without panning');
   await page.screenshot('30-chart-touch-tracking.png');
   await activate('关闭十字线');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});await delay(400);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(350);
+  await verifyInfoPosition(true);
+  await activate('关闭十字线');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});await delay(400);
+  passed('desktop hover and portrait-phone touch tracking move the information window to the opposite side and keep the inspected candle uncovered');
   assert.ok(!(await labels()).some(e=>e.label?.includes('十字线已锁定')),'explicit close returns to navigation');
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
   const resizePoint=await page.evaluate(`(() => {
@@ -615,7 +648,7 @@ try {
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('06-crypto-eight-panes.png');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('07-crypto-assessment.png');
   assert.ok((await labels()).some(item=>item.label?.includes('评分规则：六项')));
-  passed('narrow screenshots captured; 8 overlays, 8 panes, right corner info and closed-bar assessment restore');
+  passed('narrow screenshots captured; 8 overlays, 8 panes, automatic info position and closed-bar assessment restore');
   const connectionCount=streamConnections.length, requestCount=requestEvents.length;
   await page.evaluate(`window.__cryptoSockets.at(-1).close(1000,'smoke reconnect')`);
   await waitFor(()=>streamConnections.length>connectionCount,'actual closed connection reconnects');

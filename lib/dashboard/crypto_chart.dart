@@ -362,6 +362,10 @@ class _CryptoChartState extends State<CryptoChart> {
     Widget plot({IndicatorStudy? study}) => LayoutBuilder(
       builder: (context, box) {
         final width = math.max(1.0, box.maxWidth - axisWidth - 4);
+        final infoOnRight = (index + .5) / rows.length < .5;
+        // Keep either floating corner within half of the drawable plot, so a
+        // narrow phone does not put the window over a central candle.
+        final infoWidth = math.min(164.0, math.max(80.0, width / 2 - 12));
         final height = study == null
             ? cryptoPriceHeight
             : (_paneHeights[study.id] ?? cryptoPaneHeight);
@@ -602,121 +606,132 @@ class _CryptoChartState extends State<CryptoChart> {
                       if (_crosshair && study == null)
                         Positioned(
                           top: 8,
-                          left: widget.infoRight ? null : 8,
-                          right: widget.infoRight ? axisWidth + 6 : null,
-                          child: Stack(
-                            children: [
-                              IgnorePointer(
-                                child: Container(
-                                  key: const Key('crypto-info-window'),
-                                  width: math.min(
-                                    164,
-                                    math.max(144, box.maxWidth * .36),
-                                  ),
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: dashboardSurface.withValues(
-                                      alpha: .94,
+                          left: infoOnRight ? null : 8,
+                          right: infoOnRight ? axisWidth + 6 : null,
+                          child: Semantics(
+                            label: 'K 线信息窗口',
+                            container: true,
+                            explicitChildNodes: true,
+                            child: Stack(
+                              children: [
+                                IgnorePointer(
+                                  child: Container(
+                                    key: const Key('crypto-info-window'),
+                                    width: infoWidth,
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: dashboardSurface.withValues(
+                                        alpha: .94,
+                                      ),
+                                      border: Border.all(
+                                        color: dashboardBorder,
+                                      ),
+                                      borderRadius: BorderRadius.circular(4),
                                     ),
-                                    border: Border.all(color: dashboardBorder),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: DefaultTextStyle(
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.white,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            right: 22,
-                                          ),
-                                          child: Text(
-                                            '${cryptoTime(selected.time)}\nUTC+8${forming ? ' · 未收盘' : ''}',
-                                            key: const Key(
-                                              'crypto-candle-time',
-                                            ),
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              color: dashboardMuted,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        for (final entry in <String, String>{
-                                          '数值': cryptoPrice(
-                                            _pointerPane == null
-                                                ? cursorValue
-                                                : selected.close,
-                                          ),
-                                          '开盘价': cryptoPrice(selected.open),
-                                          '最高价': cryptoPrice(selected.high),
-                                          '最低价': cryptoPrice(selected.low),
-                                          '收盘价': cryptoPrice(selected.close),
-                                          '成交量':
-                                              '${cryptoVolume(selected.volume)} ${widget.asset}',
-                                          '成交额':
-                                              '${cryptoVolume(selected.quoteVolume)} USDT',
-                                          '涨幅':
-                                              '${((selected.close / selected.open - 1) * 100).toStringAsFixed(2)}%',
-                                          '振幅':
-                                              '${((selected.high - selected.low) / selected.open * 100).toStringAsFixed(2)}%',
-                                        }.entries)
+                                    child: DefaultTextStyle(
+                                      style: TextStyle(
+                                        fontSize: infoWidth < 144 ? 10 : 11,
+                                        color: Colors.white,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
                                           Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 1,
+                                            padding: const EdgeInsets.only(
+                                              right: 22,
                                             ),
-                                            child: Row(
-                                              children: [
-                                                Text(
-                                                  entry.key,
-                                                  style: const TextStyle(
-                                                    color: dashboardMuted,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 6),
-                                                Expanded(
-                                                  child: Text(
-                                                    entry.value,
-                                                    textAlign: TextAlign.right,
-                                                    maxLines: 1,
-                                                  ),
-                                                ),
-                                              ],
+                                            child: Text(
+                                              '${cryptoTime(selected.time)}\nUTC+8${forming ? ' · 未收盘' : ''}',
+                                              key: const Key(
+                                                'crypto-candle-time',
+                                              ),
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                color: dashboardMuted,
+                                              ),
                                             ),
                                           ),
-                                      ],
+                                          const SizedBox(height: 4),
+                                          for (final entry in <String, String>{
+                                            '数值': cryptoPrice(
+                                              _pointerPane == null
+                                                  ? cursorValue
+                                                  : selected.close,
+                                            ),
+                                            '开盘价': cryptoPrice(selected.open),
+                                            '最高价': cryptoPrice(selected.high),
+                                            '最低价': cryptoPrice(selected.low),
+                                            '收盘价': cryptoPrice(selected.close),
+                                            '成交量':
+                                                '${cryptoVolume(selected.volume)} ${widget.asset}',
+                                            '成交额':
+                                                '${cryptoVolume(selected.quoteVolume)} USDT',
+                                            '涨幅':
+                                                '${((selected.close / selected.open - 1) * 100).toStringAsFixed(2)}%',
+                                            '振幅':
+                                                '${((selected.high - selected.low) / selected.open * 100).toStringAsFixed(2)}%',
+                                          }.entries)
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 1,
+                                                  ),
+                                              child: Row(
+                                                children: [
+                                                  Text(
+                                                    entry.key,
+                                                    style: const TextStyle(
+                                                      color: dashboardMuted,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Expanded(
+                                                    child: FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      alignment:
+                                                          Alignment.centerRight,
+                                                      child: Text(
+                                                        entry.value,
+                                                        textAlign:
+                                                            TextAlign.right,
+                                                        maxLines: 1,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                              Positioned(
-                                top: 0,
-                                right: 0,
-                                child: IconButton(
-                                  key: const Key('crypto-close-crosshair'),
-                                  tooltip: '关闭十字线',
-                                  onPressed: _closeCrosshair,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 40,
-                                    height: 40,
-                                  ),
-                                  style: IconButton.styleFrom(
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                  icon: const Icon(
-                                    Icons.close,
-                                    size: 13,
-                                    color: dashboardMuted,
+                                Positioned(
+                                  top: 0,
+                                  right: 0,
+                                  child: IconButton(
+                                    key: const Key('crypto-close-crosshair'),
+                                    tooltip: '关闭十字线',
+                                    onPressed: _closeCrosshair,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 40,
+                                      height: 40,
+                                    ),
+                                    style: IconButton.styleFrom(
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.close,
+                                      size: 13,
+                                      color: dashboardMuted,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       if (_crosshair && study == null)
@@ -1018,23 +1033,6 @@ class _CryptoChartState extends State<CryptoChart> {
                 '已加载 ${all.length} 根',
                 key: const Key('crypto-history-count'),
                 style: const TextStyle(color: dashboardMuted, fontSize: 12),
-              ),
-              IconButton(
-                key: const Key('crypto-info-position'),
-                tooltip: widget.infoRight ? '信息靠左' : '信息靠右',
-                onPressed: widget.onSettingsChanged == null
-                    ? null
-                    : () => widget.onSettingsChanged!(
-                        widget.overlays,
-                        widget.panes,
-                        !widget.infoRight,
-                      ),
-                icon: Icon(
-                  widget.infoRight
-                      ? Icons.format_align_left
-                      : Icons.format_align_right,
-                  size: 15,
-                ),
               ),
             ],
           ),
