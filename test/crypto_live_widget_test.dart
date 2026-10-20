@@ -192,6 +192,8 @@ void main() {
               .onSelected,
           isNotNull,
         );
+        await tester.tap(find.text('完成'));
+        await tester.pumpAndSettle();
         final toggle = find.byKey(const Key('crypto-info-position'));
         await tester.ensureVisible(toggle);
         await tester.tap(toggle);

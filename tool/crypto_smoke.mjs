@@ -236,6 +236,24 @@ try {
   await delay(2200);
   assert.ok(streamFrames.length>streamStart, 'pushes continue without a manual refresh');
   passed('actual WebSocket ticker and kline pushes continue and Flutter reports live');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+  await delay(500);
+  const chartGeometry=await page.evaluate(`(() => {
+    const nodes=(${deepQuery})('flt-semantics, [aria-label]');
+    const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix));if(!e)throw new Error('Missing plot '+prefix);const r=e.getBoundingClientRect();return {y:r.y,height:r.height,bottom:r.bottom};};
+    return {main:rect('K 线主图，'),volume:rect('VOL 成交量 副图，')};
+  })()`);
+  assert.equal(chartGeometry.main.height,320,'main price plot retains 320px');
+  assert.equal(chartGeometry.volume.height,150,'volume pane retains 150px');
+  assert.ok(chartGeometry.main.y>=46 && chartGeometry.main.bottom<=900,'full main plot fits desktop first screen');
+  assert.ok(chartGeometry.volume.bottom<=900,'first subchart fits desktop first screen');
+  await page.screenshot('13-crypto-detail-desktop.png');
+  await activate('指标设置'); await page.screenshot('14-crypto-indicators-dialog.png'); await activate('完成');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});
+  await delay(500); await page.screenshot('15-crypto-detail-mobile.png');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});
+  await delay(500);
+  passed('compact crypto detail keeps a full 320px main plot and 150px first pane within desktop viewport; indicator dialog and mobile layout render');
   await page.screenshot('01-crypto-desktop.png');
   const latestRange=await visibleRange();
   assert.ok(latestRange);

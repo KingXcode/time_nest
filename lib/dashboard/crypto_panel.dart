@@ -428,30 +428,39 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Widget _status(DashboardData? data, String? error, bool busy) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (busy && data == null) const Text('正在获取币安行情…'),
-        if (error != null || data?.stale == true || data?.warning != null)
-          Text(
-            [
-              ?error,
-              if (data?.stale == true || (error != null && data != null))
-                '当前显示上次获取的数据，可能已过时。',
-              if (data?.warning != null) data!.warning!,
-            ].join(' '),
-            style: const TextStyle(color: Color(0xFFFFCA80), height: 1.6),
-          ),
-        if (data != null)
-          Text(
-            '${data.cached ? '缓存获取' : '获取'}时间：${cryptoTime(data.fetchedAt.millisecondsSinceEpoch, seconds: true)} UTC+8',
-            style: const TextStyle(color: dashboardMuted, fontSize: 11),
-          ),
-      ],
-    ),
-  );
+  Widget _status(DashboardData? data, String? error, bool busy) {
+    if (data != null &&
+        !data.cached &&
+        !data.stale &&
+        error == null &&
+        data.warning == null) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (busy && data == null) const Text('正在获取币安行情…'),
+          if (error != null || data?.stale == true || data?.warning != null)
+            Text(
+              [
+                ?error,
+                if (data?.stale == true || (error != null && data != null))
+                  '当前显示上次获取的数据，可能已过时。',
+                if (data?.warning != null) data!.warning!,
+              ].join(' '),
+              style: const TextStyle(color: Color(0xFFFFCA80), height: 1.6),
+            ),
+          if (data != null && (data.cached || data.stale || error != null))
+            Text(
+              '${data.cached ? '缓存获取' : '获取'}时间：${cryptoTime(data.fetchedAt.millisecondsSinceEpoch, seconds: true)} UTC+8',
+              style: const TextStyle(color: dashboardMuted, fontSize: 11),
+            ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -461,18 +470,15 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          '数字货币市场',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 6),
-        const Text('币安现货 · USDT 计价', style: TextStyle(color: dashboardAccent)),
-        const SizedBox(height: 12),
         Wrap(
-          spacing: 10,
+          spacing: 12,
           runSpacing: 4,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            const Text(
+              '币安现货 / USDT',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
             FilterChip(
               label: Text(_automatic ? '实时推送已开启' : '实时推送已暂停'),
               selected: _automatic,
@@ -492,84 +498,81 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               onPressed: _quotesBusy || _candlesBusy
                   ? null
                   : () => _refresh(refresh: true),
-              icon: const Icon(Icons.refresh_rounded, size: 18),
+              icon: const Icon(Icons.refresh_rounded, size: 15),
               label: Text(_quotesBusy || _candlesBusy ? '更新中' : '刷新行情'),
             ),
+            if (selected != null)
+              Text(
+                '报价截至 ${cryptoTime(selected.closeTime, seconds: true)} UTC+8',
+                style: const TextStyle(color: dashboardMuted, fontSize: 11),
+              ),
+            Text(
+              switch (_streamStatus) {
+                'live' => '● 币安实时推送 · 报价约 1 秒 / K 线约 2 秒',
+                'connected' => '已连接，等待行情推送…',
+                'connecting' => '正在连接币安推送…',
+                'paused' => '推送已暂停，当前为暂停前的快照',
+                _ => '推送暂不可用，正在重连；已启用快照补齐，当前数据可能已过时',
+              },
+              key: const Key('crypto-stream-status'),
+              style: TextStyle(
+                color: _streamStatus == 'live'
+                    ? dashboardAccent
+                    : dashboardMuted,
+                fontSize: 12,
+              ),
+            ),
           ],
-        ),
-        Text(
-          switch (_streamStatus) {
-            'live' => '● 币安实时推送 · 报价约 1 秒 / K 线约 2 秒',
-            'connected' => '已连接，等待行情推送…',
-            'connecting' => '正在连接币安推送…',
-            'paused' => '推送已暂停，当前为暂停前的快照',
-            _ => '推送暂不可用，正在重连；已启用快照补齐，当前数据可能已过时',
-          },
-          key: const Key('crypto-stream-status'),
-          style: TextStyle(
-            color: _streamStatus == 'live' ? dashboardAccent : dashboardMuted,
-            fontSize: 12,
-          ),
         ),
         _status(_quoteData, _quoteError, _quotesBusy),
         LayoutBuilder(
           builder: (context, box) {
-            final width =
-                box.maxWidth / MediaQuery.textScalerOf(context).scale(1);
-            final columns = width >= 1000
-                ? 6
-                : width >= 560
-                ? 3
-                : width >= 250
-                ? 2
-                : 1;
-            return Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final asset in cryptoAssets.entries)
-                  SizedBox(
-                    width: (box.maxWidth - (columns - 1) * 8) / columns,
-                    child: _quoteCard(
-                      asset.key,
-                      _quotes.where((q) => q.symbol == asset.key).firstOrNull,
+            final scale = MediaQuery.textScalerOf(context).scale(1);
+            final width = math.max(132.0 * scale, (box.maxWidth - 5 * 6) / 6);
+            return SingleChildScrollView(
+              key: const Key('crypto-quote-strip'),
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final asset in cryptoAssets.entries)
+                    Padding(
+                      padding: EdgeInsets.only(
+                        right: asset.key == cryptoAssets.keys.last ? 0 : 6,
+                      ),
+                      child: SizedBox(
+                        width: width,
+                        child: _quoteCard(
+                          asset.key,
+                          _quotes
+                              .where((q) => q.symbol == asset.key)
+                              .firstOrNull,
+                        ),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             );
           },
         ),
-        const SizedBox(height: 12),
-        Text(
-          '${cryptoAssets[widget.symbol]!.$1} / USDT',
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-        ),
-        if (selected != null) ...[
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 24,
-            runSpacing: 10,
-            children: [
-              _metric('24h 最高', cryptoPrice(selected.high)),
-              _metric('24h 最低', cryptoPrice(selected.low)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 14,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              '${cryptoAssets[widget.symbol]!.$1} / USDT',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            if (selected != null) ...[
+              _metric('24h 高', cryptoPrice(selected.high)),
+              _metric('24h 低', cryptoPrice(selected.low)),
               _metric(
-                '24h 成交量 (${cryptoAssets[widget.symbol]!.$1})',
+                '成交量 (${cryptoAssets[widget.symbol]!.$1})',
                 cryptoVolume(selected.volume),
               ),
-              _metric('24h 成交额 (USDT)', cryptoVolume(selected.quoteVolume)),
+              _metric('成交额 (USDT)', cryptoVolume(selected.quoteVolume)),
             ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            '报价截至 ${cryptoTime(selected.closeTime, seconds: true)} UTC+8',
-            style: const TextStyle(color: dashboardMuted, fontSize: 11),
-          ),
-        ],
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
             for (final period in cryptoIntervals.entries)
               ChoiceChip(
                 label: Text(period.value),
@@ -631,13 +634,22 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     );
   }
 
-  Widget _metric(String label, String value) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(label, style: const TextStyle(color: dashboardMuted, fontSize: 11)),
-      const SizedBox(height: 4),
-      Text(value, style: const TextStyle(fontSize: 15)),
-    ],
+  Widget _metric(String label, String value) => Text.rich(
+    TextSpan(
+      children: [
+        TextSpan(
+          text: '$label ',
+          style: const TextStyle(color: dashboardMuted, fontSize: 11),
+        ),
+        TextSpan(
+          text: value,
+          style: const TextStyle(
+            fontSize: 12,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    ),
   );
 
   Widget _quoteCard(String symbol, CryptoQuote? quote) {
@@ -645,6 +657,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     final active = symbol == widget.symbol;
     final change = quote?.changePercent;
     return Semantics(
+      label: '${asset.$1} · ${asset.$2}',
       selected: active,
       child: Material(
         color: active ? const Color(0xFF263D5B) : dashboardBackground,
@@ -657,28 +670,33 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           key: ValueKey('crypto-select-$symbol'),
           onTap: () => widget.onChanged(symbol, widget.interval),
           child: Padding(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${asset.$1} · ${asset.$2}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  asset.$1,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 2),
                 Text(
                   quote == null ? '暂无报价' : cryptoPrice(quote.price),
                   style: const TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w600,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   change == null
                       ? 'USDT'
                       : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}% · 24h',
                   style: TextStyle(
+                    fontSize: 11,
                     color: change == null
                         ? dashboardMuted
                         : change >= 0

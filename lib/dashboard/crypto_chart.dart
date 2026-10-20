@@ -123,76 +123,92 @@ class _CryptoChartState extends State<CryptoChart> {
       ? cryptoVolume(v)
       : v.toStringAsFixed(v.abs() < 1 ? 4 : 2);
 
-  Widget _settings() => Material(
-    color: Colors.transparent,
-    child: ExpansionTile(
-      dense: true,
-      minTileHeight: 40,
-      key: const PageStorageKey('crypto-indicator-settings'),
-      tilePadding: EdgeInsets.zero,
-      title: const Text('指标设置'),
-      subtitle: Text(
-        '主图 ${widget.overlays.length}/8 · 副图 ${widget.panes.length}/8 · ${cryptoIndicators.length} 种指标',
-      ),
-      children: [
-        for (final overlay in [true, false])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(overlay ? '主图叠加（最多 8 个）' : '独立副图（最多 8 个，增加副图不压缩 K 线）'),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    for (final e in cryptoIndicators.entries.where(
-                      (e) => e.value.overlay == overlay,
-                    ))
-                      Tooltip(
-                        message: e.value.formula,
-                        child: FilterChip(
-                          key: ValueKey('indicator-${e.key}'),
-                          label: Text(e.value.name),
-                          selected: (overlay ? widget.overlays : widget.panes)
-                              .contains(e.key),
-                          onSelected:
-                              widget.onSettingsChanged == null ||
-                                  (!(overlay ? widget.overlays : widget.panes)
-                                          .contains(e.key) &&
-                                      (overlay ? widget.overlays : widget.panes)
-                                              .length >=
-                                          8)
-                              ? null
-                              : (selected) {
-                                  final list = List<String>.of(
-                                    overlay ? widget.overlays : widget.panes,
-                                  );
-                                  selected
-                                      ? list.add(e.key)
-                                      : list.remove(e.key);
-                                  widget.onSettingsChanged!(
-                                    overlay ? list : widget.overlays,
-                                    overlay ? widget.panes : list,
-                                    widget.infoRight,
-                                  );
-                                },
-                        ),
-                      ),
+  Future<void> _showSettings() async {
+    var overlays = List<String>.of(widget.overlays);
+    var panes = List<String>.of(widget.panes);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          insetPadding: const EdgeInsets.all(12),
+          title: const Text('指标设置'),
+          content: SizedBox(
+            width: 720,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final overlay in [true, false]) ...[
+                    Text(overlay ? '主图叠加（最多 8 个）' : '独立副图（最多 8 个，增加副图不压缩 K 线）'),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        for (final e in cryptoIndicators.entries.where(
+                          (e) => e.value.overlay == overlay,
+                        ))
+                          Tooltip(
+                            message: e.value.formula,
+                            child: FilterChip(
+                              key: ValueKey('indicator-${e.key}'),
+                              label: Text(e.value.name),
+                              selected: (overlay ? overlays : panes).contains(
+                                e.key,
+                              ),
+                              onSelected:
+                                  widget.onSettingsChanged == null ||
+                                      (!(overlay ? overlays : panes).contains(
+                                            e.key,
+                                          ) &&
+                                          (overlay ? overlays : panes).length >=
+                                              8)
+                                  ? null
+                                  : (selected) {
+                                      final list = List<String>.of(
+                                        overlay ? overlays : panes,
+                                      );
+                                      selected
+                                          ? list.add(e.key)
+                                          : list.remove(e.key);
+                                      update(() {
+                                        if (overlay) {
+                                          overlays = list;
+                                        } else {
+                                          panes = list;
+                                        }
+                                      });
+                                      widget.onSettingsChanged!(
+                                        overlays,
+                                        panes,
+                                        widget.infoRight,
+                                      );
+                                    },
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
                   ],
-                ),
-              ],
+                  const Text(
+                    '参数见指标提示。预热不足显示“—”；每屏显示 120 根，左右拖动浏览历史。',
+                    style: TextStyle(color: dashboardMuted, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
           ),
-        const Text(
-          '参数见指标提示。指标预热不足显示“—”；使用已加载历史计算，每屏显示 120 根，可左右拖动。',
-          style: TextStyle(color: dashboardMuted, fontSize: 12),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('完成'),
+            ),
+          ],
         ),
-        const SizedBox(height: 12),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -296,12 +312,24 @@ class _CryptoChartState extends State<CryptoChart> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _settings(),
         Wrap(
           spacing: 8,
           runSpacing: 4,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            TextButton.icon(
+              key: const PageStorageKey('crypto-indicator-settings'),
+              onPressed: widget.onSettingsChanged == null
+                  ? null
+                  : _showSettings,
+              icon: const Icon(Icons.tune, size: 15),
+              label: const Text('指标设置'),
+            ),
+            Text(
+              '主图 ${widget.overlays.length}/8 · 副图 ${widget.panes.length}/8',
+              style: const TextStyle(color: dashboardMuted, fontSize: 11),
+            ),
+
             TextButton.icon(
               key: const Key('crypto-pan-older'),
               onPressed: offset > 0 || widget.hasMoreHistory
@@ -351,19 +379,9 @@ class _CryptoChartState extends State<CryptoChart> {
               key: const Key('crypto-history-count'),
               style: const TextStyle(color: dashboardMuted, fontSize: 12),
             ),
-          ],
-        ),
-        if (widget.historyError != null)
-          Text(
-            widget.historyError!,
-            key: const Key('crypto-history-error'),
-            style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
-          ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            TextButton.icon(
+            IconButton(
               key: const Key('crypto-info-position'),
+              tooltip: widget.infoRight ? '信息靠左' : '信息靠右',
               onPressed: widget.onSettingsChanged == null
                   ? null
                   : () => widget.onSettingsChanged!(
@@ -375,20 +393,25 @@ class _CryptoChartState extends State<CryptoChart> {
                 widget.infoRight
                     ? Icons.format_align_left
                     : Icons.format_align_right,
-                size: 16,
+                size: 15,
               ),
-              label: Text(widget.infoRight ? '信息靠左' : '信息靠右'),
             ),
           ],
         ),
+        if (widget.historyError != null)
+          Text(
+            widget.historyError!,
+            key: const Key('crypto-history-error'),
+            style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
+          ),
         DecoratedBox(
           decoration: BoxDecoration(
-            color: const Color(0xFF101718),
+            color: dashboardSurface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF293735)),
+            border: Border.all(color: dashboardBorder),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -402,40 +425,60 @@ class _CryptoChartState extends State<CryptoChart> {
                     style: const TextStyle(color: dashboardMuted, fontSize: 12),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Wrap(
                   key: const Key('crypto-ohlcv'),
                   alignment: alignment,
-                  spacing: 14,
-                  runSpacing: 6,
+                  spacing: 12,
+                  runSpacing: 4,
                   children: [
-                    Text('开 ${cryptoPrice(selected.open)}'),
-                    Text('高 ${cryptoPrice(selected.high)}'),
-                    Text('低 ${cryptoPrice(selected.low)}'),
-                    Text('收 ${cryptoPrice(selected.close)}'),
+                    Text(
+                      '开 ${cryptoPrice(selected.open)}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    Text(
+                      '高 ${cryptoPrice(selected.high)}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    Text(
+                      '低 ${cryptoPrice(selected.low)}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    Text(
+                      '收 ${cryptoPrice(selected.close)}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                     Text(
                       '成交量 ${cryptoVolume(selected.volume)} ${widget.asset}',
+                      style: const TextStyle(fontSize: 12),
                     ),
-                    Text('成交额 ${cryptoVolume(selected.quoteVolume)} USDT'),
+                    Text(
+                      '成交额 ${cryptoVolume(selected.quoteVolume)} USDT',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 legend(overlays, right: widget.infoRight),
-                const SizedBox(height: 12),
+                const SizedBox(height: 6),
                 plot(),
               ],
             ),
           ),
         ),
         if (rows.length > 1)
-          Slider(
-            key: const Key('crypto-candle-slider'),
-            value: index.toDouble(),
-            max: (rows.length - 1).toDouble(),
-            divisions: rows.length - 1,
-            semanticFormatterCallback: (v) => cryptoTime(rows[v.round()].time),
-            label: cryptoTime(selected.time),
-            onChanged: (v) => select(v.round()),
+          SizedBox(
+            height: 28,
+            child: Slider(
+              key: const Key('crypto-candle-slider'),
+              value: index.toDouble(),
+              max: (rows.length - 1).toDouble(),
+              divisions: rows.length - 1,
+              semanticFormatterCallback: (v) =>
+                  cryptoTime(rows[v.round()].time),
+              label: cryptoTime(selected.time),
+              onChanged: (v) => select(v.round()),
+            ),
           ),
         Semantics(
           label:
@@ -459,30 +502,38 @@ class _CryptoChartState extends State<CryptoChart> {
         ),
         const SizedBox(height: 8),
         const Text(
-          '左右拖动图表浏览历史，接近左端自动加载更多。悬停、点击图表或拖动滑杆查看开高低收、成交量与成交额。主副图时间联动；UTC 分周期，时间显示 UTC+8。',
-          style: TextStyle(color: dashboardMuted, fontSize: 12, height: 1.6),
+          '左右拖动浏览历史，点击图表或拖动滑杆定位。时间为 UTC+8。',
+          style: TextStyle(color: dashboardMuted, fontSize: 11, height: 1.4),
         ),
         for (final id in widget.panes)
           if (_studies[id] case final study?)
             Padding(
-              padding: const EdgeInsets.only(top: 16),
+              padding: const EdgeInsets.only(top: 8),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0xFF293735)),
+                  border: Border.all(color: dashboardBorder),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(8),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        cryptoIndicators[id]!.name,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            cryptoIndicators[id]!.name,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(child: legend([study])),
+                        ],
                       ),
-                      const SizedBox(height: 6),
-                      legend([study]),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       plot(study: study),
                     ],
                   ),
@@ -503,7 +554,7 @@ class _CryptoChartState extends State<CryptoChart> {
       children: [
         const Text(
           '技术指标 · 买入参考',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 10),
         if (!widget.canAdvise)
@@ -541,46 +592,50 @@ class _CryptoChartState extends State<CryptoChart> {
             '偏多 ${assessment.votes.where((v) => v.direction > 0).length} · 中性 ${assessment.votes.where((v) => v.direction == 0).length} · 偏空 ${assessment.votes.where((v) => v.direction < 0).length}    ATR14 / 收盘 ${assessment.atrPercent.toStringAsFixed(2)}%',
           ),
           const SizedBox(height: 10),
-          for (final vote in assessment.votes)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 4,
+          DashboardColumns(
+            children: [
+              for (final vote in assessment.votes)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(vote.name),
-                      Text(vote.value),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 4,
+                        children: [
+                          Text(vote.name),
+                          Text(vote.value),
+                          Text(
+                            vote.direction > 0
+                                ? '偏多'
+                                : vote.direction < 0
+                                ? '偏空'
+                                : '中性',
+                            style: TextStyle(
+                              color: vote.direction > 0
+                                  ? cryptoUp
+                                  : vote.direction < 0
+                                  ? cryptoDown
+                                  : dashboardMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
                       Text(
-                        vote.direction > 0
-                            ? '偏多'
-                            : vote.direction < 0
-                            ? '偏空'
-                            : '中性',
-                        style: TextStyle(
-                          color: vote.direction > 0
-                              ? cryptoUp
-                              : vote.direction < 0
-                              ? cryptoDown
-                              : dashboardMuted,
+                        vote.reason,
+                        style: const TextStyle(
+                          color: dashboardMuted,
+                          fontSize: 12,
+                          height: 1.5,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    vote.reason,
-                    style: const TextStyle(
-                      color: dashboardMuted,
-                      fontSize: 12,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                ),
+            ],
+          ),
           const Text(
             '评分规则：六项各计 +1 / 0 / −1；合计≥3为偏多，≤−3为偏空，其余观望。固定使用六项，勾选图形不会改变评分。',
             style: TextStyle(color: dashboardMuted, fontSize: 12, height: 1.6),
@@ -649,7 +704,7 @@ class _MarketPainter extends CustomPainter {
     }
 
     final grid = Paint()
-      ..color = const Color(0xFF293735)
+      ..color = dashboardBorder
       ..strokeWidth = .5;
     for (var i = 0; i <= 4; i++) {
       final value = low + (high - low) * i / 4;

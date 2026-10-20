@@ -434,24 +434,28 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    _subtitles[widget.id]!,
-                    style: const TextStyle(
-                      color: dashboardMuted,
-                      fontSize: 13,
-                      height: 1.6,
+                  if (widget.id == 'crypto')
+                    _panel()
+                  else ...[
+                    Text(
+                      _subtitles[widget.id]!,
+                      style: const TextStyle(
+                        color: dashboardMuted,
+                        fontSize: 13,
+                        height: 1.6,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: dashboardSurface,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: dashboardBorder),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: dashboardSurface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: dashboardBorder),
+                      ),
+                      child: _panel(),
                     ),
-                    child: _panel(),
-                  ),
+                  ],
                   if (!_saved)
                     const Padding(
                       padding: EdgeInsets.only(top: 16),
