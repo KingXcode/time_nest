@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
 
 import 'crypto_chart.dart';
+import 'crypto_chart_controls.dart';
 import 'crypto_feed.dart';
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
@@ -788,32 +789,6 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           },
         ),
         const SizedBox(height: 6),
-        Wrap(
-          spacing: 14,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              '${cryptoAssets[widget.symbol]!.$1} / USDT',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            if (selected != null) ...[
-              _metric('24h 高', cryptoPrice(selected.high)),
-              _metric('24h 低', cryptoPrice(selected.low)),
-              _metric(
-                '成交量 (${cryptoAssets[widget.symbol]!.$1})',
-                cryptoVolume(selected.volume),
-              ),
-              _metric('成交额 (USDT)', cryptoVolume(selected.quoteVolume)),
-            ],
-            for (final period in cryptoIntervals.entries)
-              ChoiceChip(
-                label: Text(period.value),
-                selected: widget.interval == period.key,
-                onSelected: (_) => widget.onChanged(widget.symbol, period.key),
-              ),
-          ],
-        ),
         _status(_candleData, _candleError, _candlesBusy),
         if (_streamStatus == 'live' && !_historySynchronized)
           const Text(
@@ -827,14 +802,13 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             chart: (belowChart) => Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: IconButton(
-                    key: const Key('crypto-view-settings'),
-                    tooltip: '图表设置',
-                    onPressed: _showViewSettings,
-                    icon: const Icon(Icons.settings_outlined, size: 17),
-                  ),
+                CryptoChartHeader(
+                  asset: cryptoAssets[widget.symbol]!.$1,
+                  interval: widget.interval,
+                  quote: selected,
+                  onIntervalChanged: (interval) =>
+                      widget.onChanged(widget.symbol, interval),
+                  onSettings: _showViewSettings,
                 ),
                 const SizedBox(
                   height: cryptoPriceHeight,
@@ -852,6 +826,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         else
           CryptoChart(
             key: _chartKey,
+            interval: widget.interval,
+            quote: selected,
+            onIntervalChanged: (interval) =>
+                widget.onChanged(widget.symbol, interval),
             viewSettings: _view,
             onViewSettings: _showViewSettings,
             chartLayout: (plots) => CryptoBookLayout(
@@ -910,24 +888,6 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       ],
     );
   }
-
-  Widget _metric(String label, String value) => Text.rich(
-    TextSpan(
-      children: [
-        TextSpan(
-          text: '$label ',
-          style: const TextStyle(color: dashboardMuted, fontSize: 11),
-        ),
-        TextSpan(
-          text: value,
-          style: const TextStyle(
-            fontSize: 12,
-            fontFeatures: [FontFeature.tabularFigures()],
-          ),
-        ),
-      ],
-    ),
-  );
 
   Widget _quoteCard(String symbol, CryptoQuote? quote) {
     final asset = cryptoAssets[symbol]!;

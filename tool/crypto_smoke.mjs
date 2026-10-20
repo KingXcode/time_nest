@@ -431,9 +431,38 @@ try {
   assert.ok(chartGeometry.main.y>=46 && chartGeometry.main.bottom<=900,'full main plot fits desktop first screen');
   assert.ok(chartGeometry.volume.bottom<=900,'first subchart fits desktop first screen');
   await page.screenshot('13-crypto-detail-desktop.png');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1440,deviceScaleFactor:1,mobile:false});await delay(400);
+  const integrated=await page.evaluate(`(() => {
+    const nodes=(${deepQuery})('flt-semantics, [aria-label]');
+    const label=e=>e.getAttribute('aria-label')||e.textContent||'';
+    const rect=match=>{const e=nodes.find(match);if(!e)throw new Error('Missing integrated control');const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};};
+    const button=text=>e=>['button','checkbox'].includes(e.getAttribute('role')) && label(e).trim().split('\\n').includes(text);
+    return {frame:rect(e=>label(e)==='K 线图表区域'),period:rect(button('日线')),gear:rect(button('图表设置')),info:rect(e=>label(e)==='BTC / USDT'),count:rect(e=>/^已加载 \\d+ 根$/.test(label(e))),indicator:rect(button('指标设置')),lastPane:rect(e=>label(e).startsWith('RSI 相对强弱 副图，'))};
+  })()`);
+  for(const control of [integrated.period,integrated.gear,integrated.info,integrated.indicator]) {
+    assert.ok(control.x>=integrated.frame.x && control.right<=integrated.frame.right+.1,'chart controls stay inside its own horizontal border');
+    assert.ok(control.y>=integrated.frame.y && control.bottom<=integrated.frame.bottom+.1,JSON.stringify({control,frame:integrated.frame}));
+  }
+  assert.ok(integrated.period.bottom<=integrated.info.y && integrated.info.bottom<=chartGeometry.main.y,'periods and thin market summary sit above the price plot');
+  assert.ok(integrated.count.bottom<=chartGeometry.main.y,'loaded count belongs in the chart summary');
+  assert.ok(integrated.indicator.y>integrated.lastPane.bottom,'indicator selection sits below all subcharts');
+  const shortcutsRange=await visibleRange(),shortcutsConnections=streamConnections.length;
+  await activate('EMA');
+  assert.ok(JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoOverlays.includes('ema'));
+  await activate('EMA');
+  await activate('RSI');
+  assert.ok(!JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoPanes.includes('rsi'));
+  await activate('RSI');
+  assert.ok(JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoPanes.includes('rsi'));
+  assert.equal(await visibleRange(),shortcutsRange,'shortcut changes preserve the chart range');
+  assert.equal(streamConnections.length,shortcutsConnections,'shortcuts never reconnect the shared feed');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1440,deviceScaleFactor:1,mobile:false});await delay(400);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(400);
+  await page.screenshot('37-chart-integrated-desktop.png');
+  passed('chart contains top period/navigation controls and market summary plus bottom indicator shortcuts; selections persist without reconnecting or shifting the historical view');
   await activate('指标设置'); await page.screenshot('14-crypto-indicators-dialog.png'); await activate('完成');
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});
-  await delay(500); await page.screenshot('15-crypto-detail-mobile.png');
+  await delay(500); await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(400);await page.screenshot('15-crypto-detail-mobile.png');
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});
   await delay(500);
   passed('compact crypto detail keeps a full 320px main plot and 150px first pane within desktop viewport; indicator dialog and mobile layout render');

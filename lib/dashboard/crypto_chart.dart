@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import 'crypto_chart_gestures.dart';
+import 'crypto_chart_controls.dart';
 import 'crypto_view_settings.dart';
 
 import 'crypto_indicators.dart';
@@ -54,6 +55,9 @@ class CryptoChart extends StatefulWidget {
     this.historyError,
     this.viewSettings = const CryptoViewSettings(),
     this.onViewSettings,
+    this.interval,
+    this.quote,
+    this.onIntervalChanged,
   });
   final List<CryptoCandle> candles;
   final String asset;
@@ -61,7 +65,7 @@ class CryptoChart extends StatefulWidget {
   final List<String> overlays, panes;
   final bool infoRight, canAdvise;
   final Widget? afterCharts;
-  // Keep controls and state outside the responsive plot/order-book arrangement.
+  // Keep chart state stable while its frame and side panels adapt to width.
   final Widget Function(Widget plots)? chartLayout;
   final Map<String, double> paneHeights;
   final ValueChanged<Map<String, double>>? onPaneHeightsChanged;
@@ -71,6 +75,9 @@ class CryptoChart extends StatefulWidget {
   final String? historyError;
   final CryptoViewSettings viewSettings;
   final VoidCallback? onViewSettings;
+  final String? interval;
+  final CryptoQuote? quote;
+  final ValueChanged<String>? onIntervalChanged;
 
   @override
   State<CryptoChart> createState() => _CryptoChartState();
@@ -766,6 +773,82 @@ class _CryptoChartState extends State<CryptoChart> {
         );
       },
     );
+    final navigation = IconButtonTheme(
+      data: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          minimumSize: const Size(28, 28),
+          maximumSize: const Size(28, 28),
+          padding: EdgeInsets.zero,
+          iconSize: 17,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            key: const Key('crypto-pan-older'),
+            onPressed: offset > 0 ? () => _pan(-_visibleCount) : null,
+            icon: const Icon(Icons.chevron_left),
+            tooltip: '更早',
+          ),
+          IconButton(
+            key: const Key('crypto-pan-newer'),
+            onPressed: offset + rows.length < all.length
+                ? () => _pan(_visibleCount)
+                : null,
+            icon: const Icon(Icons.chevron_right),
+            tooltip: '较新',
+          ),
+          IconButton(
+            key: const Key('crypto-latest'),
+            tooltip: '回到最新',
+            onPressed: _viewportStartTime == null
+                ? null
+                : () => setState(() {
+                    _viewportStartTime = null;
+                    _selectedTime = null;
+                  }),
+            icon: const Icon(Icons.last_page, size: 16),
+          ),
+          IconButton(
+            key: const Key('crypto-box-select'),
+            tooltip: _crosshair ? '关闭十字线后框选' : '框选放大（至少 10 根，Shift + 拖动）',
+            isSelected: _boxTool,
+            onPressed: _crosshair
+                ? null
+                : () => setState(() {
+                    _boxTool = !_boxTool;
+                    _selectionHint = null;
+                    _chartFocus.requestFocus();
+                  }),
+            icon: const Icon(Icons.select_all, size: 16),
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          IconButton(
+            key: const Key('crypto-undo-zoom'),
+            tooltip: '恢复上次视图',
+            onPressed: _zoomBack.isEmpty
+                ? null
+                : () => setState(() {
+                    final view = _zoomBack.removeLast();
+                    _viewportStartTime = view.time;
+                    _visibleCount = view.count;
+                    _selectedTime = null;
+                  }),
+            icon: const Icon(Icons.undo, size: 16),
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ],
+      ),
+    );
     final surface = Semantics(
       label: 'K 线图表区域',
       container: true,
@@ -782,8 +865,17 @@ class _CryptoChartState extends State<CryptoChart> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              CryptoChartHeader(
+                asset: widget.asset,
+                interval: widget.interval,
+                quote: widget.quote,
+                loaded: all.length,
+                navigation: navigation,
+                onIntervalChanged: widget.onIntervalChanged,
+                onSettings: widget.onViewSettings,
+              ),
               Container(
-                constraints: const BoxConstraints(minHeight: 36),
+                constraints: const BoxConstraints(minHeight: 26),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
                   vertical: 4,
@@ -812,21 +904,6 @@ class _CryptoChartState extends State<CryptoChart> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(child: legend(overlays, right: widget.infoRight)),
-                    if (widget.onViewSettings != null)
-                      IconButton(
-                        key: const Key('crypto-view-settings'),
-                        tooltip: '图表设置',
-                        onPressed: widget.onViewSettings,
-                        icon: const Icon(Icons.settings_outlined, size: 17),
-                        constraints: const BoxConstraints.tightFor(
-                          width: 28,
-                          height: 28,
-                        ),
-                        padding: EdgeInsets.zero,
-                        style: IconButton.styleFrom(
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -940,6 +1017,33 @@ class _CryptoChartState extends State<CryptoChart> {
                   ),
                   _resizeHandle(id),
                 ],
+              CryptoIndicatorBar(
+                overlays: widget.overlays,
+                panes: widget.panes,
+                onSettings: _showSettings,
+                onChanged: widget.onSettingsChanged == null
+                    ? null
+                    : (overlays, panes) => widget.onSettingsChanged!(
+                        overlays,
+                        panes,
+                        widget.infoRight,
+                      ),
+              ),
+              if (widget.historyError != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  child: Text(
+                    widget.historyError!,
+                    key: const Key('crypto-history-error'),
+                    style: const TextStyle(
+                      color: Color(0xFFFFCF70),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -968,103 +1072,6 @@ class _CryptoChartState extends State<CryptoChart> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              TextButton.icon(
-                key: const PageStorageKey('crypto-indicator-settings'),
-                onPressed: widget.onSettingsChanged == null
-                    ? null
-                    : _showSettings,
-                icon: const Icon(Icons.tune, size: 15),
-                label: const Text('指标设置'),
-              ),
-              Text(
-                '主图 ${widget.overlays.length}/8 · 副图 ${widget.panes.length}/8',
-                style: const TextStyle(color: dashboardMuted, fontSize: 11),
-              ),
-
-              TextButton.icon(
-                key: const Key('crypto-pan-older'),
-                onPressed: offset > 0 ? () => _pan(-_visibleCount) : null,
-                icon: const Icon(Icons.chevron_left),
-                label: const Text('更早'),
-              ),
-              TextButton.icon(
-                key: const Key('crypto-pan-newer'),
-                onPressed: offset + rows.length < all.length
-                    ? () => _pan(_visibleCount)
-                    : null,
-                icon: const Icon(Icons.chevron_right),
-                label: const Text('较新'),
-              ),
-              TextButton(
-                key: const Key('crypto-latest'),
-                onPressed: _viewportStartTime == null
-                    ? null
-                    : () => setState(() {
-                        _viewportStartTime = null;
-                        _selectedTime = null;
-                      }),
-                child: const Text('回到最新'),
-              ),
-              IconButton(
-                key: const Key('crypto-box-select'),
-                tooltip: _crosshair ? '关闭十字线后框选' : '框选放大（至少 10 根，Shift + 拖动）',
-                isSelected: _boxTool,
-                onPressed: _crosshair
-                    ? null
-                    : () => setState(() {
-                        _boxTool = !_boxTool;
-                        _selectionHint = null;
-                        _chartFocus.requestFocus();
-                      }),
-                icon: const Icon(Icons.select_all, size: 16),
-                constraints: const BoxConstraints.tightFor(
-                  width: 32,
-                  height: 32,
-                ),
-                padding: EdgeInsets.zero,
-                style: IconButton.styleFrom(
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-              IconButton(
-                key: const Key('crypto-undo-zoom'),
-                tooltip: '恢复上次视图',
-                onPressed: _zoomBack.isEmpty
-                    ? null
-                    : () => setState(() {
-                        final view = _zoomBack.removeLast();
-                        _viewportStartTime = view.time;
-                        _visibleCount = view.count;
-                        _selectedTime = null;
-                      }),
-                icon: const Icon(Icons.undo, size: 16),
-                constraints: const BoxConstraints.tightFor(
-                  width: 32,
-                  height: 32,
-                ),
-                padding: EdgeInsets.zero,
-                style: IconButton.styleFrom(
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-              Text(
-                '已加载 ${all.length} 根',
-                key: const Key('crypto-history-count'),
-                style: const TextStyle(color: dashboardMuted, fontSize: 12),
-              ),
-            ],
-          ),
-          if (widget.historyError != null)
-            Text(
-              widget.historyError!,
-              key: const Key('crypto-history-error'),
-              style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
-            ),
           widget.chartLayout?.call(surface) ?? surface,
           const SizedBox(height: 8),
           Text(
