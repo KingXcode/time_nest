@@ -58,6 +58,9 @@ class Client extends fixture.FixtureDashboardClient {
     Map<String, dynamic> args, {
     bool refresh = false,
   }) async {
+    if (module == 'cryptoConversion') {
+      return super.load(module, args, refresh: refresh);
+    }
     if (module == 'cryptoQuotes') {
       quoteRequests++;
       return quotePending?.future ??

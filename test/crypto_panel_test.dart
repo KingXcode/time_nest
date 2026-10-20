@@ -23,6 +23,9 @@ class MarketClient extends fixture.FixtureDashboardClient {
     Map<String, dynamic> args, {
     bool refresh = false,
   }) async {
+    if (module == 'cryptoConversion') {
+      return super.load(module, args, refresh: refresh);
+    }
     marketCalls.add(
       '$module:${args['symbol'] ?? ''}:${args['interval'] ?? ''}',
     );

@@ -45,6 +45,7 @@ class FixtureDashboardClient implements DashboardClient {
     if (pending != null) await pending!.future;
     if (fail) throw Exception('网络暂时不可用，请稍后重试。');
     final data = switch (module) {
+      'cryptoConversion' => {'base': 'USDT', 'USD': .99, 'CNY': 7.1},
       'cryptoQuotes' => cryptoQuotesFixture(),
       'cryptoCandles' => cryptoCandlesFixture(
         args['symbol'] as String,
@@ -262,11 +263,11 @@ void main() {
           id == 'market'
               ? <String>{}
               : id == 'crypto'
-              ? {'cryptoQuotes', 'cryptoCandles'}
+              ? {'cryptoQuotes', 'cryptoCandles', 'cryptoConversion'}
               : {id},
         );
         expect(
-          client.calls.length,
+          client.calls.where((m) => m != 'cryptoConversion').length,
           id == 'market'
               ? 0
               : id == 'crypto'

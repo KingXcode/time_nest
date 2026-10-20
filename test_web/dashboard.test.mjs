@@ -509,3 +509,46 @@ test('Binance regional errors are explicit and quote failure does not block cand
   await assert.rejects(h.request('cryptoQuotes', {}));
   assert.equal((await h.request('cryptoCandles', { symbol: 'BTCUSDT', interval: '1h' })).data.candles.length, 3);
 });
+
+
+test('order-book conversion uses USDT-base live USD/CNY rates, caches and retains dated stale results', async () => {
+  const shared = storage();
+  const h = harness(() => response({ data: { currency: 'USDT', rates: { USD: '0.9987', CNY: '6.67' } } }), { storage: shared });
+  const first = await h.request('cryptoConversion', {});
+  assert.deepEqual(first.data, { base: 'USDT', USD: .9987, CNY: 6.67 });
+  assert.equal(h.calls[0].url, 'https://api.coinbase.com/v2/exchange-rates?currency=USDT');
+  assert.equal(h.calls[0].init.credentials, 'omit');
+  assert.equal((await h.request('cryptoConversion', {})).cached, true);
+  assert.equal(h.calls.length, 1);
+  const offline = harness(() => { throw new Error('offline'); }, { storage: shared, now: START + 6 * minute });
+  const stale = await offline.request('cryptoConversion', {});
+  assert.equal(stale.stale, true);
+  assert.equal(stale.fetchedAt, first.fetchedAt);
+  assert.deepEqual(stale.data, first.data);
+  const expired = harness(() => { throw new Error('offline'); }, { storage: shared, now: START + day + 1 });
+  await assert.rejects(expired.request('cryptoConversion', {}), /加载失败/);
+});
+
+test('invalid conversion data never creates an assumed USDT dollar peg, and throttles retries', async () => {
+  for (const data of [
+    { currency: 'USD', rates: { USD: '1', CNY: '7' } },
+    { currency: 'USDT', rates: { USD: '0', CNY: '7' } },
+    { currency: 'USDT', rates: { USD: '1' } },
+    { currency: 'USDT', rates: { USD: 'NaN', CNY: '7' } },
+    { currency: 'USDT', rates: { USD: '1', CNY: '-7' } },
+  ]) {
+    const h = harness(() => response({ data }));
+    await assert.rejects(h.request('cryptoConversion', {}), /格式异常/);
+    await assert.rejects(h.request('cryptoConversion', {}, true), /格式异常/);
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test('conversion rate limit persists independently of Binance market requests', async () => {
+  const shared = storage();
+  const h = harness(() => response({}, 429, { 'retry-after': '120' }), { storage: shared });
+  await assert.rejects(h.request('cryptoConversion', {}), /请求受限/);
+  const reload = harness(() => { throw new Error('should not fetch'); }, { storage: shared, now: START + minute });
+  await assert.rejects(reload.request('cryptoConversion', {}), /请求受限/);
+  assert.equal(reload.calls.length, 0);
+});

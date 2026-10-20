@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/crypto_chart.dart';
 import 'package:time_nest/dashboard/crypto_order_book.dart';
 import 'package:time_nest/dashboard/crypto_panel.dart';
+import 'package:time_nest/dashboard/dashboard_client.dart';
 
 import 'crypto_live_widget_test.dart' show Client, Feed;
 import 'dashboard_widget_test.dart' as fixture;
@@ -51,7 +54,121 @@ Widget bookPage(Client client, Feed feed, {double scale = 1}) {
   );
 }
 
+class RateClient extends Client {
+  bool rateFails = false;
+  int rateCalls = 0;
+  DateTime? rateTime;
+  Completer<DashboardData>? pendingRate;
+  @override
+  Future<DashboardData> load(
+    String module,
+    Map<String, dynamic> args, {
+    bool refresh = false,
+  }) async {
+    if (module != 'cryptoConversion') {
+      return super.load(module, args, refresh: refresh);
+    }
+    rateCalls++;
+    if (rateFails) throw const DashboardException('offline');
+    return pendingRate?.future ??
+        DashboardData(
+          data: {'base': 'USDT', 'USD': .99, 'CNY': 7.1},
+          fetchedAt: rateTime ?? DateTime.now(),
+        );
+  }
+}
+
 void main() {
+  testWidgets(
+    'middle price converts USD/CNY without changing USDT rows or reconnecting market feeds',
+    (tester) async {
+      final client = RateClient(), feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send(depth());
+      feed.send({
+        'type': 'quote',
+        'eventTime': DateTime.now().millisecondsSinceEpoch,
+        'quote': {
+          'symbol': 'BTCUSDT',
+          'price': 100.0,
+          'changePercent': 1.0,
+          'high': 101.0,
+          'low': 99.0,
+          'volume': 2.0,
+          'quoteVolume': 200.0,
+          'openTime': DateTime.now().millisecondsSinceEpoch - 86400000,
+          'closeTime': DateTime.now().millisecondsSinceEpoch,
+        },
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('≈ \$99.00 USD'), findsOneWidget);
+      expect(find.textContaining('价差'), findsNothing);
+      final subscriptions = feed.controllers.length;
+      final switcher = find.byKey(const Key('crypto-book-currency'));
+      await tester.ensureVisible(switcher);
+      await tester.tap(switcher);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('人民币 CNY'));
+      await tester.pumpAndSettle();
+      expect(find.text('≈ ¥710.00 CNY'), findsOneWidget);
+      expect(find.text('价格(USDT)'), findsOneWidget);
+      expect(find.text('金额(USDT)'), findsOneWidget);
+      expect(feed.controllers.length, subscriptions);
+      expect(client.rateCalls, inInclusiveRange(1, 2));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'failed conversion retries, labels old rates, expires them and pauses with the panel',
+    (tester) async {
+      final client = RateClient()..rateFails = true;
+      final feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send(depth());
+      await tester.pumpAndSettle();
+      expect(find.text('汇率暂不可用 USD'), findsOneWidget);
+      client.rateFails = false;
+      client.rateTime = DateTime.now().subtract(const Duration(minutes: 10));
+      await tester.pump(const Duration(minutes: 1));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('旧汇率'), findsOneWidget);
+      client.rateTime = DateTime.now().subtract(const Duration(days: 2));
+      await tester.pump(const Duration(minutes: 5));
+      await tester.pumpAndSettle();
+      expect(find.text('汇率暂不可用 USD'), findsOneWidget);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      await tester.pumpAndSettle();
+      final calls = client.rateCalls;
+      await tester.pump(const Duration(minutes: 10));
+      expect(client.rateCalls, calls);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(client.rateCalls, greaterThan(calls));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('late conversion responses cannot update a disposed book', (
+    tester,
+  ) async {
+    final pending = Completer<DashboardData>();
+    final client = RateClient()..pendingRate = pending;
+    await tester.pumpWidget(bookPage(client, Feed()));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    pending.complete(
+      DashboardData(
+        data: {'base': 'USDT', 'USD': 1, 'CNY': 7},
+        fetchedAt: DateTime.now(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   test('full snapshots reject bad sides, crossed or duplicate levels and invalid numeric data', () {
     CryptoBook parse(Map row) =>
         CryptoBook.fromJson(row, symbol: 'BTCUSDT', receivedAt: 1000);

@@ -24,12 +24,15 @@ class CryptoPanel extends StatefulWidget {
     this.overlays = defaultCryptoOverlays,
     this.panes = defaultCryptoPanes,
     this.infoRight = false,
+    this.currency = 'USD',
+    this.onCurrencyChanged,
     this.paneHeights = const {},
     this.onPaneHeightsChanged,
     this.onChartChanged,
   });
   final DashboardClient client;
-  final String symbol, interval;
+  final String symbol, interval, currency;
+  final ValueChanged<String>? onCurrencyChanged;
   final CryptoFeed? feed;
   final List<String> overlays, panes;
   final bool infoRight;
@@ -546,6 +549,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       book: _book,
       status: _bookStatus,
       lastPrice: selected?.price,
+      client: widget.client,
+      currency: widget.currency,
+      onCurrencyChanged: widget.onCurrencyChanged,
+      active: _automatic && _visible,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

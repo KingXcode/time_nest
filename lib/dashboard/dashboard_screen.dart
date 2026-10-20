@@ -388,6 +388,9 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         overlays: preferences.cryptoOverlays,
         panes: preferences.cryptoPanes,
         infoRight: preferences.cryptoInfoRight,
+        currency: preferences.cryptoCurrency,
+        onCurrencyChanged: (currency) =>
+            _save(() => preferences.cryptoCurrency = currency),
         paneHeights: preferences.cryptoPaneHeights,
         onPaneHeightsChanged: (heights) =>
             _save(() => preferences.cryptoPaneHeights = Map.of(heights)),

@@ -241,6 +241,17 @@ try {
   assert.ok(streamConnections.some(s=>s.url.includes('btcusdt@depth')));
   assert.ok([...requests].some(raw=>{try{const url=new URL(raw);return url.hostname==='data-api.binance.vision' && url.pathname==='/api/v3/depth' && url.searchParams.get('symbol')==='BTCUSDT' && url.searchParams.get('limit')==='1000';}catch{return false;}}),'local book bootstraps with a real REST snapshot');
   passed('actual Binance diff stream and REST snapshot bootstrap a synchronized local order book on the shared socket');
+  const conversion = await page.evaluate(`timeNestDashboard.request('cryptoConversion','{}').then(JSON.parse)`);
+  assert.equal(conversion.stale, false);
+  assert.equal(conversion.data.base, 'USDT');
+  assert.ok(conversion.data.USD > 0 && conversion.data.CNY > 0);
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('≈ $') && item.label?.includes('USD')),'live USD conversion');
+  const beforeCurrencySocketCount=streamConnections.length;
+  await activate('切换折算货币'); await activate('人民币 CNY');
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('≈ ¥') && item.label?.includes('CNY')),'live CNY conversion');
+  assert.equal(JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoCurrency,'CNY');
+  assert.equal(streamConnections.length,beforeCurrencySocketCount,'currency switch keeps Binance feed connected');
+  passed('real browser USDT rates load through CORS; USD/CNY switching stores device preference without restarting the market feed');
   const bootstrapRequests=requestEvents.filter(url=>url.includes('/api/v3/depth?')).length;
   const beforeDepthFault=streamConnections.length;
   await page.evaluate(`(() => {
@@ -449,6 +460,8 @@ try {
     return e.getBoundingClientRect().height;
   })()`);
   assert.equal(restoredHeight,storedHeight,'fresh page restores custom height after symbol, interval and indicator changes');
+  assert.equal(JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoCurrency,'CNY');
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('≈ ¥') && item.label?.includes('CNY')),'CNY conversion restores on fresh page');
   passed('device-local subchart heights persist across series changes and full page reload');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:620});await delay(500);await page.screenshot('05-crypto-eight-overlays.png');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:800,deltaX:0,deltaY:1800});await delay(500);await page.screenshot('06-crypto-eight-panes.png');

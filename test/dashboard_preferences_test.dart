@@ -4,6 +4,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 
 void main() {
+  test('order-book currency defaults, validates and survives preference round trip', () {
+    expect(DashboardPreferences.decode(null).cryptoCurrency, 'USD');
+    expect(
+      DashboardPreferences.decode('{"cryptoCurrency":"EUR"}').cryptoCurrency,
+      'USD',
+    );
+    final p = DashboardPreferences.decode(
+      '{"cryptoCurrency":"CNY","cryptoSymbol":"ETHUSDT","cryptoPaneHeights":{"vol":200}}',
+    );
+    expect(DashboardPreferences.decode(p.encode()).cryptoCurrency, 'CNY');
+    expect(p.cryptoSymbol, 'ETHUSDT');
+    expect(p.cryptoPaneHeights, {'vol': 200});
+  });
+
   test(
     'pane height cache migrates, validates and survives preference round trips',
     () {

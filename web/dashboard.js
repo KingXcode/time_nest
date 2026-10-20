@@ -17,6 +17,7 @@
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
     releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
+    cryptoConversion: { ttl: 5 * MINUTE, retain: DAY, gap: MINUTE, label: '折算汇率' },
     cryptoQuotes: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币报价' },
     cryptoCandles: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币 K 线' },
     news: { ttl: 10 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '科技资讯' },
@@ -88,6 +89,7 @@
         requireValue(/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?\/[a-zA-Z0-9_.-]{1,100}$/.test(repo) && !['.', '..'].includes(repo.split('/')[1]), '仓库格式应为 owner/repo，例如 flutter/flutter。');
         return { repo: repo.toLowerCase() };
       }
+      case 'cryptoConversion':
       case 'cryptoQuotes': return {};
       case 'cryptoCandles':
         requireValue(cryptoSymbols.includes(args.symbol) && Object.hasOwn(cryptoIntervals, args.interval), '请选择支持的交易对与 K 线周期。');
@@ -104,6 +106,7 @@
       case 'searchCities': return Array.isArray(data.cities) && data.cities.length <= 10 && data.cities.every(c => object(c) && typeof c.name === 'string' && finite(c.latitude) && Math.abs(c.latitude) <= 90 && finite(c.longitude) && Math.abs(c.longitude) <= 180);
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
+      case 'cryptoConversion': return data.base === 'USDT' && ['USD', 'CNY'].every(k => finite(data[k]) && data[k] > 0);
       case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
       case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && (data.endTime === undefined || (timestamp(data.endTime) && data.endTime < Date.now())) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && (data.endTime === undefined || c.closeTime <= data.endTime) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
       case 'news':
@@ -140,7 +143,7 @@
   }
   function cleanLimits() {
     const now = Date.now();
-    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com', binanceHost].includes(key) && finite(value) && value > now && value <= now + (key === binanceHost ? 3 : 2) * DAY));
+    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.github.com', 'api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com', 'api.coinbase.com', binanceHost].includes(key) && finite(value) && value > now && value <= now + (key === binanceHost ? 3 : 2) * DAY));
     saveObject(LIMIT_KEY, limits);
   }
   function blockedMessage(host, until) {
@@ -229,6 +232,13 @@
   }
   async function loadSource(module, args) {
     switch (module) {
+      case 'cryptoConversion': {
+        const result = await jsonFetch('https://api.coinbase.com/v2/exchange-rates?currency=USDT');
+        requireValue(object(result?.data) && result.data.currency === 'USDT' && object(result.data.rates));
+        const USD = decimal(result.data.rates.USD), CNY = decimal(result.data.rates.CNY);
+        requireValue(USD > 0 && CNY > 0);
+        return { data: { base: 'USDT', USD, CNY } };
+      }
       case 'cryptoQuotes': {
         const url = new URL(`https://${binanceHost}/api/v3/ticker/24hr`);
         url.search = new URLSearchParams({ symbols: JSON.stringify(cryptoSymbols), type: 'FULL' });

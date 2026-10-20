@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'crypto_chart.dart' show cryptoUp, cryptoDown;
 import 'crypto_market.dart';
 import 'dashboard_widgets.dart';
+import 'dashboard_client.dart';
 
 class CryptoBookLevel {
   const CryptoBookLevel(this.price, this.quantity, this.amount);
@@ -148,23 +150,115 @@ class CryptoOrderBook extends StatefulWidget {
     required this.book,
     required this.status,
     this.lastPrice,
+    required this.client,
+    this.currency = 'USD',
+    this.onCurrencyChanged,
+    this.active = true,
   });
-  final String symbol, status;
+  final String symbol, status, currency;
+  final DashboardClient client;
+  final ValueChanged<String>? onCurrencyChanged;
+  final bool active;
   final CryptoBook? book;
   final double? lastPrice;
   @override
   State<CryptoOrderBook> createState() => _CryptoOrderBookState();
 }
 
-class _CryptoOrderBookState extends State<CryptoOrderBook> {
+class _CryptoOrderBookState extends State<CryptoOrderBook>
+    with WidgetsBindingObserver {
   _BookView _view = _BookView.both;
   int _multiplier = 1;
   int? _visibleLevels;
   int _priceDirection = 0;
   String? _hoveredLevel;
+  late String _currency = widget.currency == 'CNY' ? 'CNY' : 'USD';
+  DashboardData? _rates;
+  bool _rateError = false, _ratesBusy = false;
+  Timer? _rateTimer;
+  int _rateSerial = 0;
+  bool _visible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final state = WidgetsBinding.instance.lifecycleState;
+    _visible =
+        state == null ||
+        state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
+    _loadRates();
+  }
+
+  Future<void> _loadRates() async {
+    if (!_visible || !widget.active || _ratesBusy) return;
+    _rateTimer?.cancel();
+    _ratesBusy = true;
+    final serial = ++_rateSerial;
+    try {
+      final result = await widget.client.load('cryptoConversion', const {});
+      if (result.data['base'] != 'USDT' ||
+          !const ['USD', 'CNY'].every(
+            (key) =>
+                result.data[key] is num &&
+                (result.data[key] as num).isFinite &&
+                (result.data[key] as num) > 0,
+          )) {
+        throw const FormatException('Invalid conversion rates');
+      }
+      if (!mounted || serial != _rateSerial) return;
+      setState(() {
+        _rates = result;
+        _rateError = result.stale;
+      });
+    } catch (_) {
+      if (!mounted || serial != _rateSerial) return;
+      setState(() => _rateError = true);
+    } finally {
+      if (mounted && serial == _rateSerial) {
+        _ratesBusy = false;
+        if (_visible && widget.active) {
+          _rateTimer = Timer(Duration(minutes: _rateError ? 1 : 5), _loadRates);
+        }
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final visible =
+        state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
+    if (_visible == visible) return;
+    _visible = visible;
+    _rateSerial++;
+    _ratesBusy = false;
+    _rateTimer?.cancel();
+    if (visible) _loadRates();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _rateSerial++;
+    _rateTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   void didUpdateWidget(CryptoOrderBook old) {
     super.didUpdateWidget(old);
+    if (old.currency != widget.currency) {
+      _currency = widget.currency == 'CNY' ? 'CNY' : 'USD';
+    }
+    if (old.active != widget.active || old.client != widget.client) {
+      _rateSerial++;
+      _ratesBusy = false;
+      _rateTimer?.cancel();
+      if (old.client != widget.client) _rates = null;
+      _loadRates();
+    }
     if (old.lastPrice != null &&
         widget.lastPrice != null &&
         old.lastPrice != widget.lastPrice) {
@@ -186,6 +280,66 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
       (m) => '${m[1]},',
     );
     return parts.join('.');
+  }
+
+  Widget _conversion() {
+    final rates = _rates;
+    final freshEnough =
+        rates != null &&
+        DateTime.now().difference(rates.fetchedAt) <= const Duration(days: 1);
+    final rate = freshEnough ? (rates.data[_currency] as num).toDouble() : null;
+    final amount = rate != null && widget.lastPrice != null
+        ? widget.lastPrice! * rate
+        : null;
+    final stale =
+        _rateError ||
+        (rates != null &&
+            DateTime.now().difference(rates.fetchedAt) >=
+                const Duration(minutes: 5));
+    final value = amount != null && amount.isFinite
+        ? '≈ ${_currency == 'USD' ? r'$' : '¥'}${price(amount, 2)}${stale ? ' · 旧汇率' : ''}'
+        : rates == null && !_rateError
+        ? '汇率加载中…'
+        : '汇率暂不可用';
+    final detail = rate == null
+        ? '参考折算汇率暂不可用，稍后自动重试'
+        : 'Coinbase 参考汇率\n1 USDT ≈ $rate $_currency\n获取：${cryptoTime(rates!.fetchedAt.millisecondsSinceEpoch, seconds: true)} UTC+8${stale ? '\n当前使用旧汇率，稍后自动重试' : ''}';
+    return PopupMenuButton<String>(
+      key: const Key('crypto-book-currency'),
+      tooltip: '切换折算货币',
+      initialValue: _currency,
+      onSelected: (value) {
+        setState(() => _currency = value);
+        widget.onCurrencyChanged?.call(value);
+      },
+      itemBuilder: (_) => [
+        for (final entry in const {'USD': '美元 USD', 'CNY': '人民币 CNY'}.entries)
+          PopupMenuItem(value: entry.key, child: Text(entry.value)),
+      ],
+      child: Tooltip(
+        message: detail,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  '$value $_currency',
+                  key: const Key('crypto-book-converted-price'),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: dashboardMuted,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              const Icon(Icons.expand_more, size: 14, color: dashboardMuted),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -521,14 +675,16 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
                 ),
               ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               decoration: const BoxDecoration(
                 border: Border.symmetric(
                   horizontal: BorderSide(color: dashboardBorder),
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 2,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(
                     widget.lastPrice != null
@@ -549,14 +705,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  if (book.bids.isNotEmpty && book.asks.isNotEmpty)
-                    Text(
-                      '价差 ${(book.asks.first.price - book.bids.first.price).toStringAsFixed(digits)} USDT',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: dashboardMuted,
-                      ),
-                    ),
+                  _conversion(),
                 ],
               ),
             ),

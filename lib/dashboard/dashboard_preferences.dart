@@ -64,6 +64,7 @@ class DashboardPreferences {
     this.cryptoOverlays = defaultCryptoOverlays,
     this.cryptoPanes = defaultCryptoPanes,
     this.cryptoInfoRight = false,
+    this.cryptoCurrency = 'USD',
     this.cryptoPaneHeights = const {},
     this.order = dashboardModules,
     this.favorites = const ['weather'],
@@ -78,6 +79,7 @@ class DashboardPreferences {
   String cryptoInterval;
   List<String> cryptoOverlays, cryptoPanes;
   bool cryptoInfoRight;
+  String cryptoCurrency;
   Map<String, double> cryptoPaneHeights;
   List<String> order;
   List<String> favorites;
@@ -143,6 +145,9 @@ class DashboardPreferences {
         overlay: false,
         fallback: defaultCryptoPanes,
       );
+      if (const ['USD', 'CNY'].contains(json['cryptoCurrency'])) {
+        prefs.cryptoCurrency = json['cryptoCurrency'] as String;
+      }
       prefs.cryptoInfoRight = json['cryptoInfoRight'] == true;
       prefs.cryptoPaneHeights = cleanCryptoPaneHeights(
         json['cryptoPaneHeights'],
@@ -180,6 +185,7 @@ class DashboardPreferences {
     'cryptoOverlays': cryptoOverlays,
     'cryptoPanes': cryptoPanes,
     'cryptoInfoRight': cryptoInfoRight,
+    'cryptoCurrency': cryptoCurrency,
     'cryptoPaneHeights': cleanCryptoPaneHeights(cryptoPaneHeights),
     'order': order,
     'favorites': favorites,
