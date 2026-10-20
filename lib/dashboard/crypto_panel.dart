@@ -61,6 +61,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   DashboardData? _quoteData, _candleData;
   CryptoBook? _book;
   String _bookStatus = 'syncing';
+  int _bookEpoch = 0;
   GlobalKey _chartKey = GlobalKey();
   List<CryptoQuote> _quotes = [];
   List<CryptoCandle> _candles = [];
@@ -357,6 +358,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     if (!_automatic || !_visible) return;
     _streamStatus = 'connecting';
     _bookStatus = 'syncing';
+    _bookEpoch = 0;
     final serial = _feedSerial;
     _subscription = _feed
         .subscribe(widget.symbol, widget.interval)
@@ -383,6 +385,12 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                   _historySynchronized = false;
                   _refresh(refresh: true);
                 }
+                return;
+              }
+              // A callback queued before a price-step reset must never restore
+              // its obsolete copy or status after the new generation starts.
+              if ((type == 'depthStatus' || type == 'depth') &&
+                  (event['bookEpoch'] as int? ?? 0) < _bookEpoch) {
                 return;
               }
               if (type == 'depthStatus') {
@@ -575,7 +583,12 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         widget.onBookSettingsChanged?.call(_bookLevels, Map.of(_bookSteps));
       },
       onPriceStepChanged: (step) {
-        setState(() => _bookSteps[widget.symbol] = step);
+        setState(() {
+          _bookSteps[widget.symbol] = step;
+          _book = null;
+          _bookStatus = _automatic && _visible ? 'syncing' : 'paused';
+          _bookEpoch = _feed.resetOrderBook() ?? _bookEpoch;
+        });
         widget.onBookSettingsChanged?.call(_bookLevels, Map.of(_bookSteps));
       },
     );

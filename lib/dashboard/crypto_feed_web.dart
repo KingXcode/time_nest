@@ -8,10 +8,18 @@ import 'crypto_feed.dart';
 external JSString _subscribe(JSString args, JSFunction callback);
 @JS('timeNestDashboard.unsubscribeCrypto')
 external void _unsubscribe(JSString id);
+@JS('timeNestDashboard.resetCryptoBook')
+external JSNumber? _resetBook(JSString id);
 
 CryptoFeed createCryptoFeed() => _WebFeed();
 
 class _WebFeed implements CryptoFeed {
+  JSString? _activeId;
+
+  @override
+  int? resetOrderBook() =>
+      _activeId == null ? null : _resetBook(_activeId!)?.toDartInt;
+
   @override
   Stream<Map<String, dynamic>> subscribe(String symbol, String interval) {
     JSString? id;
@@ -30,12 +38,14 @@ class _WebFeed implements CryptoFeed {
               }
             }).toJS,
           );
+          _activeId = id;
         } catch (_) {
           controller.add({'type': 'status', 'status': 'unavailable'});
         }
       },
       onCancel: () {
         if (id != null) _unsubscribe(id!);
+        if (_activeId == id) _activeId = null;
       },
     );
     return controller.stream;

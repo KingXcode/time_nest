@@ -4,6 +4,9 @@ CryptoFeed createCryptoFeed() => _UnavailableFeed();
 
 class _UnavailableFeed implements CryptoFeed {
   @override
+  int? resetOrderBook() => null;
+
+  @override
   Stream<Map<String, dynamic>> subscribe(String symbol, String interval) =>
       Stream.value({'type': 'status', 'status': 'unavailable'});
 }

@@ -358,6 +358,66 @@ void main() {
   });
 
   testWidgets(
+    'every price step clears the whole book and rejects queued old generations without restarting charts',
+    (tester) async {
+      final client = Client(), feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send(depth(id: 100));
+      await tester.pumpAndSettle();
+      final candleRequests = client.candleRequests;
+      final quoteRequests = client.quoteRequests;
+      final chartState = tester.state(find.byType(CryptoChart));
+      for (final step in [.1, 1.0, 10.0, 100.0, .01]) {
+        final oldEpoch = feed.bookEpoch;
+        tester
+            .widget<DropdownButton<double>>(
+              find.byKey(const Key('crypto-book-grouping')),
+            )
+            .onChanged!(step);
+        await tester.pumpAndSettle();
+        CryptoOrderBook book() => tester.widget(find.byType(CryptoOrderBook));
+        expect(book().book, isNull);
+        expect(book().status, 'syncing');
+        expect(find.byKey(const Key('crypto-book-bids')), findsNothing);
+        expect(find.byKey(const Key('crypto-book-asks')), findsNothing);
+        expect(find.text('等待币安订单簿快照…'), findsOneWidget);
+        feed.send({...depth(id: 999), 'bookEpoch': oldEpoch});
+        feed.send({
+          'type': 'depthStatus',
+          'symbol': 'BTCUSDT',
+          'status': 'live',
+          'bookEpoch': oldEpoch,
+        });
+        await tester.pumpAndSettle();
+        expect(book().book, isNull);
+        expect(book().status, 'syncing');
+        feed.send(depth(id: 10)); // A fresh snapshot starts a new ID fence.
+        await tester.pumpAndSettle();
+        expect(book().book!.updateId, 10);
+        expect(book().status, 'live');
+        expect(book().priceStep, step);
+        expect(
+          DashboardPreferences.decode(client.preferences)
+              .cryptoBookSteps['BTCUSDT'],
+          step,
+        );
+        expect(
+          identical(tester.state(find.byType(CryptoChart)), chartState),
+          isTrue,
+        );
+      }
+      expect(feed.bookResets, 5);
+      expect(feed.selections, hasLength(1));
+      expect(feed.cancelled, 0);
+      expect(client.candleRequests, candleRequests);
+      expect(client.quoteRequests, quoteRequests);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'large aggregation fills the selected row count and shows a real depth-limit hint when needed',
     (tester) async {
       fixture.setSize(tester, const Size(1280, 900));
@@ -386,6 +446,9 @@ void main() {
         find.byKey(const Key('crypto-book-grouping')),
       );
       grouping.onChanged!(10);
+      await tester.pumpAndSettle();
+      expect(sideRows(true), isEmpty);
+      feed.send({...depth(), 'book': deepSnapshot()});
       await tester.pumpAndSettle();
       expect(sideRows(true), hasLength(20));
       expect(sideRows(false), hasLength(20));
@@ -480,6 +543,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(grouping().value, 10);
       expect(levels().initialValue, 5);
+      expect(find.text('等待币安订单簿快照…'), findsOneWidget);
+      feed.send(depth());
+      await tester.pumpAndSettle();
       expect(find.text('实时 · 5档'), findsOneWidget);
       var saved = DashboardPreferences.decode(client.preferences);
       expect(saved.cryptoBookSteps, {'BTCUSDT': 10});
@@ -792,6 +858,8 @@ void main() {
             )
             .onChanged!(.1);
         await tester.pumpAndSettle();
+        feed.send(depth());
+        await tester.pumpAndSettle();
         expect(
           find.descendant(of: asks, matching: find.text('100.10')),
           findsOneWidget,
@@ -841,6 +909,8 @@ void main() {
             find.byKey(const Key('crypto-book-grouping')),
           )
           .onChanged!(.1);
+      await tester.pumpAndSettle();
+      feed.send(event);
       await tester.pumpAndSettle();
       expect(
         bar('ask', 100.1).width,

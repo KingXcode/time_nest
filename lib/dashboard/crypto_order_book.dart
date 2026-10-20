@@ -363,6 +363,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
   @override
   void didUpdateWidget(CryptoOrderBook old) {
     super.didUpdateWidget(old);
+    if (old.book != null && widget.book == null) _hoveredLevel = null;
     if (old.levels != widget.levels) _visibleLevels = widget.levels;
     if (old.priceStep != widget.priceStep) _selectedStep = widget.priceStep;
     if (old.currency != widget.currency) {

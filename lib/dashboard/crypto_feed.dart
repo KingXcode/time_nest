@@ -4,6 +4,10 @@ import 'crypto_feed_stub.dart'
 
 abstract class CryptoFeed {
   Stream<Map<String, dynamic>> subscribe(String symbol, String interval);
+
+  /// Rebootstrap the active order book without interrupting quotes or candles.
+  /// Returns its new generation, or null when no subscription is active.
+  int? resetOrderBook();
 }
 
 CryptoFeed createCryptoFeed() => implementation.createCryptoFeed();

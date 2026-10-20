@@ -26,9 +26,17 @@ List<Map<String, dynamic>> history() =>
 class Feed implements CryptoFeed {
   final controllers = <StreamController<Map<String, dynamic>>>[];
   final selections = <String>[];
-  int cancelled = 0;
+  int cancelled = 0, bookEpoch = 0, bookResets = 0;
+
+  @override
+  int resetOrderBook() {
+    bookResets++;
+    return ++bookEpoch;
+  }
+
   @override
   Stream<Map<String, dynamic>> subscribe(String symbol, String interval) {
+    bookEpoch = 0;
     selections.add('$symbol:$interval');
     final c = StreamController<Map<String, dynamic>>(
       sync: true,
@@ -38,7 +46,11 @@ class Feed implements CryptoFeed {
     return c.stream;
   }
 
-  void send(Map<String, dynamic> event) => controllers.last.add(event);
+  void send(Map<String, dynamic> event) => controllers.last.add({
+    if (event['type'] == 'depth' || event['type'] == 'depthStatus')
+      'bookEpoch': bookEpoch,
+    ...event,
+  });
 }
 
 class Client extends fixture.FixtureDashboardClient {

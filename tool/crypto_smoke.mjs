@@ -312,19 +312,57 @@ try {
   assert.ok(!(await labels()).some(e=>e.label?.startsWith('卖盘 ')),'single bid view hides asks');
   await activate('显示买卖盘');await activate('显示档位');await activate('20 档');
   assert.ok((await labels()).some(e=>e.label?.startsWith('卖盘 20 档')),'twenty levels can be shown in landscape');
+  async function changeBookStep(step, menuOpen=false, rangeBefore) {
+    const depthBefore=requestEvents.filter(url=>url.includes('/api/v3/depth?')).length;
+    const socketBefore=streamConnections.length;
+    const candlesBefore=requestEvents.filter(url=>url.includes('/klines')).length;
+    rangeBefore ??= await visibleRange();
+    assert.ok(rangeBefore,'chart range is available before opening the step menu');
+    await page.evaluate(`(() => {
+      if(!window.__stepResetHarness) {
+        window.__stepResetHarness=true;
+        const originalFetch=window.fetch;
+        window.fetch=(...args)=>{
+          if(window.__holdStepSnapshot && String(args[0]).includes('/api/v3/depth?')) {
+            window.__stepSnapshotWaiting=true;
+            return new Promise((resolve,reject)=>{
+              window.__releaseStepSnapshot=()=>originalFetch(...args).then(resolve,reject);
+              args[1]?.signal?.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});
+            });
+          }
+          return originalFetch(...args);
+        };
+      }
+      window.__stepSnapshotWaiting=false;window.__holdStepSnapshot=true;
+    })()`);
+    if(!menuOpen) await activate('价格档位');
+    await activate(String(step));
+    await waitFor(()=>page.evaluate('window.__stepSnapshotWaiting === true'),'price-step reset requests a fresh snapshot');
+    const empty=await labels();
+    assert.ok(empty.some(e=>e.label?.includes('等待币安订单簿快照')),'reset clears the old book while waiting');
+    assert.ok(!empty.some(e=>/^买盘 \d+ 档|^卖盘 \d+ 档/.test(e.label||'')),'neither old book side survives the reset');
+    if(step===0.1) await page.screenshot('28-orderbook-step-reset.png');
+    await page.evaluate('window.__holdStepSnapshot=false;window.__releaseStepSnapshot()');
+    await waitFor(async()=>(await labels()).some(e=>/实时 · (5|20)档/.test(e.label||'')),'new price-step book completes snapshot and incremental synchronization');
+    assert.ok(requestEvents.filter(url=>url.includes('/api/v3/depth?')).length>depthBefore);
+    assert.equal(streamConnections.length,socketBefore,'price-step reset keeps the existing socket');
+    assert.equal(requestEvents.filter(url=>url.includes('/klines')).length,candlesBefore,'price-step reset does not reload candles');
+    assert.equal(await visibleRange(),rangeBefore,'price-step reset preserves chart viewport');
+  }
   const bookRules=await page.evaluate(`timeNestDashboard.request('cryptoBookRules','{}').then(JSON.parse)`);
   assert.equal(bookRules.stale,false);
   assert.equal(bookRules.data.rules.find(r=>r.symbol==='BTCUSDT').tickSize,'0.01000000');
   await activate('显示档位');await activate('5 档');
+  const initialStepRange=await visibleRange();
   await activate('价格档位');
   await waitFor(async()=>{const menu=await labels();return ['0.01','0.1','1','10','100'].every(step=>menu.some(e=>e.label===step));},'all five BTC price steps appear in the menu');
   await page.screenshot('23-orderbook-price-steps.png');
-  await activate('10');
+  await changeBookStep(10,true,initialStepRange);
   await activate('显示档位');await activate('20 档');
   await waitFor(async()=>{const rows=await labels();return rows.some(e=>e.label?.startsWith('买盘 20 档')) && rows.some(e=>e.label?.startsWith('卖盘 20 档'));},'10 USDT aggregation fills twenty rows on both sides');
   assert.ok((await labels()).some(e=>{const m=e.label?.match(/买(\d+)\/卖(\d+)价位/);return m && Number(m[1])>1000 && Number(m[2])>1000;}),'the UI receives deep data instead of only the raw top twenty');
   await page.screenshot('24-orderbook-deep-10.png');
-  await activate('价格档位');await activate('100');
+  await changeBookStep(100);
   await waitFor(async()=>{
     const rows=await labels();
     const bid=rows.find(e=>e.label?.match(/^买盘 \d+ 档/)),ask=rows.find(e=>e.label?.match(/^卖盘 \d+ 档/));
@@ -333,7 +371,8 @@ try {
     return b>=2 && a>=2 && (b===20 && a===20 || rows.some(e=>e.label?.includes('已达每侧5000价位上限')));
   },'100 USDT aggregation uses available full buckets and explains any snapshot limit');
   await page.screenshot('25-orderbook-deep-100.png');
-  await activate('价格档位');await activate('10');
+  for(const step of [0.1,1,0.01,10]) await changeBookStep(step);
+  passed('every BTC price step clears both sides, requests fresh depth and rejects the old display while preserving the chart and live socket');
   await activate('显示档位');await activate('5 档');
   passed('5000-level live depth fills twenty rows at 10 USDT and keeps complete buckets with an explicit limit at 100 USDT');
   const savedBook=JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()'));
@@ -455,7 +494,7 @@ try {
   await waitFor(async () => (await labels()).some(item => item.label === 'ETH / USDT'), 'ETH selection rendered');
   await waitFor(() => [...requests].some(url => url.includes('symbol=ETHUSDT') && url.includes('interval=1h')), 'ETH hourly request');
   await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'ETH book inherits saved level count');
-  await activate('价格档位');await activate('1');
+  await changeBookStep(1);
   const perSymbolSteps=JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoBookSteps;
   assert.deepEqual(perSymbolSteps,{BTCUSDT:10,ETHUSDT:1});
   await activate('日线');
@@ -474,7 +513,7 @@ try {
   await page.send('Input.dispatchMouseEvent', { type:'mouseWheel', x:2, y:650, deltaX:0, deltaY:900 });
   await delay(600); await page.screenshot('04-crypto-mobile-chart.png');
   // A fresh page restores a demanding 8+8 saved configuration.
-  await page.evaluate(`(() => { const p=JSON.parse(timeNestDashboard.readPreferences());p.cryptoOverlays=['ma','ema','wma','boll','donchian','keltner','vwma','hma'];p.cryptoPanes=['vol','amount','macd','rsi','kdj','stoch','cci','adx'];p.cryptoInfoRight=true;timeNestDashboard.writePreferences(JSON.stringify(p)); })()`);
+  await page.evaluate(`(() => { const p=JSON.parse(timeNestDashboard.readPreferences());p.cryptoOverlays=['ma','ema','wma','boll','donchian','keltner','vwma','hma'];p.cryptoPanes=['vol','amount','macd','rsi','kdj','stoch','cci','adx'];p.cryptoInfoRight=true;p.cryptoBookSteps.ETHUSDT=0.01;timeNestDashboard.writePreferences(JSON.stringify(p)); })()`);
   await page.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1280,deviceScaleFactor:1,mobile:false});
   await page.evaluate(`(() => {
     const key='shike.crypto.rules.v2', entry=JSON.parse(localStorage.getItem(key));
@@ -500,20 +539,19 @@ try {
   // Reopening a route is covered in widget tests at 320 px and 2x text.
   const restored = await page.evaluate(`JSON.parse(timeNestDashboard.readPreferences())`);
   assert.equal(restored.cryptoSymbol, 'ETHUSDT'); assert.equal(restored.cryptoInterval, '1d');
-  assert.equal(restored.cryptoBookLevels,5);assert.deepEqual(restored.cryptoBookSteps,{BTCUSDT:10,ETHUSDT:1});
+  assert.equal(restored.cryptoBookLevels,5);assert.deepEqual(restored.cryptoBookSteps,{BTCUSDT:10,ETHUSDT:0.01});
   assert.equal(restored.cryptoPaneHeights.vol,storedHeight);
   assert.ok(!restored.order?.includes('fx'));
   await activate('数字货币行情');
   await waitFor(()=>page.evaluate('window.__rulesHeld === true'),'expired exchange rules refresh in background');
   await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'cached rules and the restored depth are ready',6500);
-  await activate('价格档位');await activate('0.01');
   await waitFor(async()=>(await labels()).some(e=>/^数量\(ETH\) [\d,]+\.\d{3}$/.test(e.label||'')),'cached exchange rules render quantity with three decimals',7000);
   await page.screenshot('26-orderbook-cached-rules.png');
   await page.evaluate('window.__releaseRules()');
   await waitFor(async()=>(await labels()).some(e=>/^数量\(ETH\) [\d,]+\.\d{4}$/.test(e.label||'')),'fresh exchange rules automatically reformat to four decimals');
   assert.equal(await page.evaluate("JSON.parse(localStorage.getItem('shike.crypto.rules.v2')).data.rules.find(r=>r.symbol==='ETHUSDT').quoteAssetPrecision"),8);
   await page.screenshot('27-orderbook-fresh-rules.png');
-  await activate('价格档位');await activate('1');
+  await changeBookStep(1);
   passed('expired persistent rules render immediately; a held background refresh updates quantity and amount precision without a page reload');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('主图 8/8 · 副图 8/8')), '8+8 chart settings restored');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'restored stream live');

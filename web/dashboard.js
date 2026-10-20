@@ -570,6 +570,7 @@
     }
     state('syncing');
     return {
+      restart() { if (valid()) { failures = 0; reset(null); } },
       push(data) {
         if (!valid()) return false;
         let event;
@@ -601,7 +602,7 @@
     requireValue(typeof callback === 'function');
     const id = String(++cryptoSessionId);
     let socket, retryTimer, watchdog, rotation, stopped = false, generation = 0, failures = 0;
-    let opened = false, localDepth;
+    let opened = false, localDepth, bookEpoch = 0;
     const selected = args.symbol.toLowerCase();
     const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), `${selected}@depth`, `${selected}@kline_${args.interval}`];
     const emit = event => { if (!stopped) callback(JSON.stringify(event)); };
@@ -628,7 +629,7 @@
       try { socket = new WebSocket(`wss://data-stream.binance.vision/stream?streams=${streams.join('/')}`); }
       catch (_) { retry(); return; }
       const valid = () => !stopped && epoch === generation;
-      localDepth = maintainSpotBook(args.symbol,emit,valid);
+      localDepth = maintainSpotBook(args.symbol,event => emit({...event,bookEpoch}),valid);
       function check() {
         if (!valid()) return;
         const now = Date.now();
@@ -677,17 +678,26 @@
       else connect();
     };
     globalThis.document?.addEventListener('visibilitychange', visibility);
-    cryptoSessions.set(id, () => {
-      stopped = true; clear(); globalThis.document?.removeEventListener('visibilitychange', visibility);
+    cryptoSessions.set(id, {
+      stop() { stopped = true; clear(); globalThis.document?.removeEventListener('visibilitychange', visibility); },
+      resetBook() {
+        bookEpoch++;
+        // Notify even if already syncing. Discard queued Dart callbacks from
+        // older generations and never reuse their buffer or REST response.
+        emit({type:'depthStatus',symbol:args.symbol,status:'syncing',bookEpoch});
+        localDepth?.restart();
+        return bookEpoch;
+      },
     });
     connect();
     return id;
   }
-  function unsubscribeCrypto(id) { cryptoSessions.get(id)?.(); cryptoSessions.delete(id); }
+  function unsubscribeCrypto(id) { cryptoSessions.get(id)?.stop(); cryptoSessions.delete(id); }
+  function resetCryptoBook(id) { return cryptoSessions.get(id)?.resetBook() ?? null; }
   cleanCache();
   cleanLimits();
   globalThis.timeNestDashboard = Object.freeze({
-    subscribeCrypto, unsubscribeCrypto,
+    subscribeCrypto, unsubscribeCrypto, resetCryptoBook,
     subscribeCryptoRules(callback) {
       requireValue(typeof callback === 'function');
       const id = String(++ruleListenerId); ruleListeners.set(id, callback); return id;

@@ -150,6 +150,52 @@ test('zero deletes existing or absent prices while the entire trusted range stay
   h.api.unsubscribeCrypto(id);
 });
 
+test('explicit price-step resets rebootstrap every generation while quote/kline keep their socket',async()=>{
+  const h=harness(),id=h.start(),ws=h.sockets[0];ws.open();
+  ws.frame(depth());await settle();
+  assert.equal(copies(h).at(-1).bookEpoch,0);
+  for(let epoch=1;epoch<=5;epoch++) {
+    const before=copies(h).length, requests=h.requests.length;
+    assert.equal(h.api.resetCryptoBook(id),epoch);
+    assert.equal(bookStatus(h),'syncing');
+    assert.equal(h.events.at(-1).bookEpoch,epoch);
+    // Never reuse an old buffered event: the next diff starts the new bootstrap.
+    h.advance(1000);await settle();assert.equal(h.requests.length,requests);
+    ws.frame(depth());await settle();
+    assert.equal(h.requests.length,requests+1);
+    assert.equal(new URL(h.requests.at(-1).url).searchParams.get('limit'),'5000');
+    assert.equal(copies(h).length,before+1);
+    assert.equal(copies(h).at(-1).bookEpoch,epoch);
+    ws.frame(ticker(h.now()));ws.frame(candle(h.now()));
+    assert.equal(h.events.filter(e=>e.type==='quote').at(-1).eventTime,h.now());
+    assert.equal(h.events.filter(e=>e.type==='candle').at(-1).eventTime,h.now());
+    assert.equal(h.sockets.length,1);assert.notEqual(ws.closed,true);
+  }
+  h.api.unsubscribeCrypto(id);
+  assert.equal(h.api.resetCryptoBook(id),null);
+  assert.equal(h.api.resetCryptoBook('missing'),null);
+  assert.equal(h.timers.size,0);
+});
+
+test('rapid price-step resets abort pending snapshots, reject late responses and preserve snapshot throttling',async()=>{
+  const first=deferred(),second=deferred();
+  const h=harness({fetch:n=>n===1?first.promise:n===2?second.promise:response(snapshot())}),id=h.start(),ws=h.sockets[0];ws.open();
+  ws.frame(depth());assert.equal(h.requests.length,1);
+  h.api.resetCryptoBook(id);
+  assert.equal(h.requests[0].init.signal.aborted,true);
+  ws.frame(depth());h.advance(999);await settle();assert.equal(h.requests.length,1);
+  h.advance(1);await settle();assert.equal(h.requests.length,2);
+  h.api.resetCryptoBook(id);h.api.resetCryptoBook(id);
+  assert.equal(h.requests[1].init.signal.aborted,true);
+  first.resolve(response(snapshot()));second.resolve(response(snapshot()));await settle();
+  assert.equal(copies(h).length,0);
+  ws.frame(depth());h.advance(1000);await settle();
+  assert.equal(h.requests.length,3);assert.equal(copies(h).length,1);
+  assert.equal(copies(h)[0].bookEpoch,3);assert.equal(bookStatus(h),'live');
+  h.api.resetCryptoBook(id);ws.frame(depth());h.api.unsubscribeCrypto(id);
+  h.advance(10000);await settle();assert.equal(h.requests.length,3);
+});
+
 test('a sequence gap freezes the copy, refetches and replays without disrupting ticker/kline',async()=>{
   const pending=deferred(),h=harness({fetch:n=>n===1?response(snapshot()):pending.promise}),id=h.start(),ws=h.sockets[0];ws.open();
   ws.frame(depth());await settle();ws.frame(ticker());ws.frame(candle());
