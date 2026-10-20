@@ -239,7 +239,7 @@ try {
   await waitFor(()=>streamFrames.filter(f=>f.stream?.endsWith('@depth') && Number.isSafeInteger(f.data?.U) && Number.isSafeInteger(f.data?.u)).length>=2,'multiple real incremental depth events');
   await waitFor(async()=>(await labels()).some(item=>item.label?.includes('实时 · 20档')),'live depth UI');
   assert.ok(streamConnections.some(s=>s.url.includes('btcusdt@depth')));
-  assert.ok([...requests].some(raw=>{try{const url=new URL(raw);return url.hostname==='data-api.binance.vision' && url.pathname==='/api/v3/depth' && url.searchParams.get('symbol')==='BTCUSDT' && url.searchParams.get('limit')==='1000';}catch{return false;}}),'local book bootstraps with a real REST snapshot');
+  assert.ok([...requests].some(raw=>{try{const url=new URL(raw);return url.hostname==='data-api.binance.vision' && url.pathname==='/api/v3/depth' && url.searchParams.get('symbol')==='BTCUSDT' && url.searchParams.get('limit')==='5000';}catch{return false;}}),'local book bootstraps with a real REST snapshot');
   passed('actual Binance diff stream and REST snapshot bootstrap a synchronized local order book on the shared socket');
   const conversion = await page.evaluate(`timeNestDashboard.request('cryptoConversion','{}').then(JSON.parse)`);
   assert.equal(conversion.stale, false);
@@ -320,6 +320,22 @@ try {
   await waitFor(async()=>{const menu=await labels();return ['0.01','0.1','1','10','100'].every(step=>menu.some(e=>e.label===step));},'all five BTC price steps appear in the menu');
   await page.screenshot('23-orderbook-price-steps.png');
   await activate('10');
+  await activate('显示档位');await activate('20 档');
+  await waitFor(async()=>{const rows=await labels();return rows.some(e=>e.label?.startsWith('买盘 20 档')) && rows.some(e=>e.label?.startsWith('卖盘 20 档'));},'10 USDT aggregation fills twenty rows on both sides');
+  assert.ok((await labels()).some(e=>{const m=e.label?.match(/买(\d+)\/卖(\d+)价位/);return m && Number(m[1])>1000 && Number(m[2])>1000;}),'the UI receives deep data instead of only the raw top twenty');
+  await page.screenshot('24-orderbook-deep-10.png');
+  await activate('价格档位');await activate('100');
+  await waitFor(async()=>{
+    const rows=await labels();
+    const bid=rows.find(e=>e.label?.match(/^买盘 \d+ 档/)),ask=rows.find(e=>e.label?.match(/^卖盘 \d+ 档/));
+    if(!bid || !ask)return false;
+    const b=Number(bid.label.match(/\d+/)[0]),a=Number(ask.label.match(/\d+/)[0]);
+    return b>=2 && a>=2 && (b===20 && a===20 || rows.some(e=>e.label?.includes('已达每侧5000价位上限')));
+  },'100 USDT aggregation uses available full buckets and explains any snapshot limit');
+  await page.screenshot('25-orderbook-deep-100.png');
+  await activate('价格档位');await activate('10');
+  await activate('显示档位');await activate('5 档');
+  passed('5000-level live depth fills twenty rows at 10 USDT and keeps complete buckets with an explicit limit at 100 USDT');
   const savedBook=JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()'));
   assert.equal(savedBook.cryptoBookSteps.BTCUSDT,10);assert.equal(savedBook.cryptoBookLevels,5);
   passed('order-book side filters and level menu work in the live landscape browser');

@@ -89,7 +89,155 @@ class RateClient extends Client {
   }
 }
 
+Map<String, dynamic> deepSnapshot({double spacing = .5}) {
+  final bids = [
+    for (var i = 0; i < 5000; i++)
+      {
+        'price': double.parse((100000 - i * spacing).toStringAsFixed(2)),
+        'quantity': 1.0,
+      },
+  ];
+  final asks = [
+    for (var i = 0; i < 5000; i++)
+      {
+        'price': double.parse((100000.01 + i * spacing).toStringAsFixed(2)),
+        'quantity': 2.0,
+      },
+  ];
+  return {
+    'lastUpdateId': 10,
+    'priceDecimals': 2,
+    'bids': bids,
+    'asks': asks,
+    'bidFloor': bids.last['price'],
+    'askCeiling': asks.last['price'],
+  };
+}
+
 void main() {
+  test('full trusted depth is merged before limiting, retains totals and caches immutable groups', () {
+    final value = deepSnapshot();
+    final book = CryptoBook.fromJson(
+      value,
+      symbol: 'BTCUSDT',
+      receivedAt: 1000,
+    );
+    expect(book.bids, hasLength(5000));
+    expect(book.asks, hasLength(5000));
+    for (final step in [10.0, 100.0]) {
+      final bids = book.grouped(bid: true, step: step),
+          asks = book.grouped(bid: false, step: step);
+      expect(bids.length, greaterThanOrEqualTo(20));
+      expect(asks.length, greaterThanOrEqualTo(20));
+      expect(bids.take(20), hasLength(20));
+      expect(asks.take(20), hasLength(20));
+      expect(identical(bids, book.grouped(bid: true, step: step)), isTrue);
+      expect(() => bids.clear(), throwsUnsupportedError);
+      for (final group in [...bids.take(20), ...asks.take(20)]) {
+        final bid = bids.contains(group);
+        final source = (bid ? book.bids : book.asks).where(
+          (r) => bid
+              ? r.price >= group.price && r.price < group.price + step
+              : r.price > group.price - step && r.price <= group.price,
+        );
+        expect(
+          group.quantity,
+          source.fold<double>(0, (sum, r) => sum + r.quantity),
+        );
+        expect(
+          group.amount,
+          closeTo(source.fold<double>(0, (sum, r) => sum + r.amount), .0001),
+        );
+      }
+    }
+    expect(() => book.bids.clear(), throwsUnsupportedError);
+    expect(
+      () => CryptoBook.fromJson(
+        {...value, 'bidFloor': 100001},
+        symbol: 'BTCUSDT',
+        receivedAt: 1000,
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => CryptoBook.fromJson(
+        {...value, 'askCeiling': double.nan},
+        symbol: 'BTCUSDT',
+        receivedAt: 1000,
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('partial boundary buckets and unknown outer levels cannot masquerade as full depth', () {
+    final value = deepSnapshot(spacing: .1);
+    final book = CryptoBook.fromJson(
+      value,
+      symbol: 'BTCUSDT',
+      receivedAt: 1000,
+    );
+    final bids = book.grouped(bid: true, step: 100),
+        asks = book.grouped(bid: false, step: 100);
+    expect(bids.map((r) => r.price), [100000, 99900, 99800, 99700, 99600]);
+    expect(asks.map((r) => r.price), [100100, 100200, 100300, 100400]);
+    expect(bids.every((r) => r.price >= book.bidFloor!), isTrue);
+    expect(asks.every((r) => r.price <= book.askCeiling!), isTrue);
+    final whole = CryptoBook.fromJson(
+      {...value, 'bidFloor': null, 'askCeiling': null},
+      symbol: 'BTCUSDT',
+      receivedAt: 1000,
+    );
+    expect(whole.grouped(bid: true, step: 100).last.price, 99500);
+    expect(whole.grouped(bid: false, step: 100).last.price, 100500);
+  });
+
+  testWidgets(
+    'large aggregation fills the selected row count and shows a real depth-limit hint when needed',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 900));
+      final client = Client()
+        ..preferences =
+            '{"cryptoBookLevels":20,"cryptoBookSteps":{"BTCUSDT":100}}';
+      final feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send({...depth(), 'book': deepSnapshot()});
+      await tester.pumpAndSettle();
+      Iterable<Text> sideRows(bool bid) => tester
+          .widgetList<Text>(
+            find.descendant(
+              of: find.byKey(
+                Key(bid ? 'crypto-book-bids' : 'crypto-book-asks'),
+              ),
+              matching: find.byType(Text),
+            ),
+          )
+          .where((t) => t.style?.color == (bid ? cryptoUp : cryptoDown));
+      expect(sideRows(true), hasLength(20));
+      expect(sideRows(false), hasLength(20));
+      expect(find.byKey(const Key('crypto-book-depth-limit')), findsNothing);
+      final grouping = tester.widget<DropdownButton<double>>(
+        find.byKey(const Key('crypto-book-grouping')),
+      );
+      grouping.onChanged!(10);
+      await tester.pumpAndSettle();
+      expect(sideRows(true), hasLength(20));
+      expect(sideRows(false), hasLength(20));
+      grouping.onChanged!(100);
+      await tester.pumpAndSettle();
+      feed.send({
+        ...depth(id: 11),
+        'book': {...deepSnapshot(spacing: .1), 'lastUpdateId': 11},
+      });
+      await tester.pumpAndSettle();
+      expect(sideRows(true), hasLength(5));
+      expect(sideRows(false), hasLength(4));
+      expect(find.textContaining('已达每侧5000价位上限'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   test(
     'price steps follow symbol tick sizes including non-power-of-ten ticks',
     () {

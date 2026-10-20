@@ -49,7 +49,7 @@ class CryptoBook {
     updateId = value['lastUpdateId'] as int;
     priceDecimals = value['priceDecimals'] as int;
     List<CryptoBookLevel> side(Object? raw, bool bid) {
-      if (raw is! List || raw.length > 20) {
+      if (raw is! List || raw.length > 10000) {
         throw const FormatException('Invalid depth side');
       }
       final rows = raw.map((r) => CryptoBookLevel.fromJson(r as Map)).toList();
@@ -60,11 +60,26 @@ class CryptoBook {
           throw const FormatException('Unsorted depth');
         }
       }
-      return rows;
+      return List.unmodifiable(rows);
     }
 
     bids = side(value['bids'], true);
     asks = side(value['asks'], false);
+    double? cutoff(String key) {
+      final raw = value[key];
+      if (raw == null) return null;
+      if (raw is! num || !raw.isFinite || raw <= 0) {
+        throw const FormatException('Invalid depth cutoff');
+      }
+      return raw.toDouble();
+    }
+
+    bidFloor = cutoff('bidFloor');
+    askCeiling = cutoff('askCeiling');
+    if ((bidFloor != null && bids.any((r) => r.price < bidFloor!)) ||
+        (askCeiling != null && asks.any((r) => r.price > askCeiling!))) {
+      throw const FormatException('Depth outside trusted range');
+    }
     if (bids.isNotEmpty &&
         asks.isNotEmpty &&
         bids.first.price >= asks.first.price) {
@@ -75,6 +90,8 @@ class CryptoBook {
   final int receivedAt;
   late final int updateId, priceDecimals;
   late final List<CryptoBookLevel> bids, asks;
+  late final double? bidFloor, askCeiling;
+  final _groupCache = <(bool, int, double?), List<CryptoBookLevel>>{};
 
   List<CryptoBookLevel> grouped({
     required bool bid,
@@ -82,6 +99,9 @@ class CryptoBook {
     double? step,
   }) {
     final rows = bid ? bids : asks;
+    final key = (bid, multiplier, step);
+    final cached = _groupCache[key];
+    if (cached != null) return cached;
     if (step == null && multiplier == 1) return rows;
     var decimals = priceDecimals;
     if (step != null) {
@@ -97,12 +117,17 @@ class CryptoBook {
     final scale = math.pow(10, decimals).toDouble();
     if (step != null) multiplier = (step * scale).round();
     if (multiplier < 1) throw const FormatException('Invalid grouping step');
+    final boundary = bid ? bidFloor : askCeiling;
+    final cutoff = boundary == null ? null : (boundary * scale).round();
     final groups = <int, CryptoBookLevel>{};
     for (final row in rows) {
       final ticks = (row.price * scale).round();
       final bucket =
           (bid ? ticks ~/ multiplier : (ticks + multiplier - 1) ~/ multiplier) *
           multiplier;
+      // A coarse bucket crossing the original 5000-level boundary is only
+      // partly known. Omit it instead of presenting a partial sum as complete.
+      if (cutoff != null && (bid ? bucket < cutoff : bucket > cutoff)) continue;
       final old = groups[bucket];
       groups[bucket] = CryptoBookLevel(
         bucket / scale,
@@ -112,11 +137,19 @@ class CryptoBook {
     }
     final keys = groups.keys.toList()
       ..sort((a, b) => bid ? b.compareTo(a) : a.compareTo(b));
-    return [for (final key in keys) groups[key]!];
+    return _groupCache[key] = List.unmodifiable([
+      for (final key in keys) groups[key]!,
+    ]);
   }
 
-  double get bidQuantity => bids.fold(0, (sum, row) => sum + row.quantity);
-  double get askQuantity => asks.fold(0, (sum, row) => sum + row.quantity);
+  late final double bidQuantity = bids.fold(
+    0,
+    (sum, row) => sum + row.quantity,
+  );
+  late final double askQuantity = asks.fold(
+    0,
+    (sum, row) => sum + row.quantity,
+  );
   double get bidShare => bidQuantity + askQuantity == 0
       ? 0
       : bidQuantity / (bidQuantity + askQuantity);
@@ -423,6 +456,13 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     final asks =
         book?.grouped(bid: false, step: step).take(levels).toList() ??
         <CryptoBookLevel>[];
+    final bidQuantity = bids.fold<double>(0, (sum, row) => sum + row.quantity);
+    final askQuantity = asks.fold<double>(0, (sum, row) => sum + row.quantity);
+    final bidShare = bidQuantity + askQuantity == 0
+        ? 0.0
+        : bidQuantity / (bidQuantity + askQuantity);
+    final insufficient = bids.length < levels || asks.length < levels;
+    final truncated = book?.bidFloor != null || book?.askCeiling != null;
     final maxBidQty = bids.fold<double>(
       0,
       (max, r) => math.max(max, r.quantity),
@@ -784,7 +824,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                   children: [for (final level in bids) row(level, true)],
                 ),
               ),
-            if (book.bidQuantity + book.askQuantity > 0)
+            if (bidQuantity + askQuantity > 0)
               Padding(
                 padding: const EdgeInsets.all(8),
                 child: Column(
@@ -792,12 +832,12 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                     Row(
                       children: [
                         Text(
-                          '买 ${(book.bidShare * 100).toStringAsFixed(1)}%',
+                          '买 ${(bidShare * 100).toStringAsFixed(1)}%',
                           style: const TextStyle(color: cryptoUp, fontSize: 10),
                         ),
                         const Spacer(),
                         Text(
-                          '${((1 - book.bidShare) * 100).toStringAsFixed(1)}% 卖',
+                          '${((1 - bidShare) * 100).toStringAsFixed(1)}% 卖',
                           style: const TextStyle(
                             color: cryptoDown,
                             fontSize: 10,
@@ -807,7 +847,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                     ),
                     const SizedBox(height: 4),
                     LinearProgressIndicator(
-                      value: book.bidShare,
+                      value: bidShare,
                       minHeight: 4,
                       color: cryptoUp,
                       backgroundColor: cryptoDown,
@@ -815,7 +855,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                   ],
                 ),
               ),
-            if (book.bidQuantity + book.askQuantity == 0)
+            if (bidQuantity + askQuantity == 0)
               const Padding(
                 padding: EdgeInsets.all(8),
                 child: Text(
@@ -823,10 +863,19 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                   style: TextStyle(fontSize: 11, color: dashboardMuted),
                 ),
               ),
+            if (insufficient)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+                child: Text(
+                  '${truncated ? '已达每侧5000价位上限' : '当前挂单不足'} · 买${bids.length}/$levels 卖${asks.length}/$levels${truncated ? '（仅完整档）' : ''}',
+                  key: const Key('crypto-book-depth-limit'),
+                  style: const TextStyle(fontSize: 9, color: dashboardMuted),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
               child: Text(
-                '最多$levels档 / 原始前20档数量占比 · 接收 ${cryptoTime(book.receivedAt, seconds: true).substring(11)}',
+                '买${book.bids.length}/卖${book.asks.length}价位 · 显示档数占比 · ${cryptoTime(book.receivedAt, seconds: true).substring(11)}',
                 style: const TextStyle(fontSize: 9, color: dashboardMuted),
               ),
             ),

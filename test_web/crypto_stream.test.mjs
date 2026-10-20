@@ -105,7 +105,7 @@ test('diff stream buffers before REST, discards snapshot-covered events and repl
   assert.equal(h.requests.length,1);
   const url=new URL(h.requests[0].url);
   assert.equal(url.hostname,'data-api.binance.vision');assert.equal(url.pathname,'/api/v3/depth');
-  assert.equal(url.searchParams.get('symbol'),'BTCUSDT');assert.equal(url.searchParams.get('limit'),'1000');
+  assert.equal(url.searchParams.get('symbol'),'BTCUSDT');assert.equal(url.searchParams.get('limit'),'5000');
   assert.equal(h.requests[0].init.cache,'no-store');assert.equal(h.requests[0].init.credentials,'omit');
   ws.frame(depth(102,{U:101,b:[['100.00','7']]}));
   ws.frame(depth(103,{U:102,b:[['100.00','4']],a:[['100.01','0'],['101.00','1.5']]}));
@@ -139,14 +139,14 @@ test('snapshot alone waits for its first bridge; U=id+1, overlapping ranges and 
   h.api.unsubscribeCrypto(id);
 });
 
-test('zero deletes existing or absent prices and retained deeper levels are promoted into the top twenty',async()=>{
+test('zero deletes existing or absent prices while the entire trusted range stays available for grouping',async()=>{
   const initial={lastUpdateId:10,bids:Array.from({length:30},(_,i)=>[(100-i*.01).toFixed(2),'1']),asks:Array.from({length:30},(_,i)=>[(101+i*.01).toFixed(2),'2'])};
   const h=harness({fetch:()=>response(initial)}),id=h.start(),ws=h.sockets[0];ws.open();ws.frame(depth());await settle();
-  assert.equal(copy(h).bids.length,20);assert.equal(copy(h).asks.length,20);
+  assert.equal(copy(h).bids.length,30);assert.equal(copy(h).asks.length,30);
   ws.frame(depth(12,{U:12,b:[['100.000','0'],['90','0'],['100.5','3']],a:[['101.00','0']]}));
   assert.equal(copy(h).bids[0].price,100.5);assert.equal(copy(h).bids[0].quantity,3);
   assert.equal(copy(h).bids[1].price,99.99);assert.equal(copy(h).asks[0].price,101.01);
-  assert.equal(copy(h).asks.at(-1).price,101.2);assert.equal(h.requests.length,1);
+  assert.equal(copy(h).asks.at(-1).price,101.29);assert.equal(h.requests.length,1);
   h.api.unsubscribeCrypto(id);
 });
 
@@ -236,10 +236,10 @@ test('buffer overflow replaces an unfinished bootstrap and ignores its cancelled
 });
 
 test('unknown prices beyond a full snapshot cannot be promoted as a complete top twenty',async()=>{
-  const initial={lastUpdateId:10,bids:Array.from({length:1000},(_,i)=>[(100-i*.01).toFixed(2),'1']),asks:[['101','2']]};
+  const initial={lastUpdateId:10,bids:Array.from({length:5000},(_,i)=>[(100-i*.01).toFixed(2),'1']),asks:[['101','2']]};
   const h=harness({fetch:()=>response(initial)}),id=h.start(),ws=h.sockets[0];ws.open();ws.frame(depth());await settle();
   const before=copies(h).length;
-  ws.frame(depth(12,{U:12,b:[...initial.bids.slice(0,981).map(([p])=>[p,'0']),['80','1']]}));
+  ws.frame(depth(12,{U:12,b:[...initial.bids.slice(0,4981).map(([p])=>[p,'0']),['40','1']]}));
   assert.equal(copies(h).length,before);assert.equal(bookStatus(h),'syncing');
   h.api.unsubscribeCrypto(id);
 });
@@ -256,4 +256,31 @@ test('sequential diff frames keep the shared connection healthy and background c
   for(let i=0;i<7;i++) {h.advance(3000);ws.frame(ticker(h.now()));ws.frame(candle(h.now()));ws.frame(depth(i+12,{U:i+12}));await settle();}
   assert.notEqual(ws.closed,true);assert.equal(h.sockets.length,1);assert.equal(copy(h).lastUpdateId,18);
   h.visibility(true);assert.equal(ws.closed,true);assert.equal(h.timers.size,0);h.api.unsubscribeCrypto(id);
+});
+
+
+test('5000-level bootstrap publishes all trusted depth and ignores unknown outer updates',async()=>{
+  const initial={lastUpdateId:10,bids:Array.from({length:5000},(_,i)=>[(100000-i*.5).toFixed(2),'1']),asks:Array.from({length:5000},(_,i)=>[(100000.01+i*.5).toFixed(2),'2'])};
+  const h=harness({fetch:()=>response(initial)}),id=h.start(),ws=h.sockets[0];ws.open();ws.frame(depth(11,{U:10,b:[],a:[]}));await settle();
+  let current=copy(h);
+  assert.equal(current.bids.length,5000);assert.equal(current.asks.length,5000);
+  assert.equal(current.bidFloor,97500.5);assert.equal(current.askCeiling,102499.51);
+  ws.frame(depth(12,{U:12,b:[['98000','9'],['97000','123']],a:[['102000.01','7'],['103000','456']]}));
+  current=copy(h);
+  assert.equal(current.bids.find(r=>r.price===98000).quantity,9);
+  assert.equal(current.asks.find(r=>r.price===102000.01).quantity,7);
+  assert.equal(current.bids.some(r=>r.price===97000),false);
+  assert.equal(current.asks.some(r=>r.price===103000),false);
+  assert.equal(h.requests.length,1);
+  assert.equal(current.lastUpdateId,12);assert.equal(bookStatus(h),'live');
+  h.api.unsubscribeCrypto(id);
+});
+
+test('growth beyond 10000 known prices per side restarts instead of publishing an unbounded copy',async()=>{
+  const initial={lastUpdateId:10,bids:Array.from({length:5000},(_,i)=>[(100000-i*.01).toFixed(2),'1']),asks:[['100001','2']]};
+  const h=harness({fetch:()=>response(initial)}),id=h.start(),ws=h.sockets[0];ws.open();ws.frame(depth(11,{U:10,b:[]}));await settle();
+  const before=copies(h).length;
+  ws.frame(depth(12,{U:12,b:Array.from({length:6000},(_,i)=>[(99999.9999-i*.0001).toFixed(4),'1'])}));
+  assert.equal(copies(h).length,before);assert.equal(bookStatus(h),'syncing');
+  h.api.unsubscribeCrypto(id);
 });

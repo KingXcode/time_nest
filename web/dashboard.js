@@ -399,7 +399,8 @@
   // Spot protocol: buffer diff events before REST, then bridge lastUpdateId with
   // U/u. Futures uses a different pu chain; never apply that rule to Spot data.
   // https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md#how-to-manage-a-local-order-book-correctly
-  const bookSnapshotLimit = 1000;
+  const bookSnapshotLimit = 5000;
+  const maxLocalBookLevels = 10000;
   function bookLevels(rows, { zero = false, bid } = {}) {
     requireValue(Array.isArray(rows) && rows.length <= (zero ? 10000 : bookSnapshotLimit));
     let digits = 0;
@@ -415,7 +416,7 @@
     return { levels, digits };
   }
   function maintainSpotBook(symbol, emit, current) {
-    let local = null, buffer = [], bufferedLevels = 0, pending = null, timer = null;
+    let local = null, rendered = null, buffer = [], bufferedLevels = 0, pending = null, timer = null;
     let serial = 0, closed = false, failures = 0, lastAttempt = -Infinity, status;
     const valid = () => !closed && current();
     const state = value => {
@@ -427,26 +428,35 @@
       clearTimeout(timer); timer = null;
     }
     function visibleBook() {
-      requireValue(local.bids.size <= 5000 && local.asks.size <= 5000);
-      const bids = [...local.bids].sort((a,b) => b[0]-a[0]).slice(0,20);
-      const asks = [...local.asks].sort((a,b) => a[0]-b[0]).slice(0,20);
+      if (rendered) return rendered;
+      requireValue(local.bids.size <= maxLocalBookLevels && local.asks.size <= maxLocalBookLevels);
+      const bids = [...local.bids].sort((a,b) => b[0]-a[0]);
+      const asks = [...local.asks].sort((a,b) => a[0]-b[0]);
       // Updates outside the initial snapshot cannot describe all intervening
       // levels. Rebootstrap before such unknown ranges could enter the UI.
-      if (local.bidFloor !== null) requireValue(bids.length === 20 && bids.at(-1)[0] >= local.bidFloor);
-      if (local.askCeiling !== null) requireValue(asks.length === 20 && asks.at(-1)[0] <= local.askCeiling);
+      if (local.bidFloor !== null) requireValue(bids.length >= 20 && bids[19][0] >= local.bidFloor);
+      if (local.askCeiling !== null) requireValue(asks.length >= 20 && asks[19][0] <= local.askCeiling);
       requireValue(!bids.length || !asks.length || bids[0][0] < asks[0][0]);
       const side = rows => rows.map(([price,quantity]) => ({price,quantity}));
-      return {lastUpdateId:local.id,bids:side(bids),asks:side(asks),priceDecimals:local.digits};
+      // Preserve the entire trusted range. Flutter aggregates it BEFORE taking
+      // the requested 5/10/20 rows; the cutoff also excludes partial buckets.
+      return rendered = {lastUpdateId:local.id,bids:side(bids),asks:side(asks),priceDecimals:local.digits,
+        bidFloor:local.bidFloor,askCeiling:local.askCeiling};
     }
     function apply(event) {
       if (event.u <= local.id) return false;
       requireValue(event.U <= local.id + 1); // A gap invalidates the WHOLE copy.
-      for (const [side, rows] of [[local.bids,event.b], [local.asks,event.a]]) {
+      for (const [side, rows, bid] of [[local.bids,event.b,true], [local.asks,event.a,false]]) {
         for (const [price,quantity] of rows) {
+          // A change outside the bootstrap cutoff cannot fill the unknown
+          // intervening levels. Never let that incomplete range reach the UI.
+          if (bid ? local.bidFloor !== null && price < local.bidFloor
+                  : local.askCeiling !== null && price > local.askCeiling) continue;
           if (quantity === 0) side.delete(price); // Removing an absent price is harmless.
           else side.set(price,quantity); // Absolute quantity, never an increment.
         }
       }
+      rendered = null;
       local.id = event.u; local.digits = Math.max(local.digits,event.digits);
       visibleBook(); // Validate both sides atomically before any UI emission.
       return true;
@@ -462,7 +472,7 @@
       else snapshot();
     }
     function reset(event, retrying = false) {
-      cancelRequest(); local = null;
+      cancelRequest(); local = null; rendered = null;
       buffer = event ? [event] : [];
       bufferedLevels = event ? event.b.length + event.a.length : 0;
       state(retrying ? 'retrying' : 'syncing');
@@ -481,7 +491,7 @@
         local = {id:value.lastUpdateId,bids:new Map(bids.levels),asks:new Map(asks.levels),digits:Math.max(bids.digits,asks.digits),
           bidFloor:bids.levels.length === bookSnapshotLimit ? bids.levels.at(-1)[0] : null,
           askCeiling:asks.levels.length === bookSnapshotLimit ? asks.levels.at(-1)[0] : null};
-        visibleBook();
+        rendered = null; visibleBook();
         let advanced = false;
         for (const event of buffer) advanced = apply(event) || advanced;
         buffer = []; bufferedLevels = 0;
@@ -490,7 +500,7 @@
         if (advanced) publish();
       } catch (_) {
         if (!valid() || token !== serial) return;
-        local = null; state('retrying');
+        local = null; rendered = null; state('retrying');
         const delay = Math.min(30000, 1000 * 2 ** Math.min(failures++,5));
         pending = null; schedule(delay);
       } finally { if (token === serial && pending === controller) pending = null; }
@@ -517,7 +527,7 @@
         }
         return true;
       },
-      stop() { closed = true; cancelRequest(); local = null; buffer = []; },
+      stop() { closed = true; cancelRequest(); local = null; rendered = null; buffer = []; },
     };
   }
   // Public market-only streams. Browsers handle WebSocket protocol ping/pong.
