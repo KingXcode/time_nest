@@ -1,11 +1,10 @@
 import 'dart:convert';
 
-import 'market_config.dart';
 import 'crypto_market.dart';
 import 'crypto_indicators.dart';
 import 'crypto_view_settings.dart';
 
-const dashboardModules = ['weather', 'releases', 'news', 'market', 'crypto'];
+const dashboardModules = ['weather', 'releases', 'news', 'crypto'];
 
 // Curated popular projects, not a live star ranking. No authentication required.
 const defaultDashboardRepos = [
@@ -74,8 +73,6 @@ class DashboardPreferences {
     this.city,
     this.repos = defaultDashboardRepos,
     this.feed = 'sspai',
-    this.marketIndex = 'shanghai',
-    this.marketInterval = 'D',
     this.cryptoSymbol = 'BTCUSDT',
     this.cryptoInterval = '1h',
     this.cryptoOverlays = defaultCryptoOverlays,
@@ -93,8 +90,6 @@ class DashboardPreferences {
   Map<String, dynamic>? city;
   List<String> repos;
   String feed;
-  String marketIndex;
-  String marketInterval;
   String cryptoSymbol;
   String cryptoInterval;
   List<String> cryptoOverlays, cryptoPanes;
@@ -146,12 +141,6 @@ class DashboardPreferences {
       if (json['version'] == null && json['feed'] == 'top') {
         prefs.feed = 'sspai';
       }
-      prefs.marketIndex = marketIndexFor(
-        json['marketIndex'] is String ? json['marketIndex'] as String : '',
-      ).id;
-      if (marketIntervals.containsKey(json['marketInterval'])) {
-        prefs.marketInterval = json['marketInterval'] as String;
-      }
       if (cryptoAssets.containsKey(json['cryptoSymbol'])) {
         prefs.cryptoSymbol = json['cryptoSymbol'] as String;
       }
@@ -178,6 +167,8 @@ class DashboardPreferences {
       prefs.cryptoPaneHeights = cleanCryptoPaneHeights(
         json['cryptoPaneHeights'],
       );
+      // Ignore retired module settings and filter their navigation IDs while
+      // keeping the relative order and favorites of every active module.
       if (json['order'] is List) {
         prefs.order = <String>{
           ...(json['order'] as List).whereType<String>().where(
@@ -204,8 +195,6 @@ class DashboardPreferences {
     'city': city,
     'repos': repos,
     'feed': feed,
-    'marketIndex': marketIndex,
-    'marketInterval': marketInterval,
     'cryptoSymbol': cryptoSymbol,
     'cryptoInterval': cryptoInterval,
     'cryptoOverlays': cryptoOverlays,

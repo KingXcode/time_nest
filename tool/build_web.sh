@@ -37,4 +37,7 @@ printf 'Building 此刻 %s\n' "${release_version}"
 "${flutter_command[@]}" build web --release --no-web-resources-cdn --pwa-strategy=none "$@" \
   --build-name="${release_version%%+*}" --build-number="${release_version##*+}" \
   --dart-define="APP_VERSION=${release_version}"
+# Flutter copies web/ incrementally and does not remove retired source assets.
+# Do not ship or precache the removed A-share wrapper from an older local build.
+rm -f -- build/web/market_chart.html build/web/market_chart.js
 node tool/generate_sw.mjs build/web

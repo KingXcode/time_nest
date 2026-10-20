@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'crypto_fixture.dart';
 
@@ -8,7 +9,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_client.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/dashboard_screen.dart';
-import 'package:time_nest/dashboard/market_panel.dart';
 import 'package:time_nest/dashboard/news_panel.dart';
 import 'package:time_nest/dashboard/releases_panel.dart';
 import 'package:time_nest/dashboard/weather_panel.dart';
@@ -170,7 +170,6 @@ const titles = {
   'weather': '天气',
   'releases': '项目更新',
   'news': '科技资讯',
-  'market': 'A股行情',
   'crypto': '数字货币行情',
 };
 final testNow = DateTime.utc(2026, 10, 18, 1);
@@ -219,6 +218,11 @@ void main() {
         expect(find.byType(ReleasesPanel), findsNothing);
         expect(find.byType(NewsPanel), findsNothing);
         expect(find.textContaining('假期'), findsNothing);
+        expect(find.textContaining('A股'), findsNothing);
+        expect(
+          find.byKey(const ValueKey('dashboard-entry-market')),
+          findsNothing,
+        );
         expect(client.calls.toSet(), {
           'weather',
           'news',
@@ -296,9 +300,7 @@ void main() {
         await openModule(tester, id);
         expect(
           client.calls.toSet(),
-          id == 'market'
-              ? <String>{}
-              : id == 'crypto'
+          id == 'crypto'
               ? {
                   'cryptoQuotes',
                   'cryptoCandles',
@@ -311,17 +313,11 @@ void main() {
           client.calls
               .where((m) => m != 'cryptoConversion' && m != 'cryptoBookRules')
               .length,
-          id == 'market'
-              ? 0
-              : id == 'crypto'
+          id == 'crypto'
               ? 2
               : id == 'releases'
               ? 4
               : 1,
-        );
-        expect(
-          find.byType(MarketPanel),
-          id == 'market' ? findsOneWidget : findsNothing,
         );
         expect(find.text('数据总览'), findsNothing);
         expect(
@@ -351,6 +347,75 @@ void main() {
       }
       await tester.pumpWidget(const SizedBox());
     });
+  }
+
+  for (final favorites in [
+    <String>['market'],
+    <String>['market', 'crypto'],
+  ]) {
+    testWidgets(
+      'retired A-share entries stay absent after migration: $favorites',
+      (tester) async {
+        final client = FixtureDashboardClient()
+          ..preferences = jsonEncode({
+            'version': 4,
+            'marketIndex': 'shenzhen',
+            'marketInterval': 'W',
+            'order': ['market', 'crypto', 'news', 'weather', 'releases'],
+            'favorites': favorites,
+            'cryptoSymbol': 'ETHUSDT',
+            'cryptoInterval': '4h',
+          });
+        await tester.pumpWidget(app(DashboardScreen(client: client)));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('dashboard-entry-market')),
+          findsNothing,
+        );
+        expect(find.textContaining('A股'), findsNothing);
+        final count = favorites.length - 1;
+        await tester.tap(find.text('已收藏 $count'));
+        await tester.pumpAndSettle();
+        if (count == 0) {
+          expect(find.text('还没有收藏。在全部功能里点一下星标吧。'), findsOneWidget);
+        } else {
+          expect(
+            find.byKey(const ValueKey('dashboard-entry-crypto')),
+            findsOneWidget,
+          );
+        }
+        expect(find.textContaining('A 股'), findsNothing);
+        await tester.tap(find.text('全部功能'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('调整入口顺序'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('A股'), findsNothing);
+        expect(find.byTooltip('上移数字货币行情'), findsOneWidget);
+        await tester.tap(find.text('保存'));
+        await tester.pumpAndSettle();
+        final saved = jsonDecode(client.preferences!) as Map<String, dynamic>;
+        expect(saved['order'], ['crypto', 'news', 'weather', 'releases']);
+        expect(saved['favorites'], count == 0 ? <String>[] : ['crypto']);
+        expect(saved['cryptoSymbol'], 'ETHUSDT');
+        expect(saved['cryptoInterval'], '4h');
+        expect(saved.containsKey('marketIndex'), isFalse);
+        expect(saved.containsKey('marketInterval'), isFalse);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpWidget(app(DashboardScreen(client: client)));
+        await tester.pumpAndSettle();
+        expect(find.text('已收藏 $count'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('dashboard-entry-crypto')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('dashboard-entry-market')),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
   }
 
   testWidgets('favorites and ordering persist while snapshots stay bounded', (

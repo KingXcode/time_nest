@@ -86,8 +86,8 @@ void main() {
           'feed': 'show',
         }),
       );
-      expect(old.order, ['news', 'weather', 'market', 'releases', 'crypto']);
-      expect(old.favorites, ['market']);
+      expect(old.order, ['news', 'weather', 'releases', 'crypto']);
+      expect(old.favorites, isEmpty);
       expect(old.cryptoSymbol, 'BTCUSDT');
       expect(old.cryptoInterval, '1h');
       old.cryptoSymbol = 'ETHUSDT';
@@ -95,7 +95,7 @@ void main() {
       final read = DashboardPreferences.decode(old.encode());
       expect(read.cryptoSymbol, 'ETHUSDT');
       expect(read.cryptoInterval, '4h');
-      expect(read.marketIndex, 'shenzhen');
+      expect(jsonDecode(read.encode()).containsKey('marketIndex'), isFalse);
       expect(read.feed, 'show');
     },
   );

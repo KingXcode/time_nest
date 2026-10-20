@@ -474,12 +474,6 @@ class DashboardOverview extends StatelessWidget {
             firstFlex: 6,
             secondFlex: 4,
           ),
-          if (modules.length == 1 && modules.contains('market'))
-            OutlinedButton.icon(
-              onPressed: () => onOpen('market'),
-              icon: const Icon(Icons.show_chart),
-              label: const Text('打开 A 股指数图表'),
-            ),
         ],
       );
     },

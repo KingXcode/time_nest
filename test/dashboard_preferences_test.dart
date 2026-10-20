@@ -106,7 +106,7 @@ void main() {
     expect(read.repos, defaultDashboardRepos);
     expect(read.repos, hasLength(24));
     expect(read.feed, 'sspai');
-    expect(read.order, ['weather', 'releases', 'news', 'market', 'crypto']);
+    expect(read.order, ['weather', 'releases', 'news', 'crypto']);
     expect(read.favorites, ['weather']);
   });
 
@@ -160,14 +160,14 @@ void main() {
       city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
       repos: ['dart-lang/sdk'],
       feed: 'show',
-      order: ['news', 'market'],
+      order: ['news', 'crypto'],
       favorites: ['news'],
     );
     final read = DashboardPreferences.decode(settings.encode());
     expect(read.city?['name'], '上海');
     expect(read.repos, ['dart-lang/sdk']);
     expect(read.feed, 'show');
-    expect(read.order, ['news', 'market', 'weather', 'releases', 'crypto']);
+    expect(read.order, ['news', 'crypto', 'weather', 'releases']);
     expect(read.favorites, ['news']);
   });
 
@@ -186,19 +186,19 @@ void main() {
           'marketIndex': 'shenzhen',
           'marketInterval': 'W',
           'leaveDays': 5,
-          'order': ['holidays', 'news', 'weather', 'fx', 'releases'],
-          'favorites': ['holidays', 'fx', 'news', 'weather'],
+          'order': ['holidays', 'market', 'news', 'weather', 'fx', 'releases'],
+          'favorites': ['holidays', 'market', 'fx', 'news', 'weather'],
         }),
       );
-      expect(read.order, ['news', 'weather', 'releases', 'market', 'crypto']);
+      expect(read.order, ['news', 'weather', 'releases', 'crypto']);
       expect(read.favorites, ['news', 'weather']);
       expect(read.city?['name'], '上海');
       expect(read.repos, ['owner/project']);
       expect(read.feed, 'top');
-      expect(read.marketIndex, 'shenzhen');
-      expect(read.marketInterval, 'W');
       final encoded = jsonDecode(read.encode()) as Map<String, dynamic>;
       expect(encoded['version'], 4);
+      expect(encoded.containsKey('marketIndex'), isFalse);
+      expect(encoded.containsKey('marketInterval'), isFalse);
       expect(encoded.containsKey('leaveDays'), isFalse);
       expect(encoded.containsKey('base'), isFalse);
       expect(encoded.containsKey('quote'), isFalse);
@@ -207,9 +207,54 @@ void main() {
       expect(read.encode(), isNot(contains('"fx"')));
       expect(DashboardPreferences.decode(read.encode()).order, read.order);
       expect(
-        DashboardPreferences.decode('{"favorites":["holidays","fx"]}')
+        DashboardPreferences.decode('{"favorites":["holidays","fx","market"]}')
             .favorites,
         isEmpty,
+      );
+    },
+  );
+
+  test(
+    'A-share migration preserves every active setting across repeated saves',
+    () {
+      final active = jsonDecode(
+        DashboardPreferences(
+          city: {'name': '上海', 'latitude': 31.23, 'longitude': 121.47},
+          repos: const [],
+          feed: 'show',
+          cryptoSymbol: 'XRPUSDT',
+          cryptoInterval: '4h',
+          cryptoOverlays: const ['ema', 'boll'],
+          cryptoPanes: const ['rsi', 'vol'],
+          cryptoInfoRight: true,
+          cryptoCurrency: 'CNY',
+          cryptoBookLevels: 10,
+          cryptoBookSteps: const {'XRPUSDT': .001, 'BTCUSDT': 10},
+          cryptoPaneHeights: const {'rsi': 240, 'vol': 180},
+          order: const ['crypto', 'news', 'weather', 'releases'],
+          favorites: const ['crypto', 'news'],
+        ).encode(),
+      ) as Map<String, dynamic>;
+      active['cryptoView'] = {
+        'orderBook': false,
+        'trades': false,
+        'timeline': false,
+        'indicatorValues': false,
+        'assessment': false,
+        'tradeRows': 100,
+      };
+      final legacy = {
+        ...active,
+        'marketIndex': 'shenzhen',
+        'marketInterval': 'W',
+        'order': ['market', 'crypto', 'news', 'weather', 'market', 'releases'],
+        'favorites': ['market', 'crypto', 'news', 'market'],
+      };
+      final migrated = DashboardPreferences.decode(jsonEncode(legacy));
+      expect(jsonDecode(migrated.encode()), active);
+      expect(
+        jsonDecode(DashboardPreferences.decode(migrated.encode()).encode()),
+        active,
       );
     },
   );

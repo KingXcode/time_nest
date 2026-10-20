@@ -5,7 +5,6 @@ import 'dashboard_preferences.dart';
 import 'dashboard_overview.dart';
 import 'dashboard_widgets.dart';
 import 'crypto_panel.dart';
-import 'market_panel.dart';
 import 'news_panel.dart';
 import 'releases_panel.dart';
 import 'weather_panel.dart';
@@ -14,21 +13,18 @@ const _titles = {
   'weather': '天气',
   'releases': '项目更新',
   'news': '科技资讯',
-  'market': 'A股行情',
   'crypto': '数字货币行情',
 };
 const _subtitles = {
   'weather': '查看城市天气与逐小时预报',
   'releases': '关注热门开源项目的最新发布',
   'news': '中文科技资讯，也可切换 HN 英文',
-  'market': '免费收盘参考，查看 A 股指数与历史走势',
   'crypto': 'BTC、ETH 等主流币行情与 K 线',
 };
 const _icons = {
   'weather': Icons.wb_sunny_outlined,
   'releases': Icons.code_rounded,
   'news': Icons.auto_awesome_outlined,
-  'market': Icons.show_chart_rounded,
   'crypto': Icons.currency_bitcoin_rounded,
 };
 const _storageWarning = '浏览器存储不可用。当前选择仍可使用，刷新后可能丢失。';
@@ -411,15 +407,6 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         onChanged: (symbol, interval) => _save(() {
           preferences.cryptoSymbol = symbol;
           preferences.cryptoInterval = interval;
-        }),
-      ),
-      'market' => MarketPanel(
-        client: widget.client,
-        indexId: preferences.marketIndex,
-        interval: preferences.marketInterval,
-        onChanged: (index, interval) => _save(() {
-          preferences.marketIndex = index;
-          preferences.marketInterval = interval;
         }),
       ),
       _ => NewsPanel(
