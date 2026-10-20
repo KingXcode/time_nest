@@ -137,6 +137,25 @@ async function click(x, y, p = page) {
   await p.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
   await p.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
 }
+async function doubleClick(x,y) {
+  await click(x,y); await delay(60); await click(x,y); await delay(350);
+}
+async function selectPrice(from,to,shift=true) {
+  const r=await page.evaluate(`(() => {
+    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('K 线主图，'));
+    const b=e.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};
+  })()`);
+  const left=r.x+4, width=r.width-80, y=r.y+r.height*.75;
+  if(shift) await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16,modifiers:8});
+  await page.send('Input.dispatchMouseEvent',{type:'mousePressed',x:left+width*from,y,button:'left',buttons:1,clickCount:1,modifiers:shift?8:0});
+  for(let i=1;i<=12;i++) {
+    await page.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:left+width*(from+(to-from)*i/12),y,button:'left',buttons:1,modifiers:shift?8:0});
+    await delay(20);
+  }
+  await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:left+width*to,y,button:'left',buttons:0,clickCount:1,modifiers:shift?8:0});
+  if(shift) await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16,modifiers:0});
+  await delay(350);
+}
 async function key(key, code, virtualKey, p = page) {
   await p.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: virtualKey });
   await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: virtualKey });
@@ -217,7 +236,7 @@ try {
   passed('compact overview shows real multi-source snapshots and responsive layout; favorites filter has no chart subscriptions');
   await activate('数字货币行情');
   await waitFor(async () => (await labels()).some(item => item.label?.includes('报价截至')), 'live UI quote timestamp');
-  await waitFor(async () => (await labels()).some(item => item.label?.includes('点击查看十字线')), 'live UI candles');
+  await waitFor(async () => (await labels()).some(item => item.label?.includes('左键平移')), 'live UI candles');
   assert.ok([...requests].some(url => url.includes('data-api.binance.vision/api/v3/ticker/24hr')));
   assert.ok([...requests].some(url => url.includes('data-api.binance.vision/api/v3/klines')));
   // Read through the production bridge, including browser CORS and validation.
@@ -439,7 +458,25 @@ try {
     const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('K 线主图，'));
     const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height*.75};
   })()`);
-  if (!(await labels()).some(e=>e.label?.includes('十字线已锁定'))) await click(pinchRect.x,pinchRect.y);
+  assert.ok(!(await labels()).some(e=>e.label==='关闭十字线'),'information and crosshair start hidden');
+  await click(pinchRect.x,pinchRect.y);await delay(350);
+  assert.ok(!(await labels()).some(e=>e.label==='关闭十字线'),'single mouse click does not enter tracking');
+  await doubleClick(pinchRect.x,pinchRect.y);
+  assert.ok((await labels()).some(e=>e.label==='关闭十字线'),'double click opens tracking and its close button');
+  await doubleClick(pinchRect.x,pinchRect.y);
+  assert.ok(!(await labels()).some(e=>e.label==='关闭十字线'),'second double click closes information too');
+  const beforeSelection=await visibleRange();
+  await selectPrice(.25,.55);
+  const selectionSpan=r=>{const dates=r.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g);return Date.parse(dates[1].replace(' ','T')+'+08:00')-Date.parse(dates[0].replace(' ','T')+'+08:00');};
+  assert.ok(selectionSpan(await visibleRange())<selectionSpan(beforeSelection),'Shift drag zooms the selected bars');
+  await page.screenshot('29-chart-box-selection.png');
+  await activate('恢复上次视图');assert.equal(await visibleRange(),beforeSelection);
+  await activate('框选放大（至少 10 根，Shift + 拖动）');
+  await selectPrice(.7,.4,false);
+  assert.ok(selectionSpan(await visibleRange())<selectionSpan(beforeSelection),'button selection works right-to-left');
+  await activate('恢复上次视图');assert.equal(await visibleRange(),beforeSelection);
+  passed('desktop single click stays hidden; double click toggles tracking; Shift and compact tool select ranges and undo restores the viewport');
+  await doubleClick(pinchRect.x,pinchRect.y);
   const beforeWheel=await visibleRange();
   const rangeSpan=range=>{const dates=range.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g);return Date.parse(dates[1].replace(' ','T')+'+08:00')-Date.parse(dates[0].replace(' ','T')+'+08:00');};
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:pinchRect.x,y:pinchRect.y,deltaX:0,deltaY:-120}); await delay(350);
@@ -459,9 +496,18 @@ try {
   assert.ok(span(afterPinch)<span(beforePinch),'two-finger pinch zooms the time window');
   assert.ok((await labels()).some(e=>e.label?.includes('十字线已锁定')),'crosshair persists after fingers lift');
   await page.screenshot('17-crypto-timeline-crosshair.png');
+  await activate('关闭十字线');
+  assert.ok(!(await labels()).some(e=>e.label?.includes('十字线已锁定')),'close button dismisses crosshair and information');
+  const beforeTouchTracking=await visibleRange();
   await page.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...pinchRect}]});
+  await delay(450);
+  assert.ok((await labels()).some(e=>e.label?.includes('十字线已锁定')),'long press opens tracking on a desktop-width touch screen too');
+  await page.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,x:pinchRect.x+70,y:pinchRect.y}]});
   await page.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await delay(350);
-  assert.ok(!(await labels()).some(e=>e.label?.includes('十字线已锁定')),'tap again dismisses crosshair');
+  assert.equal(await visibleRange(),beforeTouchTracking,'long press and slide move the crosshair without panning');
+  await page.screenshot('30-chart-touch-tracking.png');
+  await activate('关闭十字线');
+  assert.ok(!(await labels()).some(e=>e.label?.includes('十字线已锁定')),'explicit close returns to navigation');
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
   const resizePoint=await page.evaluate(`(() => {
     const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').endsWith('调整 VOL 成交量 副图高度'));
@@ -482,7 +528,7 @@ try {
   assert.equal(storedHeight,resized.volume,'drag end stores the pane height');
   await page.screenshot('18-crypto-connected-resizable.png');
   passed('dragging a subchart edge resizes only that pane within the connected chart');
-  passed('two-finger zoom and persistent crosshair with second-tap dismissal');
+  passed('two-finger zoom preserves tracking; long press and slide inspect bars without panning, and the small close button returns to navigation');
   passed('mouse and touch pan real charts; manual button loads contiguous older candles and live pushes keep the viewport');
   // Flutter semantics represents the entire card as one tappable node.
   const ethPoint = await page.evaluate(`(() => {

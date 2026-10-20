@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/crypto_chart.dart';
 import 'package:time_nest/dashboard/crypto_market.dart';
@@ -105,7 +106,223 @@ Future<void> press(WidgetTester tester, String key) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> doubleClick(WidgetTester tester, Offset position) async {
+  await tester.tapAt(position, kind: PointerDeviceKind.mouse);
+  await tester.pump(const Duration(milliseconds: 60));
+  await tester.tapAt(position, kind: PointerDeviceKind.mouse);
+  await tester.pumpAndSettle();
+}
+
+Widget chartPage() => fixture.app(
+  Scaffold(
+    body: SingleChildScrollView(
+      child: CryptoChart(
+        candles: candles(0, 500),
+        asset: 'BTC',
+        fetchedAt: DateTime.utc(2026, 2),
+      ),
+    ),
+  ),
+);
+
 void main() {
+  testWidgets(
+    'mouse double click controls information; Shift/button select at least ten bars, Escape cancels and undo restores',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      fixture.setSize(tester, const Size(1200, 1000));
+      await tester.pumpWidget(chartPage());
+      await tester.pumpAndSettle();
+      final plot = find.byKey(const Key('crypto-price-plot'));
+      await tester.ensureVisible(plot);
+      final rect = tester.getRect(plot);
+      CryptoTimeline timeline() => tester.widget(find.byType(CryptoTimeline));
+      Offset at(double fraction) =>
+          rect.topLeft + Offset(4 + (rect.width - 70) * fraction, 180);
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      await tester.tapAt(at(.5), kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      await tester.pump(const Duration(milliseconds: 350));
+      await doubleClick(tester, at(.5));
+      expect(find.byKey(const Key('crypto-info-window')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^技术指标 · 买入参考$')), findsOneWidget);
+      final beforePan = timeline().start;
+      await tester.dragFrom(
+        at(.6),
+        Offset(rect.width * .15, 0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(timeline().start, lessThan(beforePan));
+      expect(find.byKey(const Key('crypto-info-window')), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 350));
+      await doubleClick(tester, at(.5));
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      final start = timeline().start, count = timeline().count;
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.dragFrom(
+        at(.2),
+        Offset(rect.width * .3, 0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+      expect(timeline().count, inInclusiveRange(10, 100));
+      expect(timeline().start, greaterThan(start));
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      await press(tester, 'crypto-undo-zoom');
+      expect(timeline().start, start);
+      expect(timeline().count, count);
+      await press(tester, 'crypto-box-select');
+      await tester.ensureVisible(plot);
+      await tester.dragFrom(
+        at(.3),
+        const Offset(24, 0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(timeline().count, count);
+      expect(find.text('至少选择 10 根 K 线'), findsOneWidget);
+      await press(tester, 'crypto-box-select');
+      await tester.ensureVisible(plot);
+      final selection = await tester.startGesture(
+        at(.7),
+        kind: PointerDeviceKind.mouse,
+      );
+      await selection.moveTo(at(.4));
+      await tester.pump();
+      expect(find.byKey(const Key('crypto-selection-box')), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await selection.up();
+      await tester.pumpAndSettle();
+      expect(timeline().count, count);
+      expect(find.byKey(const Key('crypto-selection-box')), findsNothing);
+      await press(tester, 'crypto-box-select');
+      await tester.ensureVisible(plot);
+      await tester.dragFrom(
+        at(.7),
+        Offset(-rect.width * .25, 0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(timeline().count, inInclusiveRange(10, 100));
+      await doubleClick(tester, at(.6));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'selection accepts exactly ten bars, rejects nine and cancels pending long press on disposal',
+    (tester) async {
+      fixture.setSize(tester, const Size(1200, 1000));
+      await tester.pumpWidget(chartPage());
+      await tester.pumpAndSettle();
+      final plot = find.byKey(const Key('crypto-price-plot'));
+      await tester.ensureVisible(plot);
+      final rect = tester.getRect(plot);
+      final dynamic painter = tester
+          .widget<CustomPaint>(
+            find.descendant(of: plot, matching: find.byType(CustomPaint)).first,
+          )
+          .painter;
+      final width = rect.width - (painter.axisWidth as double) - 4;
+      Offset at(int bar) =>
+          rect.topLeft + Offset(4 + (bar + .5) / 200 * width, 180);
+      CryptoTimeline timeline() => tester.widget(find.byType(CryptoTimeline));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.dragFrom(
+        at(50),
+        at(58) - at(50),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+      expect(timeline().count, 200);
+      expect(find.text('至少选择 10 根 K 线'), findsOneWidget);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.dragFrom(
+        at(50),
+        at(59) - at(50),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+      expect(timeline().count, 10);
+      expect(timeline().start, 350);
+      await press(tester, 'crypto-undo-zoom');
+      expect(timeline().count, 200);
+      await tester.ensureVisible(plot);
+      final pending = await tester.startGesture(tester.getCenter(plot));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 500));
+      await pending.up();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'touch tap never opens tracking; long press slides crosshair without panning, close restores pan and vertical page scrolling',
+    (tester) async {
+      fixture.setSize(tester, const Size(390, 844));
+      await tester.pumpWidget(chartPage());
+      await tester.pumpAndSettle();
+      final plot = find.byKey(const Key('crypto-price-plot'));
+      await tester.ensureVisible(plot);
+      var rect = tester.getRect(plot);
+      CryptoTimeline timeline() => tester.widget(find.byType(CryptoTimeline));
+      final from = rect.topLeft + Offset(rect.width * .6, 200);
+      await tester.tapAt(from);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      final start = timeline().start;
+      final finger = await tester.startGesture(from);
+      await tester.pump(const Duration(milliseconds: 399));
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      await tester.pump(const Duration(milliseconds: 2));
+      expect(find.byKey(const Key('crypto-info-window')), findsOneWidget);
+      final oldTime = tester
+          .widget<Text>(find.byKey(const Key('crypto-candle-time')))
+          .data;
+      await finger.moveBy(const Offset(60, 0));
+      await tester.pump();
+      await finger.up();
+      await tester.pumpAndSettle();
+      expect(timeline().start, start);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('crypto-candle-time'))).data,
+        isNot(oldTime),
+      );
+      await tester.tapAt(from);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('crypto-info-window')), findsOneWidget);
+      await press(tester, 'crypto-close-crosshair');
+      await tester.ensureVisible(plot);
+      await tester.drag(plot, const Offset(70, 0));
+      await tester.pumpAndSettle();
+      expect(timeline().start, lessThan(start));
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      await tester.ensureVisible(plot);
+      rect = tester.getRect(plot);
+      await tester.dragFrom(
+        rect.topLeft + Offset(rect.width * .6, 220),
+        const Offset(0, -100),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(plot).dy, lessThan(rect.top));
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final kind in [PointerDeviceKind.mouse, PointerDeviceKind.touch]) {
     testWidgets(
       '$kind pans main and subcharts, anchors across prepends and pushes, returns to live',
@@ -197,10 +414,12 @@ void main() {
         bool horizontal(String key) {
           final dynamic painter = tester
               .widget<CustomPaint>(
-                find.descendant(
-                  of: find.byKey(Key(key)),
-                  matching: find.byType(CustomPaint),
-                ),
+                find
+                    .descendant(
+                      of: find.byKey(Key(key)),
+                      matching: find.byType(CustomPaint),
+                    )
+                    .first,
               )
               .painter;
           return painter.crosshair && painter.horizontalCrosshair;
@@ -208,10 +427,7 @@ void main() {
 
         expect(timeline().count, 200);
         expect(timeline().start, 300);
-        expect(
-          tester.getSize(find.byKey(const Key('crypto-info-window'))).width,
-          lessThanOrEqualTo(164),
-        );
+        expect(find.byKey(const Key('crypto-info-window')), findsNothing);
         final load = find.byKey(const Key('crypto-load-older'));
         expect(tester.widget<IconButton>(load).tooltip, '加载更多历史');
         expect(tester.getSize(load).width, 32);
@@ -223,8 +439,12 @@ void main() {
         await tester.ensureVisible(plot);
         final rect = tester.getRect(plot);
         final finger = await tester.startGesture(rect.center, pointer: 1);
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 450));
         expect(find.byKey(const Key('crypto-crosshair')), findsOneWidget);
+        expect(
+          tester.getSize(find.byKey(const Key('crypto-info-window'))).width,
+          lessThanOrEqualTo(164),
+        );
         expect(horizontal('crypto-price-plot'), isTrue);
         expect(horizontal('crypto-pane-vol'), isFalse);
         final selected = tester
@@ -239,10 +459,13 @@ void main() {
         );
         await tester.tapAt(rect.center);
         await tester.pumpAndSettle();
+        expect(find.byKey(const Key('crypto-crosshair')), findsOneWidget);
+        await press(tester, 'crypto-close-crosshair');
         expect(find.byKey(const Key('crypto-crosshair')), findsNothing);
+        expect(find.byKey(const Key('crypto-info-window')), findsNothing);
         final pane = find.byKey(const Key('crypto-pane-vol'));
         await tester.ensureVisible(pane);
-        await tester.tapAt(tester.getCenter(pane));
+        await tester.longPressAt(tester.getCenter(pane));
         await tester.pumpAndSettle();
         expect(horizontal('crypto-pane-vol'), isTrue);
         expect(horizontal('crypto-price-plot'), isFalse);
@@ -267,7 +490,7 @@ void main() {
         await two.up();
         await tester.pumpAndSettle();
         expect(timeline().count, lessThan(200));
-        expect(timeline().count, greaterThanOrEqualTo(20));
+        expect(timeline().count, greaterThanOrEqualTo(10));
         final nav = find.byKey(const Key('crypto-timeline'));
         await tester.ensureVisible(nav);
         await tester.tapAt(tester.getTopLeft(nav) + const Offset(5, 20));
@@ -358,7 +581,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(count(), noCursor);
       await tester.ensureVisible(plot);
-      await tester.tapAt(pointer());
+      await doubleClick(tester, pointer());
       await tester.pumpAndSettle();
       final top = tester.getTopLeft(plot).dy;
       await tester.sendEventToBinding(

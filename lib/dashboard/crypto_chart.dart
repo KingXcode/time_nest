@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
+
+import 'crypto_chart_gestures.dart';
 
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
@@ -74,7 +77,14 @@ class _CryptoChartState extends State<CryptoChart> {
   // prepending history and receiving live bars never shift a historical view.
   int? _viewportStartTime;
   double _dragRemainder = 0;
-  bool _dragging = false, _crosshair = false, _tapHadCrosshair = false;
+  bool _dragging = false, _crosshair = false, _boxTool = false;
+  final _chartFocus = FocusNode();
+  final _zoomBack = <({int? time, int count})>[];
+  Offset? _boxFrom, _boxTo;
+  Offset _dragPoint = Offset.zero;
+  String? _boxPane, _selectionHint;
+  int _boxStart = 0, _boxCount = 0;
+  bool _touchInput = false;
   int _visibleCount = 200, _scaleCount = 200, _scaleStart = 0;
   double _scaleAnchor = .5, _pointerY = .5;
   String? _pointerPane, _hoveredResize, _resizingPane;
@@ -85,7 +95,7 @@ class _CryptoChartState extends State<CryptoChart> {
   void _range(int start, int count) {
     final rows = widget.candles;
     if (rows.isEmpty) return;
-    count = count.clamp(math.min(20, rows.length), rows.length);
+    count = count.clamp(math.min(10, rows.length), rows.length);
     start = start.clamp(0, math.max(0, rows.length - count));
     setState(() {
       _visibleCount = count;
@@ -93,6 +103,23 @@ class _CryptoChartState extends State<CryptoChart> {
           ? null
           : rows[start].time;
     });
+  }
+
+  void _rememberView() {
+    final view = (time: _viewportStartTime, count: _visibleCount);
+    if (_zoomBack.isEmpty || _zoomBack.last != view) _zoomBack.add(view);
+    if (_zoomBack.length > 10) _zoomBack.removeAt(0);
+  }
+
+  void _closeCrosshair() => setState(() {
+    _crosshair = false;
+    _selectedTime = null;
+  });
+
+  @override
+  void dispose() {
+    _chartFocus.dispose();
+    super.dispose();
   }
 
   int get _startIndex {
@@ -255,7 +282,6 @@ class _CryptoChartState extends State<CryptoChart> {
     final selected = rows[index], absolute = index + offset;
     final forming =
         selected.closeTime >= widget.fetchedAt.millisecondsSinceEpoch;
-    void select(int i) => setState(() => _selectedTime = rows[i].time);
     final overlays = [for (final id in widget.overlays) ?_studies[id]];
     final scales = <String, _ChartScale>{
       'price': _ChartScale(rows, offset, overlays, price: true),
@@ -335,25 +361,162 @@ class _CryptoChartState extends State<CryptoChart> {
 
     Widget plot({IndicatorStudy? study}) => LayoutBuilder(
       builder: (context, box) {
+        final width = math.max(1.0, box.maxWidth - axisWidth - 4);
+        final height = study == null
+            ? cryptoPriceHeight
+            : (_paneHeights[study.id] ?? cryptoPaneHeight);
+        double x(Offset pos) => ((pos.dx - 4) / width).clamp(0.0, 1.0);
         void point(Offset pos) {
-          select(
-            ((pos.dx - 4) /
-                    math.max(1, box.maxWidth - axisWidth - 4) *
-                    rows.length)
-                .floor()
-                .clamp(0, rows.length - 1),
-          );
-          _pointerPane = study?.id;
-          _pointerY =
-              (pos.dy /
-                      (study == null
-                          ? cryptoPriceHeight
-                          : (_paneHeights[study.id] ?? cryptoPaneHeight)))
-                  .clamp(0.0, 1.0);
+          final start = _startIndex;
+          final count = math.min(_visibleCount, all.length - start);
+          final i = (x(pos) * count).floor().clamp(0, count - 1);
+          setState(() {
+            _selectedTime = all[start + i].time;
+            _pointerPane = study?.id;
+            _pointerY = (pos.dy / height).clamp(0.0, 1.0);
+          });
         }
 
+        void finishBox(bool cancelled) {
+          if (_boxFrom == null) return;
+          final first = (math.min(x(_boxFrom!), x(_boxTo!)) * _boxCount)
+              .floor()
+              .clamp(0, _boxCount - 1);
+          final last = (math.max(x(_boxFrom!), x(_boxTo!)) * _boxCount)
+              .floor()
+              .clamp(0, _boxCount - 1);
+          final count = last - first + 1;
+          if (!cancelled && count >= 10) {
+            _rememberView();
+            _range(_boxStart + first, count);
+          }
+          setState(() {
+            _selectionHint = !cancelled && count < 10 ? '至少选择 10 根 K 线' : null;
+            _boxFrom = _boxTo = null;
+            _boxTool = false;
+          });
+        }
+
+        final navigation = RawGestureDetector(
+          behavior: HitTestBehavior.opaque,
+          gestures: {
+            CryptoChartGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  CryptoChartGestureRecognizer
+                >(() => CryptoChartGestureRecognizer(), (gesture) {
+                  gesture.tracking = () => _crosshair;
+                  gesture.selecting = (kind) =>
+                      !_crosshair &&
+                      (_boxTool ||
+                          kind == PointerDeviceKind.mouse &&
+                              HardwareKeyboard.instance.isShiftPressed);
+                  gesture.onInput = (kind) {
+                    _chartFocus.requestFocus();
+                    setState(
+                      () => _touchInput = kind != PointerDeviceKind.mouse,
+                    );
+                  };
+                  gesture.onDoubleClick = (pos) {
+                    if (_crosshair) {
+                      _closeCrosshair();
+                    } else {
+                      point(pos);
+                      setState(() {
+                        _crosshair = true;
+                        _boxTool = false;
+                        _selectionHint = null;
+                      });
+                    }
+                  };
+                  gesture.onTrack = (pos) {
+                    point(pos);
+                    setState(() {
+                      _crosshair = true;
+                      _boxTool = false;
+                      _selectionHint = null;
+                    });
+                  };
+                  gesture.onPanStart = (pos) {
+                    _dragPoint = pos;
+                    _dragRemainder = 0;
+                    setState(() {
+                      _dragging = true;
+                      _selectionHint = null;
+                    });
+                  };
+                  gesture.onPanUpdate = (delta) {
+                    _dragPoint += delta;
+                    _dragRemainder -=
+                        delta.dx / width * math.min(_visibleCount, all.length);
+                    final bars = _dragRemainder.truncate();
+                    if (bars != 0) {
+                      _dragRemainder -= bars;
+                      _pan(bars);
+                    }
+                    if (_crosshair) point(_dragPoint);
+                  };
+                  gesture.onPinchStart = (pos) {
+                    _rememberView();
+                    _scaleCount = math.min(_visibleCount, all.length);
+                    _scaleStart = _startIndex;
+                    _scaleAnchor = x(pos);
+                    setState(() => _dragging = true);
+                  };
+                  gesture.onPinchUpdate = (scale) {
+                    final count = (_scaleCount / math.max(.01, scale))
+                        .round()
+                        .clamp(math.min(10, all.length), all.length);
+                    _range(
+                      (_scaleStart + (_scaleCount - count) * _scaleAnchor)
+                          .round(),
+                      count.toInt(),
+                    );
+                  };
+                  gesture.onBoxStart = (pos) {
+                    setState(() {
+                      _boxFrom = _boxTo = pos;
+                      _boxPane = study?.id;
+                      _boxStart = _startIndex;
+                      _boxCount = math.min(_visibleCount, all.length);
+                      _selectionHint = null;
+                      _dragging = true;
+                    });
+                  };
+                  gesture.onBoxUpdate = (pos) {
+                    if (_boxFrom != null) {
+                      setState(() => _boxTo = pos);
+                    }
+                  };
+                  gesture.onBoxEnd = finishBox;
+                  gesture.onEnd = () {
+                    if (mounted) {
+                      setState(() => _dragging = false);
+                    }
+                  };
+                }),
+          },
+          child: CustomPaint(
+            painter: _MarketPainter(
+              rows,
+              index,
+              offset,
+              study == null ? overlays : [study],
+              price: study == null,
+              crosshair: _crosshair,
+              pointerY: _pointerY,
+              axisWidth: axisWidth,
+              scale: scales[study?.id ?? 'price']!,
+              horizontalCrosshair: _pointerPane == study?.id,
+            ),
+          ),
+        );
+
         return MouseRegion(
-          cursor: _dragging
+          cursor:
+              _boxTool ||
+                  HardwareKeyboard.instance.isShiftPressed && !_crosshair
+              ? SystemMouseCursors.precise
+              : _dragging
               ? SystemMouseCursors.grabbing
               : SystemMouseCursors.grab,
           onHover: (event) {
@@ -363,208 +526,217 @@ class _CryptoChartState extends State<CryptoChart> {
             onPointerSignal: (event) {
               if (event is! PointerScrollEvent ||
                   !_crosshair ||
-                  study != null ||
                   event.scrollDelta.dy == 0) {
                 return;
               }
               GestureBinding.instance.pointerSignalResolver.register(event, (
                 _,
               ) {
-                final anchor =
-                    ((event.localPosition.dx - 4) /
-                            math.max(1, box.maxWidth - axisWidth - 4))
-                        .clamp(0.0, 1.0);
+                _rememberView();
+                final anchor = x(event.localPosition);
                 final count =
                     (rows.length *
                             math.exp(
                               event.scrollDelta.dy.clamp(-600.0, 600.0) * .0015,
                             ))
                         .round()
-                        .clamp(math.min(20, all.length), all.length)
-                        .toInt();
+                        .clamp(math.min(10, all.length), all.length);
                 _range(
                   (offset + (rows.length - count) * anchor).round(),
-                  count,
+                  count.toInt(),
                 );
+                point(event.localPosition);
               });
             },
-            onPointerDown: (event) {
-              _tapHadCrosshair = _crosshair;
-              point(event.localPosition);
-              setState(() => _crosshair = true);
-            },
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapUp: (_) => setState(() => _crosshair = !_tapHadCrosshair),
-              onScaleStart: (event) {
-                _dragging = true;
-                _dragRemainder = 0;
-                _scaleCount = rows.length;
-                _scaleStart = _startIndex;
-                _scaleAnchor =
-                    (event.localFocalPoint.dx /
-                            math.max(1, box.maxWidth - axisWidth - 4))
-                        .clamp(0.0, 1.0);
-              },
-              onScaleUpdate: (event) {
-                if (event.pointerCount > 1) {
-                  final count = (_scaleCount / event.scale).round().clamp(
-                    math.min(20, all.length),
-                    all.length,
-                  );
-                  _range(
-                    (_scaleStart +
-                            _scaleCount * _scaleAnchor -
-                            count * _scaleAnchor)
-                        .round(),
-                    count.toInt(),
-                  );
-                } else {
-                  _dragRemainder -=
-                      event.focalPointDelta.dx /
-                      math.max(1, box.maxWidth - axisWidth - 4) *
-                      rows.length;
-                  final bars = _dragRemainder.truncate();
-                  if (bars != 0) {
-                    _dragRemainder -= bars;
-                    _pan(bars);
-                  }
-                }
-              },
-              onScaleEnd: (_) => setState(() => _dragging = false),
-              child: Semantics(
-                label: study == null
-                    ? 'K 线主图，绿色上涨、红色下跌，左右拖动浏览历史，双指缩放，下方时间轴选择范围'
-                    : '${cryptoIndicators[study.id]!.name} 副图，与主图时间联动',
-                child: SizedBox(
-                  key: study == null
-                      ? const Key('crypto-price-plot')
-                      : ValueKey('crypto-pane-${study.id}'),
-                  height: study == null
-                      ? cryptoPriceHeight
-                      : (_paneHeights[study.id] ?? cryptoPaneHeight),
-                  child: ColoredBox(
-                    color: study == null
-                        ? _cryptoMainSurface
-                        : _cryptoPaneSurface,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        CustomPaint(
-                          painter: _MarketPainter(
-                            rows,
-                            index,
-                            offset,
-                            study == null ? overlays : [study],
-                            price: study == null,
-                            crosshair: _crosshair,
-                            pointerY: _pointerY,
-                            axisWidth: axisWidth,
-                            scale: scales[study?.id ?? 'price']!,
-                            horizontalCrosshair: _pointerPane == study?.id,
+            child: Semantics(
+              label: study == null
+                  ? 'K 线主图，绿色上涨、红色下跌，左键拖动平移，双击或长按查看，Shift 拖动框选，双指缩放'
+                  : '${cryptoIndicators[study.id]!.name} 副图，与主图时间联动',
+              child: SizedBox(
+                key: study == null
+                    ? const Key('crypto-price-plot')
+                    : ValueKey('crypto-pane-${study.id}'),
+                height: height,
+                child: ColoredBox(
+                  color: study == null
+                      ? _cryptoMainSurface
+                      : _cryptoPaneSurface,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      navigation,
+                      if (_boxFrom != null && _boxPane == study?.id)
+                        Positioned(
+                          left: 4 + math.min(x(_boxFrom!), x(_boxTo!)) * width,
+                          width: math.max(
+                            1,
+                            (x(_boxTo!) - x(_boxFrom!)).abs() * width,
                           ),
-                        ),
-                        if (study == null)
-                          Positioned(
-                            top: 8,
-                            left: widget.infoRight ? null : 8,
-                            right: widget.infoRight ? axisWidth + 6 : null,
-                            child: IgnorePointer(
-                              child: Container(
-                                key: const Key('crypto-info-window'),
-                                width: math.min(
-                                  164,
-                                  math.max(144, box.maxWidth * .36),
+                          top: 0,
+                          bottom: 0,
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              key: const Key('crypto-selection-box'),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF77BCFF)
+                                    .withValues(alpha: .16),
+                                border: Border.all(
+                                  color: const Color(0xFF77BCFF),
                                 ),
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: dashboardSurface.withValues(
-                                    alpha: .94,
-                                  ),
-                                  border: Border.all(color: dashboardBorder),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: DefaultTextStyle(
+                              ),
+                              child: Align(
+                                alignment: Alignment.topLeft,
+                                child: Text(
+                                  '${((x(_boxTo!) * _boxCount).floor().clamp(0, _boxCount - 1) - (x(_boxFrom!) * _boxCount).floor().clamp(0, _boxCount - 1)).abs() + 1} 根',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.clip,
                                   style: const TextStyle(
-                                    fontSize: 11,
+                                    fontSize: 10,
                                     color: Colors.white,
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      Text(
-                                        '${cryptoTime(selected.time)}\nUTC+8${forming ? ' · 未收盘' : ''}',
-                                        key: const Key('crypto-candle-time'),
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          color: dashboardMuted,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      for (final entry in <String, String>{
-                                        '数值': cryptoPrice(
-                                          _crosshair && _pointerPane == null
-                                              ? cursorValue
-                                              : selected.close,
-                                        ),
-                                        '开盘价': cryptoPrice(selected.open),
-                                        '最高价': cryptoPrice(selected.high),
-                                        '最低价': cryptoPrice(selected.low),
-                                        '收盘价': cryptoPrice(selected.close),
-                                        '成交量':
-                                            '${cryptoVolume(selected.volume)} ${widget.asset}',
-                                        '成交额':
-                                            '${cryptoVolume(selected.quoteVolume)} USDT',
-                                        '涨幅':
-                                            '${((selected.close / selected.open - 1) * 100).toStringAsFixed(2)}%',
-                                        '振幅':
-                                            '${((selected.high - selected.low) / selected.open * 100).toStringAsFixed(2)}%',
-                                      }.entries)
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 1,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              Text(
-                                                entry.key,
-                                                style: const TextStyle(
-                                                  color: dashboardMuted,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Expanded(
-                                                child: Text(
-                                                  entry.value,
-                                                  textAlign: TextAlign.right,
-                                                  maxLines: 1,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                    ],
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        if (_crosshair && study == null)
-                          const Positioned(
-                            bottom: 0,
-                            left: 4,
+                        ),
+                      if (_crosshair && study == null)
+                        Positioned(
+                          top: 8,
+                          left: widget.infoRight ? null : 8,
+                          right: widget.infoRight ? axisWidth + 6 : null,
+                          child: Stack(
+                            children: [
+                              IgnorePointer(
+                                child: Container(
+                                  key: const Key('crypto-info-window'),
+                                  width: math.min(
+                                    164,
+                                    math.max(144, box.maxWidth * .36),
+                                  ),
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: dashboardSurface.withValues(
+                                      alpha: .94,
+                                    ),
+                                    border: Border.all(color: dashboardBorder),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: DefaultTextStyle(
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.white,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 22,
+                                          ),
+                                          child: Text(
+                                            '${cryptoTime(selected.time)}\nUTC+8${forming ? ' · 未收盘' : ''}',
+                                            key: const Key(
+                                              'crypto-candle-time',
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              color: dashboardMuted,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        for (final entry in <String, String>{
+                                          '数值': cryptoPrice(
+                                            _pointerPane == null
+                                                ? cursorValue
+                                                : selected.close,
+                                          ),
+                                          '开盘价': cryptoPrice(selected.open),
+                                          '最高价': cryptoPrice(selected.high),
+                                          '最低价': cryptoPrice(selected.low),
+                                          '收盘价': cryptoPrice(selected.close),
+                                          '成交量':
+                                              '${cryptoVolume(selected.volume)} ${widget.asset}',
+                                          '成交额':
+                                              '${cryptoVolume(selected.quoteVolume)} USDT',
+                                          '涨幅':
+                                              '${((selected.close / selected.open - 1) * 100).toStringAsFixed(2)}%',
+                                          '振幅':
+                                              '${((selected.high - selected.low) / selected.open * 100).toStringAsFixed(2)}%',
+                                        }.entries)
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 1,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Text(
+                                                  entry.key,
+                                                  style: const TextStyle(
+                                                    color: dashboardMuted,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Text(
+                                                    entry.value,
+                                                    textAlign: TextAlign.right,
+                                                    maxLines: 1,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: 0,
+                                right: 0,
+                                child: IconButton(
+                                  key: const Key('crypto-close-crosshair'),
+                                  tooltip: '关闭十字线',
+                                  onPressed: _closeCrosshair,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 40,
+                                    height: 40,
+                                  ),
+                                  style: IconButton.styleFrom(
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.close,
+                                    size: 13,
+                                    color: dashboardMuted,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (_crosshair && study == null)
+                        Positioned(
+                          bottom: 0,
+                          left: 4,
+                          child: IgnorePointer(
                             child: Text(
-                              '十字线已锁定 · 再次点击关闭',
-                              key: Key('crypto-crosshair'),
-                              style: TextStyle(
+                              _touchInput
+                                  ? '十字线已锁定 · 滑动查看 · × 关闭'
+                                  : '十字线已锁定 · 双击 / Esc 关闭',
+                              key: const Key('crypto-crosshair'),
+                              style: const TextStyle(
                                 fontSize: 10,
                                 color: dashboardMuted,
                               ),
                             ),
                           ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
                 ),
               ),
@@ -735,91 +907,158 @@ class _CryptoChartState extends State<CryptoChart> {
         ),
       ),
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            TextButton.icon(
-              key: const PageStorageKey('crypto-indicator-settings'),
-              onPressed: widget.onSettingsChanged == null
-                  ? null
-                  : _showSettings,
-              icon: const Icon(Icons.tune, size: 15),
-              label: const Text('指标设置'),
-            ),
-            Text(
-              '主图 ${widget.overlays.length}/8 · 副图 ${widget.panes.length}/8',
-              style: const TextStyle(color: dashboardMuted, fontSize: 11),
-            ),
-
-            TextButton.icon(
-              key: const Key('crypto-pan-older'),
-              onPressed: offset > 0 ? () => _pan(-_visibleCount) : null,
-              icon: const Icon(Icons.chevron_left),
-              label: const Text('更早'),
-            ),
-            TextButton.icon(
-              key: const Key('crypto-pan-newer'),
-              onPressed: offset + rows.length < all.length
-                  ? () => _pan(_visibleCount)
-                  : null,
-              icon: const Icon(Icons.chevron_right),
-              label: const Text('较新'),
-            ),
-            TextButton(
-              key: const Key('crypto-latest'),
-              onPressed: _viewportStartTime == null
-                  ? null
-                  : () => setState(() {
-                      _viewportStartTime = null;
-                      _selectedTime = null;
-                    }),
-              child: const Text('回到最新'),
-            ),
-            Text(
-              '已加载 ${all.length} 根',
-              key: const Key('crypto-history-count'),
-              style: const TextStyle(color: dashboardMuted, fontSize: 12),
-            ),
-            IconButton(
-              key: const Key('crypto-info-position'),
-              tooltip: widget.infoRight ? '信息靠左' : '信息靠右',
-              onPressed: widget.onSettingsChanged == null
-                  ? null
-                  : () => widget.onSettingsChanged!(
-                      widget.overlays,
-                      widget.panes,
-                      !widget.infoRight,
-                    ),
-              icon: Icon(
-                widget.infoRight
-                    ? Icons.format_align_left
-                    : Icons.format_align_right,
-                size: 15,
+    return Focus(
+      includeSemantics: false,
+      focusNode: _chartFocus,
+      onKeyEvent: (_, event) {
+        if (event is! KeyDownEvent ||
+            event.logicalKey != LogicalKeyboardKey.escape) {
+          return KeyEventResult.ignored;
+        }
+        if (_boxFrom != null || _boxTool) {
+          setState(() {
+            _boxFrom = _boxTo = null;
+            _boxTool = false;
+          });
+        } else if (_crosshair) {
+          _closeCrosshair();
+        } else {
+          return KeyEventResult.ignored;
+        }
+        return KeyEventResult.handled;
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              TextButton.icon(
+                key: const PageStorageKey('crypto-indicator-settings'),
+                onPressed: widget.onSettingsChanged == null
+                    ? null
+                    : _showSettings,
+                icon: const Icon(Icons.tune, size: 15),
+                label: const Text('指标设置'),
               ),
-            ),
-          ],
-        ),
-        if (widget.historyError != null)
-          Text(
-            widget.historyError!,
-            key: const Key('crypto-history-error'),
-            style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
+              Text(
+                '主图 ${widget.overlays.length}/8 · 副图 ${widget.panes.length}/8',
+                style: const TextStyle(color: dashboardMuted, fontSize: 11),
+              ),
+
+              TextButton.icon(
+                key: const Key('crypto-pan-older'),
+                onPressed: offset > 0 ? () => _pan(-_visibleCount) : null,
+                icon: const Icon(Icons.chevron_left),
+                label: const Text('更早'),
+              ),
+              TextButton.icon(
+                key: const Key('crypto-pan-newer'),
+                onPressed: offset + rows.length < all.length
+                    ? () => _pan(_visibleCount)
+                    : null,
+                icon: const Icon(Icons.chevron_right),
+                label: const Text('较新'),
+              ),
+              TextButton(
+                key: const Key('crypto-latest'),
+                onPressed: _viewportStartTime == null
+                    ? null
+                    : () => setState(() {
+                        _viewportStartTime = null;
+                        _selectedTime = null;
+                      }),
+                child: const Text('回到最新'),
+              ),
+              IconButton(
+                key: const Key('crypto-box-select'),
+                tooltip: _crosshair ? '关闭十字线后框选' : '框选放大（至少 10 根，Shift + 拖动）',
+                isSelected: _boxTool,
+                onPressed: _crosshair
+                    ? null
+                    : () => setState(() {
+                        _boxTool = !_boxTool;
+                        _selectionHint = null;
+                        _chartFocus.requestFocus();
+                      }),
+                icon: const Icon(Icons.select_all, size: 16),
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                padding: EdgeInsets.zero,
+                style: IconButton.styleFrom(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              IconButton(
+                key: const Key('crypto-undo-zoom'),
+                tooltip: '恢复上次视图',
+                onPressed: _zoomBack.isEmpty
+                    ? null
+                    : () => setState(() {
+                        final view = _zoomBack.removeLast();
+                        _viewportStartTime = view.time;
+                        _visibleCount = view.count;
+                        _selectedTime = null;
+                      }),
+                icon: const Icon(Icons.undo, size: 16),
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+                padding: EdgeInsets.zero,
+                style: IconButton.styleFrom(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              Text(
+                '已加载 ${all.length} 根',
+                key: const Key('crypto-history-count'),
+                style: const TextStyle(color: dashboardMuted, fontSize: 12),
+              ),
+              IconButton(
+                key: const Key('crypto-info-position'),
+                tooltip: widget.infoRight ? '信息靠左' : '信息靠右',
+                onPressed: widget.onSettingsChanged == null
+                    ? null
+                    : () => widget.onSettingsChanged!(
+                        widget.overlays,
+                        widget.panes,
+                        !widget.infoRight,
+                      ),
+                icon: Icon(
+                  widget.infoRight
+                      ? Icons.format_align_left
+                      : Icons.format_align_right,
+                  size: 15,
+                ),
+              ),
+            ],
           ),
-        widget.chartLayout?.call(surface) ?? surface,
-        const SizedBox(height: 8),
-        const Text(
-          '左右拖动 · 双指缩放 · 点击查看十字线后可滚轮缩放，再次点击关闭 · 副图边缘拖动调高。UTC+8。',
-          style: TextStyle(color: dashboardMuted, fontSize: 11, height: 1.4),
-        ),
-        ?widget.afterCharts,
-        const SizedBox(height: 14),
-        _assessmentPanel(),
-      ],
+          if (widget.historyError != null)
+            Text(
+              widget.historyError!,
+              key: const Key('crypto-history-error'),
+              style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
+            ),
+          widget.chartLayout?.call(surface) ?? surface,
+          const SizedBox(height: 8),
+          Text(
+            _selectionHint ??
+                (_boxTool
+                    ? '拖动框选至少 10 根 K 线 · Esc 取消'
+                    : '左键平移 · 双击查看 / 滚轮缩放 · Shift 拖动框选 · 手机长按查看，× 关闭后拖动 · 双指缩放。UTC+8。'),
+            key: const Key('crypto-selection-hint'),
+            style: TextStyle(color: dashboardMuted, fontSize: 11, height: 1.4),
+          ),
+          ?widget.afterCharts,
+          const SizedBox(height: 14),
+          _assessmentPanel(),
+        ],
+      ),
     );
   }
 
@@ -1294,7 +1533,7 @@ class _CryptoTimelineState extends State<CryptoTimeline> {
 
       void move(double x) {
         final delta = ((x - _origin) / box.maxWidth * n).round();
-        final minimum = math.min(20, n);
+        final minimum = math.min(10, n);
         if (_edge < 0) {
           final start = (_start + delta).clamp(0, _start + _count - minimum);
           widget.onRangeChanged(start, _start + _count - start);

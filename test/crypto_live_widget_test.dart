@@ -217,15 +217,16 @@ void main() {
           tester.widget<CryptoChart>(find.byType(CryptoChart)).infoRight,
           isTrue,
         );
-        expect(find.text('成交额'), findsWidgets);
+        expect(find.byKey(const Key('crypto-info-window')), findsNothing);
         final saved = DashboardPreferences.decode(client.preferences);
         expect(saved.cryptoInfoRight, isTrue);
         expect(saved.cryptoOverlays, hasLength(8));
         expect(saved.cryptoPanes, hasLength(8));
         final plot = find.byKey(const Key('crypto-price-plot'));
         await tester.ensureVisible(plot);
-        await tester.tapAt(tester.getTopLeft(plot) + const Offset(5, 40));
+        await tester.longPressAt(tester.getTopLeft(plot) + const Offset(5, 40));
         await tester.pumpAndSettle();
+        expect(find.text('成交额'), findsWidgets);
         expect(
           find.textContaining(
             cryptoTime(CryptoCandle.fromJson(client.rows[50]).time),

@@ -219,7 +219,7 @@ void main() {
         await tester.ensureVisible(plot);
         final calls = client.marketCalls.length;
         await tester.ensureVisible(plot);
-        await tester.tapAt(tester.getTopLeft(plot) + const Offset(5, 40));
+        await tester.longPressAt(tester.getTopLeft(plot) + const Offset(5, 40));
         await tester.pumpAndSettle();
         expect(client.marketCalls.length, calls);
         expect(find.textContaining('2026-10-17 08:00\nUTC+8'), findsOneWidget);
