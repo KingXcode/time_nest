@@ -221,6 +221,14 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
         DateTime.now().millisecondsSinceEpoch - book.receivedAt <= 15000;
     final status = widget.status == 'paused'
         ? '已暂停'
+        : widget.status == 'syncing'
+        ? book == null
+              ? '正在同步订单簿…'
+              : '同步中 · 旧快照'
+        : widget.status == 'retrying'
+        ? book == null
+              ? '同步重试中'
+              : '同步重试 · 旧快照'
         : live
         ? '实时 · 20档'
         : book == null

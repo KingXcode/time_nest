@@ -236,10 +236,45 @@ try {
   await delay(2200);
   assert.ok(streamFrames.length>streamStart, 'pushes continue without a manual refresh');
   passed('actual WebSocket ticker and kline pushes continue and Flutter reports live');
-  await waitFor(()=>streamFrames.filter(f=>f.stream?.endsWith('@depth20') && Number.isSafeInteger(f.data?.lastUpdateId)).length>=2,'multiple real complete depth snapshots');
+  await waitFor(()=>streamFrames.filter(f=>f.stream?.endsWith('@depth') && Number.isSafeInteger(f.data?.U) && Number.isSafeInteger(f.data?.u)).length>=2,'multiple real incremental depth events');
   await waitFor(async()=>(await labels()).some(item=>item.label?.includes('实时 · 20档')),'live depth UI');
-  assert.ok(streamConnections.some(s=>s.url.includes('btcusdt@depth20')));
-  passed('actual Binance depth20 stream supplies live complete order-book snapshots on the shared socket');
+  assert.ok(streamConnections.some(s=>s.url.includes('btcusdt@depth')));
+  assert.ok([...requests].some(raw=>{try{const url=new URL(raw);return url.hostname==='data-api.binance.vision' && url.pathname==='/api/v3/depth' && url.searchParams.get('symbol')==='BTCUSDT' && url.searchParams.get('limit')==='1000';}catch{return false;}}),'local book bootstraps with a real REST snapshot');
+  passed('actual Binance diff stream and REST snapshot bootstrap a synchronized local order book on the shared socket');
+  const bootstrapRequests=requestEvents.filter(url=>url.includes('/api/v3/depth?')).length;
+  const beforeDepthFault=streamConnections.length;
+  await page.evaluate(`(() => {
+    const originalFetch=window.fetch;
+    window.__holdBookSnapshot=true;
+    window.fetch=(...args)=>{
+      if(window.__holdBookSnapshot && String(args[0]).includes('/api/v3/depth?')) {
+        window.__bookRefetchWaiting=true;
+        return new Promise((resolve,reject)=>{
+          window.__releaseBookSnapshot=()=>originalFetch(...args).then(resolve,reject);
+          args[1]?.signal?.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});
+        });
+      }
+      return originalFetch(...args);
+    };
+    const socket=window.__cryptoSockets.find(s=>s.readyState===WebSocket.OPEN && s.url.includes('btcusdt@depth'));
+    if(!socket) throw new Error('Missing live depth socket');
+    const handler=socket.onmessage;
+    socket.onmessage=event=>{
+      const envelope=JSON.parse(event.data);
+      if(envelope.stream==='btcusdt@depth') { socket.onmessage=handler;window.__droppedDepth=envelope.data;return; }
+      handler.call(socket,event);
+    };
+  })()`);
+  await waitFor(()=>page.evaluate('window.__bookRefetchWaiting===true'),'a dropped real diff triggers REST rebootstrap');
+  assert.ok((await labels()).some(item=>item.label?.includes('同步中 · 旧快照')),'gap must label the frozen copy as stale while REST is pending');
+  assert.ok((await labels()).some(item=>item.label?.includes('● 币安实时推送')),'price/candle connection remains live during book rebootstrap');
+  await page.screenshot('22-orderbook-resynchronizing.png');
+  await page.evaluate('window.__holdBookSnapshot=false;window.__releaseBookSnapshot()');
+  await waitFor(async()=>(await labels()).some(item=>item.label?.includes('实时 · 20档')),'local copy recovers after missing a real event');
+  assert.ok(requestEvents.filter(url=>url.includes('/api/v3/depth?')).length>bootstrapRequests);
+  assert.equal(streamConnections.length,beforeDepthFault,'book gap recovery does not reconnect the ticker/kline socket');
+  passed('dropping a real diff freezes the old book, refetches a snapshot and resumes without interrupting live prices/candles');
+
   async function bookGeometry() {
     return page.evaluate(`(() => {
       const nodes=(${deepQuery})('flt-semantics, [aria-label]');
@@ -297,8 +332,11 @@ try {
   assert.notEqual(await visibleRange(),latestRange,'mouse drag changes the visible time window');
   for(let i=0;i<5;i++) await dragPrice();
   assert.ok(![...requests].some(url=>url.includes('/klines') && url.includes('endTime=')), 'left edge must not load automatically');
+  const loadedCount=async()=>Number((await labels()).find(item=>/^已加载 \d+ 根$/.test(item.label))?.label.match(/\d+/)[0]);
+  const beforeOlder=await loadedCount();
   await activate('加载更多历史');
-  await waitFor(async()=>(await labels()).some(item=>item.label==='已加载 1000 根'),'manual timeline button loads another 500 bars');
+  await waitFor(async()=>await loadedCount()>=beforeOlder+500,'manual timeline button loads another 500 bars');
+  assert.ok(await loadedCount()<=beforeOlder+501,'pagination adds exactly 500 historical bars, plus at most one live hourly rollover');
   const historyUrl=new URL([...requests].find(url=>url.includes('/klines') && url.includes('endTime=')));
   assert.equal(Number(historyUrl.searchParams.get('endTime')),btc.data.candles[0].time-1);
   const olderPage=await page.evaluate(`timeNestDashboard.request('cryptoCandles',JSON.stringify({symbol:'BTCUSDT',interval:'1h',endTime:${btc.data.candles[0].time-1}})).then(JSON.parse)`);
@@ -318,7 +356,8 @@ try {
   await delay(600);
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:500,deltaX:0,deltaY:-10000}); await delay(500);
   await activate('回到最新');
-  assert.equal(await visibleRange(),latestRange);
+  const latestEnd=range=>range.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g).at(-1);
+  assert.ok(latestEnd(await visibleRange())>=latestEnd(latestRange),'latest view follows a live hourly rollover too');
   const pinchRect=await page.evaluate(`(() => {
     const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('K 线主图，'));
     const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height*.75};

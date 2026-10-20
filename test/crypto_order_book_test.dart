@@ -349,6 +349,62 @@ void main() {
   );
 
   testWidgets(
+    'order-book synchronization status is independent of live quotes and freezes the displayed copy',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 900));
+      final client = Client(), feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send({'type': 'status', 'status': 'live'});
+      feed.send(depth(id: 20));
+      await tester.pumpAndSettle();
+      String label() => tester
+          .widget<Text>(find.byKey(const Key('crypto-book-status')))
+          .data!;
+      CryptoOrderBook book() =>
+          tester.widget<CryptoOrderBook>(find.byType(CryptoOrderBook));
+      expect(label(), contains('实时'));
+      feed.send({
+        'type': 'depthStatus',
+        'symbol': 'BTCUSDT',
+        'status': 'syncing',
+      });
+      await tester.pumpAndSettle();
+      expect(label(), '同步中 · 旧快照');
+      expect(book().book!.updateId, 20);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('crypto-stream-status'))).data,
+        contains('实时推送'),
+      );
+      feed.send({
+        'type': 'depthStatus',
+        'symbol': 'ETHUSDT',
+        'status': 'retrying',
+      });
+      await tester.pumpAndSettle();
+      expect(label(), '同步中 · 旧快照');
+      feed.send({
+        'type': 'depthStatus',
+        'symbol': 'BTCUSDT',
+        'status': 'retrying',
+      });
+      await tester.pumpAndSettle();
+      expect(label(), '同步重试 · 旧快照');
+      // A reinitialized copy may start a new sequence; ordinary late frames
+      // within the new live sequence are still rejected.
+      feed.send(depth(id: 1));
+      await tester.pumpAndSettle();
+      expect(book().book!.updateId, 1);
+      expect(label(), contains('实时'));
+      feed.send({'type': 'status', 'status': 'paused'});
+      await tester.pumpAndSettle();
+      expect(label(), '已暂停');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'rotation repositions the order book without resetting the candle viewport',
     (tester) async {
       fixture.setSize(tester, const Size(844, 390));

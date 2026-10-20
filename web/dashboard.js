@@ -180,7 +180,7 @@
     try { localStorage.setItem(key, JSON.stringify(githubBudget)); } catch (_) { /* still protected in memory */ }
   }
   let githubBudget = [];
-  async function jsonFetch(url, { xml = false } = {}) {
+  async function jsonFetch(url, { xml = false, signal } = {}) {
     const host = new URL(url).host;
     const persisted = readObject(LIMIT_KEY);
     if (finite(persisted[host])) limits[host] = Math.max(limits[host] || 0, persisted[host]);
@@ -189,6 +189,9 @@
     if (host === 'api.github.com') reserveGithubRequest();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
+    const cancel = () => { clearTimeout(timer); controller.abort(); };
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener('abort', cancel, { once: true });
     try {
       const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store', headers: { Accept: host === 'api.github.com' ? 'application/vnd.github+json' : xml ? 'application/rss+xml, application/xml, text/xml' : 'application/json' } });
       if (response.status === 429 || (host === binanceHost && response.status === 418) || (host === 'api.github.com' && response.status === 403)) throw blockHost(host, response);
@@ -214,7 +217,7 @@
       if (error?.name === 'AbortError') throw new Error('连接数据服务超时，请检查网络后重试。');
       if (error instanceof TypeError) throw new Error('无法连接数据服务，请检查网络或稍后重试。');
       throw error;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
   }
   async function mapLimit(values, concurrency, fn) {
     const result = new Array(values.length);
@@ -364,6 +367,130 @@
     inflight.set(key, pending);
     return pending;
   }
+  // Spot protocol: buffer diff events before REST, then bridge lastUpdateId with
+  // U/u. Futures uses a different pu chain; never apply that rule to Spot data.
+  // https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md#how-to-manage-a-local-order-book-correctly
+  const bookSnapshotLimit = 1000;
+  function bookLevels(rows, { zero = false, bid } = {}) {
+    requireValue(Array.isArray(rows) && rows.length <= (zero ? 10000 : bookSnapshotLimit));
+    let digits = 0;
+    const levels = rows.map((row, index) => {
+      requireValue(Array.isArray(row) && row.length === 2);
+      const price = decimal(row[0]), quantity = decimal(row[1]);
+      requireValue(price > 0 && (zero ? quantity >= 0 : quantity > 0) && finite(price * quantity));
+      if (bid !== undefined && index) requireValue(bid ? price < decimal(rows[index-1][0]) : price > decimal(rows[index-1][0]));
+      digits = Math.max(digits, (row[0].replace(/0+$/, '').split('.')[1] || '').length);
+      return [price, quantity];
+    });
+    requireValue(digits <= 8);
+    return { levels, digits };
+  }
+  function maintainSpotBook(symbol, emit, current) {
+    let local = null, buffer = [], bufferedLevels = 0, pending = null, timer = null;
+    let serial = 0, closed = false, failures = 0, lastAttempt = -Infinity, status;
+    const valid = () => !closed && current();
+    const state = value => {
+      if (valid() && status !== value) { status = value; emit({type:'depthStatus',symbol,status:value}); }
+    };
+    function cancelRequest() {
+      serial++;
+      pending?.abort(); pending = null;
+      clearTimeout(timer); timer = null;
+    }
+    function visibleBook() {
+      requireValue(local.bids.size <= 5000 && local.asks.size <= 5000);
+      const bids = [...local.bids].sort((a,b) => b[0]-a[0]).slice(0,20);
+      const asks = [...local.asks].sort((a,b) => a[0]-b[0]).slice(0,20);
+      // Updates outside the initial snapshot cannot describe all intervening
+      // levels. Rebootstrap before such unknown ranges could enter the UI.
+      if (local.bidFloor !== null) requireValue(bids.length === 20 && bids.at(-1)[0] >= local.bidFloor);
+      if (local.askCeiling !== null) requireValue(asks.length === 20 && asks.at(-1)[0] <= local.askCeiling);
+      requireValue(!bids.length || !asks.length || bids[0][0] < asks[0][0]);
+      const side = rows => rows.map(([price,quantity]) => ({price,quantity}));
+      return {lastUpdateId:local.id,bids:side(bids),asks:side(asks),priceDecimals:local.digits};
+    }
+    function apply(event) {
+      if (event.u <= local.id) return false;
+      requireValue(event.U <= local.id + 1); // A gap invalidates the WHOLE copy.
+      for (const [side, rows] of [[local.bids,event.b], [local.asks,event.a]]) {
+        for (const [price,quantity] of rows) {
+          if (quantity === 0) side.delete(price); // Removing an absent price is harmless.
+          else side.set(price,quantity); // Absolute quantity, never an increment.
+        }
+      }
+      local.id = event.u; local.digits = Math.max(local.digits,event.digits);
+      visibleBook(); // Validate both sides atomically before any UI emission.
+      return true;
+    }
+    function publish() {
+      emit({type:'depth',symbol,eventTime:Date.now(),book:visibleBook()});
+      failures = 0; state('live');
+    }
+    function schedule(delay = 0) {
+      if (!valid() || pending || timer !== null || !buffer.length) return;
+      const wait = Math.max(delay, lastAttempt + 1000 - Date.now(), (limits[binanceHost] || 0) - Date.now());
+      if (wait > 0) timer = setTimeout(() => { timer = null; snapshot(); }, wait);
+      else snapshot();
+    }
+    function reset(event, retrying = false) {
+      cancelRequest(); local = null;
+      buffer = event ? [event] : [];
+      bufferedLevels = event ? event.b.length + event.a.length : 0;
+      state(retrying ? 'retrying' : 'syncing');
+      schedule();
+    }
+    async function snapshot() {
+      if (!valid() || pending || !buffer.length) return;
+      const token = serial, controller = new AbortController();
+      pending = controller; lastAttempt = Date.now();
+      try {
+        const value = await jsonFetch(`https://${binanceHost}/api/v3/depth?symbol=${symbol}&limit=${bookSnapshotLimit}`, {signal:controller.signal});
+        if (!valid() || token !== serial) return;
+        requireValue(object(value) && Number.isSafeInteger(value.lastUpdateId) && value.lastUpdateId >= 0);
+        const bids = bookLevels(value.bids,{bid:true}), asks = bookLevels(value.asks,{bid:false});
+        requireValue(value.lastUpdateId >= buffer[0].U); // Snapshot older than buffered stream: refetch.
+        local = {id:value.lastUpdateId,bids:new Map(bids.levels),asks:new Map(asks.levels),digits:Math.max(bids.digits,asks.digits),
+          bidFloor:bids.levels.length === bookSnapshotLimit ? bids.levels.at(-1)[0] : null,
+          askCeiling:asks.levels.length === bookSnapshotLimit ? asks.levels.at(-1)[0] : null};
+        visibleBook();
+        let advanced = false;
+        for (const event of buffer) advanced = apply(event) || advanced;
+        buffer = []; bufferedLevels = 0;
+        // A snapshot alone does not prove the stream was bridged. Wait for an
+        // applicable diff before calling the locally maintained copy live.
+        if (advanced) publish();
+      } catch (_) {
+        if (!valid() || token !== serial) return;
+        local = null; state('retrying');
+        const delay = Math.min(30000, 1000 * 2 ** Math.min(failures++,5));
+        pending = null; schedule(delay);
+      } finally { if (token === serial && pending === controller) pending = null; }
+    }
+    state('syncing');
+    return {
+      push(data) {
+        if (!valid()) return false;
+        let event;
+        try {
+          requireValue(object(data) && data.e === 'depthUpdate' && data.s === symbol
+            && timestamp(data.E) && data.E <= Date.now() + MINUTE && Date.now() - data.E < MINUTE
+            && Number.isSafeInteger(data.U) && data.U >= 0 && Number.isSafeInteger(data.u) && data.u >= data.U);
+          const bids = bookLevels(data.b,{zero:true}), asks = bookLevels(data.a,{zero:true});
+          event = {U:data.U,u:data.u,b:bids.levels,a:asks.levels,digits:Math.max(bids.digits,asks.digits)};
+        } catch (_) { reset(null,true); return false; }
+        if (local) {
+          try { if (apply(event)) publish(); }
+          catch (_) { reset(event); }
+        } else {
+          buffer.push(event); bufferedLevels += event.b.length + event.a.length;
+          if (buffer.length > 1000 || bufferedLevels > 20000) reset(event);
+          else schedule();
+        }
+        return true;
+      },
+      stop() { closed = true; cancelRequest(); local = null; buffer = []; },
+    };
+  }
   // Public market-only streams. Browsers handle WebSocket protocol ping/pong.
   const cryptoSessions = new Map();
   let cryptoSessionId = 0;
@@ -372,12 +499,13 @@
     requireValue(typeof callback === 'function');
     const id = String(++cryptoSessionId);
     let socket, retryTimer, watchdog, rotation, stopped = false, generation = 0, failures = 0;
-    let opened = false;
+    let opened = false, localDepth;
     const selected = args.symbol.toLowerCase();
-    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), `${selected}@depth20`, `${selected}@kline_${args.interval}`];
+    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), `${selected}@depth`, `${selected}@kline_${args.interval}`];
     const emit = event => { if (!stopped) callback(JSON.stringify(event)); };
     function clear() {
       generation++;
+      localDepth?.stop(); localDepth = null;
       clearTimeout(retryTimer); clearTimeout(watchdog); clearTimeout(rotation);
       if (socket) { socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null; socket.close(); socket = null; }
     }
@@ -398,10 +526,11 @@
       try { socket = new WebSocket(`wss://data-stream.binance.vision/stream?streams=${streams.join('/')}`); }
       catch (_) { retry(); return; }
       const valid = () => !stopped && epoch === generation;
+      localDepth = maintainSpotBook(args.symbol,emit,valid);
       function check() {
         if (!valid()) return;
         const now = Date.now();
-        if ([`${selected}@ticker`, `${selected}@kline_${args.interval}`, `${selected}@depth20`].some(key => now - (received.get(key) || start) > 15000)) { retry(); return; }
+        if ([`${selected}@ticker`, `${selected}@kline_${args.interval}`, `${selected}@depth`].some(key => now - (received.get(key) || start) > 15000)) { retry(); return; }
         watchdog = setTimeout(check, 5000);
       }
       const start = Date.now();
@@ -416,25 +545,8 @@
         try {
           const envelope = JSON.parse(message.data), data = envelope.data;
           if (data?.e === 'serverShutdown' || envelope.e === 'serverShutdown') { retry(); return; }
-          if (envelope.stream === `${selected}@depth20`) {
-            requireValue(object(data) && Number.isSafeInteger(data.lastUpdateId) && data.lastUpdateId >= 0);
-            const side = (rows, bid) => {
-              requireValue(Array.isArray(rows) && rows.length <= 20);
-              return rows.map((row, i) => {
-                requireValue(Array.isArray(row) && row.length === 2);
-                const price = decimal(row[0]), quantity = decimal(row[1]);
-                requireValue(price > 0 && quantity > 0 && finite(price * quantity));
-                if (i) requireValue(bid ? price < decimal(rows[i-1][0]) : price > decimal(rows[i-1][0]));
-                return {price, quantity};
-              });
-            };
-            const bids = side(data.bids, true), asks = side(data.asks, false);
-            requireValue(!bids.length || !asks.length || bids[0].price < asks[0].price);
-            if (data.lastUpdateId < (times.get(envelope.stream) ?? -1)) return;
-            const digits = Math.max(0, ...[...data.bids, ...data.asks].map(row => (row[0].replace(/0+$/, '').split('.')[1] || '').length));
-            requireValue(digits <= 8);
-            times.set(envelope.stream, data.lastUpdateId); received.set(envelope.stream, Date.now());
-            emit({type:'depth',symbol:args.symbol,eventTime:Date.now(),book:{lastUpdateId:data.lastUpdateId,bids,asks,priceDecimals:digits}});
+          if (envelope.stream === `${selected}@depth`) {
+            if (localDepth.push(data)) received.set(envelope.stream,Date.now());
             return;
           }
           requireValue(streams.includes(envelope.stream) && object(data) && timestamp(data.E) && data.E <= Date.now() + MINUTE && Date.now() - data.E < MINUTE);

@@ -50,6 +50,7 @@ class CryptoPanel extends StatefulWidget {
 class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   DashboardData? _quoteData, _candleData;
   CryptoBook? _book;
+  String _bookStatus = 'syncing';
   GlobalKey _chartKey = GlobalKey();
   List<CryptoQuote> _quotes = [];
   List<CryptoCandle> _candles = [];
@@ -135,7 +136,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       _refresh(refresh: true);
     } else {
       _stopFeed();
-      setState(() => _streamStatus = 'paused');
+      setState(() {
+        _streamStatus = 'paused';
+        _bookStatus = 'paused';
+      });
     }
   }
 
@@ -334,6 +338,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     _stopFeed();
     if (!_automatic || !_visible) return;
     _streamStatus = 'connecting';
+    _bookStatus = 'syncing';
     final serial = _feedSerial;
     _subscription = _feed
         .subscribe(widget.symbol, widget.interval)
@@ -343,11 +348,33 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             try {
               final type = event['type'];
               if (type == 'status') {
-                setState(() => _streamStatus = event['status'] as String);
+                setState(() {
+                  _streamStatus = event['status'] as String;
+                  if (_streamStatus != 'live') {
+                    _bookStatus =
+                        const [
+                          'connecting',
+                          'connected',
+                        ].contains(_streamStatus)
+                        ? 'syncing'
+                        : _streamStatus;
+                  }
+                });
                 if (event['resync'] == true) {
                   _book = null;
                   _historySynchronized = false;
                   _refresh(refresh: true);
+                }
+                return;
+              }
+              if (type == 'depthStatus') {
+                if (event['symbol'] == widget.symbol &&
+                    const [
+                      'syncing',
+                      'retrying',
+                      'live',
+                    ].contains(event['status'])) {
+                  setState(() => _bookStatus = event['status'] as String);
                 }
                 return;
               }
@@ -359,10 +386,15 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                     symbol: widget.symbol,
                     receivedAt: event['eventTime'] as int,
                   );
-                  if (_book != null && book.updateId < _book!.updateId) {
+                  if (_bookStatus == 'live' &&
+                      _book != null &&
+                      book.updateId < _book!.updateId) {
                     return;
                   }
-                  setState(() => _book = book);
+                  setState(() {
+                    _book = book;
+                    _bookStatus = 'live';
+                  });
                 } catch (_) {
                   /* Invalid depth must not change the price/candle connection state. */
                 }
@@ -418,12 +450,18 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                 }
               }
             } catch (_) {
-              setState(() => _streamStatus = 'error');
+              setState(() {
+                _streamStatus = 'error';
+                _bookStatus = 'error';
+              });
             }
           },
           onError: (_) {
             if (mounted && serial == _feedSerial) {
-              setState(() => _streamStatus = 'error');
+              setState(() {
+                _streamStatus = 'error';
+                _bookStatus = 'error';
+              });
             }
           },
         );
@@ -506,7 +544,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       key: ValueKey('crypto-book-${widget.symbol}'),
       symbol: widget.symbol,
       book: _book,
-      status: _streamStatus,
+      status: _bookStatus,
       lastPrice: selected?.price,
     );
     return Column(
@@ -532,7 +570,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                   _refresh(refresh: true);
                 } else {
                   _stopFeed();
-                  setState(() => _streamStatus = 'paused');
+                  setState(() {
+                    _streamStatus = 'paused';
+                    _bookStatus = 'paused';
+                  });
                 }
               },
             ),
