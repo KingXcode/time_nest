@@ -552,3 +552,40 @@ test('conversion rate limit persists independently of Binance market requests', 
   await assert.rejects(reload.request('cryptoConversion', {}), /请求受限/);
   assert.equal(reload.calls.length, 0);
 });
+
+
+const priceRules = () => ({ symbols: ['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','DOGEUSDT'].map(symbol => ({symbol,filters:[{filterType:'PRICE_FILTER',tickSize:symbol==='XRPUSDT'?'0.00010000':symbol==='DOGEUSDT'?'0.00001000':'0.01000000'}]})) });
+test('book price increments come from exchangeInfo PRICE_FILTER for each supported symbol', async () => {
+  const shared = storage();
+  const h = harness(() => response(priceRules()), {storage: shared});
+  const result = await h.request('cryptoBookRules',{});
+  const url = new URL(h.calls[0].url);
+  assert.equal(url.hostname,'data-api.binance.vision');
+  assert.equal(url.pathname,'/api/v3/exchangeInfo');
+  assert.equal(JSON.parse(url.searchParams.get('symbols')).length,6);
+  assert.equal(result.data.rules.find(r=>r.symbol==='BTCUSDT').tickSize,'0.01000000');
+  assert.equal(result.data.rules.find(r=>r.symbol==='XRPUSDT').tickSize,'0.00010000');
+  assert.equal(result.data.rules.find(r=>r.symbol==='DOGEUSDT').tickSize,'0.00001000');
+  const reload = harness(() => {throw new Error('offline');},{storage:shared,now:START+30*minute});
+  assert.equal((await reload.request('cryptoBookRules',{})).cached,true);
+  assert.equal(reload.calls.length,0);
+  reload.advance(hour);
+  const stale = await reload.request('cryptoBookRules',{});
+  assert.equal(stale.stale,true); assert.equal(stale.fetchedAt,result.fetchedAt);
+  const expired = harness(() => {throw new Error('offline');},{storage:shared,now:START+day+1});
+  await assert.rejects(expired.request('cryptoBookRules',{}),/加载失败/);
+});
+
+test('missing, duplicate or invalid price filters never fabricate grouping rules', async () => {
+  const variants = [];
+  let r=priceRules();r.symbols.pop();variants.push(r);
+  r=priceRules();r.symbols[1].symbol='BTCUSDT';variants.push(r);
+  r=priceRules();r.symbols[0].filters=[];variants.push(r);
+  for(const tickSize of ['0','-0.01','NaN','1e-2','0.000000001']) {
+    r=priceRules();r.symbols[0].filters[0].tickSize=tickSize;variants.push(r);
+  }
+  for(const raw of variants) {
+    const h=harness(()=>response(raw));
+    await assert.rejects(h.request('cryptoBookRules',{}),/格式异常/);
+  }
+});

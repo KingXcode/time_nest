@@ -26,6 +26,9 @@ class CryptoPanel extends StatefulWidget {
     this.infoRight = false,
     this.currency = 'USD',
     this.onCurrencyChanged,
+    this.bookLevels,
+    this.bookSteps = const {},
+    this.onBookSettingsChanged,
     this.paneHeights = const {},
     this.onPaneHeightsChanged,
     this.onChartChanged,
@@ -33,6 +36,10 @@ class CryptoPanel extends StatefulWidget {
   final DashboardClient client;
   final String symbol, interval, currency;
   final ValueChanged<String>? onCurrencyChanged;
+  final int? bookLevels;
+  final Map<String, double> bookSteps;
+  final void Function(int? levels, Map<String, double> steps)?
+  onBookSettingsChanged;
   final CryptoFeed? feed;
   final List<String> overlays, panes;
   final bool infoRight;
@@ -76,6 +83,8 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   late List<String> _overlays = List.of(widget.overlays),
       _panes = List.of(widget.panes);
   late bool _infoRight = widget.infoRight;
+  late int? _bookLevels = cleanCryptoBookLevels(widget.bookLevels);
+  late Map<String, double> _bookSteps = cleanCryptoBookSteps(widget.bookSteps);
   late Map<String, double> _paneHeights = cleanCryptoPaneHeights(
     widget.paneHeights,
   );
@@ -96,6 +105,12 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(CryptoPanel old) {
     super.didUpdateWidget(old);
+    if (old.bookLevels != widget.bookLevels) {
+      _bookLevels = cleanCryptoBookLevels(widget.bookLevels);
+    }
+    if (!mapEquals(old.bookSteps, widget.bookSteps)) {
+      _bookSteps = cleanCryptoBookSteps(widget.bookSteps);
+    }
     if (!mapEquals(old.paneHeights, widget.paneHeights)) {
       _paneHeights = cleanCryptoPaneHeights(widget.paneHeights);
     }
@@ -553,6 +568,16 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       currency: widget.currency,
       onCurrencyChanged: widget.onCurrencyChanged,
       active: _automatic && _visible,
+      levels: _bookLevels,
+      priceStep: _bookSteps[widget.symbol],
+      onLevelsChanged: (levels) {
+        setState(() => _bookLevels = levels);
+        widget.onBookSettingsChanged?.call(_bookLevels, Map.of(_bookSteps));
+      },
+      onPriceStepChanged: (step) {
+        setState(() => _bookSteps[widget.symbol] = step);
+        widget.onBookSettingsChanged?.call(_bookLevels, Map.of(_bookSteps));
+      },
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -388,6 +388,12 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         overlays: preferences.cryptoOverlays,
         panes: preferences.cryptoPanes,
         infoRight: preferences.cryptoInfoRight,
+        bookLevels: preferences.cryptoBookLevels,
+        bookSteps: preferences.cryptoBookSteps,
+        onBookSettingsChanged: (levels, steps) => _save(() {
+          preferences.cryptoBookLevels = levels;
+          preferences.cryptoBookSteps = Map.of(steps);
+        }),
         currency: preferences.cryptoCurrency,
         onCurrencyChanged: (currency) =>
             _save(() => preferences.cryptoCurrency = currency),

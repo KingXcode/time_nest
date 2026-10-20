@@ -4,6 +4,40 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 
 void main() {
+  test('order book levels and per-symbol steps validate and retain other preferences', () {
+    expect(DashboardPreferences.decode(null).cryptoBookLevels, isNull);
+    for (final value in [0, 15, '5', 5.0]) {
+      expect(
+        DashboardPreferences.decode(jsonEncode({'cryptoBookLevels': value}))
+            .cryptoBookLevels,
+        isNull,
+      );
+    }
+    for (final levels in [5, 10, 20]) {
+      final p = DashboardPreferences.decode(
+        jsonEncode({
+          'cryptoBookLevels': levels,
+          'cryptoBookSteps': {
+            'BTCUSDT': 10,
+            'XRPUSDT': .001,
+            'DOGEUSDT': -1,
+            'unknown': 1,
+            'ETHUSDT': '0.1',
+          },
+          'cryptoCurrency': 'CNY',
+        }),
+      );
+      final restored = DashboardPreferences.decode(p.encode());
+      expect(restored.cryptoBookLevels, levels);
+      expect(restored.cryptoBookSteps, {'BTCUSDT': 10, 'XRPUSDT': .001});
+      expect(restored.cryptoCurrency, 'CNY');
+    }
+    expect(
+      cleanCryptoBookSteps({'BTCUSDT': double.nan, 'ETHUSDT': double.infinity}),
+      isEmpty,
+    );
+  });
+
   test('order-book currency defaults, validates and survives preference round trip', () {
     expect(DashboardPreferences.decode(null).cryptoCurrency, 'USD');
     expect(

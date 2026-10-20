@@ -114,3 +114,36 @@ String cryptoTime(int milliseconds, {bool seconds = false}) {
   return '${date.year}-${two(date.month)}-${two(date.day)} '
       '${two(date.hour)}:${two(date.minute)}${seconds ? ':${two(date.second)}' : ''}';
 }
+
+/// UI aggregation steps derive from Binance PRICE_FILTER, never the decimals
+/// accidentally present in a particular depth snapshot.
+class CryptoPriceRule {
+  CryptoPriceRule.fromJson(Map value) {
+    final raw = value['tickSize'];
+    if (!cryptoAssets.containsKey(value['symbol']) ||
+        raw is! String ||
+        !RegExp(r'^\d{1,12}(?:\.\d{1,8})?$').hasMatch(raw)) {
+      throw const FormatException('Invalid price rule');
+    }
+    symbol = value['symbol'] as String;
+    tickSize = double.parse(raw);
+    if (!tickSize.isFinite || tickSize <= 0 || tickSize > 1e8) {
+      throw const FormatException('Invalid tick size');
+    }
+    final fraction = raw.contains('.') ? raw.split('.')[1] : '';
+    decimals = fraction.replaceFirst(RegExp(r'0+$'), '').length;
+  }
+  late final String symbol;
+  late final double tickSize;
+  late final int decimals;
+  List<double> get steps => [
+    for (final multiplier in [1, 10, 100, 1000, 10000])
+      double.parse((tickSize * multiplier).toStringAsFixed(decimals)),
+  ];
+  String label(double step) {
+    final value = step.toStringAsFixed(decimals);
+    return value.contains('.')
+        ? value.replaceFirst(RegExp(r'\.?0+$'), '')
+        : value;
+  }
+}

@@ -45,6 +45,26 @@ class FixtureDashboardClient implements DashboardClient {
     if (pending != null) await pending!.future;
     if (fail) throw Exception('网络暂时不可用，请稍后重试。');
     final data = switch (module) {
+      'cryptoBookRules' => {
+        'rules': [
+          for (final symbol in [
+            'BTCUSDT',
+            'ETHUSDT',
+            'BNBUSDT',
+            'SOLUSDT',
+            'XRPUSDT',
+            'DOGEUSDT',
+          ])
+            {
+              'symbol': symbol,
+              'tickSize': symbol == 'XRPUSDT'
+                  ? '0.00010000'
+                  : symbol == 'DOGEUSDT'
+                  ? '0.00001000'
+                  : '0.01000000',
+            },
+        ],
+      },
       'cryptoConversion' => {'base': 'USDT', 'USD': .99, 'CNY': 7.1},
       'cryptoQuotes' => cryptoQuotesFixture(),
       'cryptoCandles' => cryptoCandlesFixture(
@@ -114,7 +134,12 @@ class FixtureDashboardClient implements DashboardClient {
         ],
       },
     };
-    return DashboardData(data: data, fetchedAt: DateTime(2026, 10, 18, 9));
+    return DashboardData(
+      data: data,
+      fetchedAt: module == 'cryptoBookRules'
+          ? DateTime.now()
+          : DateTime(2026, 10, 18, 9),
+    );
   }
 }
 
@@ -263,11 +288,18 @@ void main() {
           id == 'market'
               ? <String>{}
               : id == 'crypto'
-              ? {'cryptoQuotes', 'cryptoCandles', 'cryptoConversion'}
+              ? {
+                  'cryptoQuotes',
+                  'cryptoCandles',
+                  'cryptoConversion',
+                  'cryptoBookRules',
+                }
               : {id},
         );
         expect(
-          client.calls.where((m) => m != 'cryptoConversion').length,
+          client.calls
+              .where((m) => m != 'cryptoConversion' && m != 'cryptoBookRules')
+              .length,
           id == 'market'
               ? 0
               : id == 'crypto'

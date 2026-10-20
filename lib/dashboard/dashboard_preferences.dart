@@ -52,6 +52,22 @@ Map<String, double> cleanCryptoPaneHeights(Object? raw) {
   };
 }
 
+int? cleanCryptoBookLevels(Object? raw) =>
+    raw is int && const [5, 10, 20].contains(raw) ? raw : null;
+
+Map<String, double> cleanCryptoBookSteps(Object? raw) {
+  if (raw is! Map) return {};
+  return {
+    for (final entry in raw.entries)
+      if (cryptoAssets.containsKey(entry.key) &&
+          entry.value is num &&
+          (entry.value as num).isFinite &&
+          (entry.value as num) > 0 &&
+          (entry.value as num) <= 1e12)
+        entry.key as String: (entry.value as num).toDouble(),
+  };
+}
+
 class DashboardPreferences {
   DashboardPreferences({
     this.city,
@@ -65,6 +81,8 @@ class DashboardPreferences {
     this.cryptoPanes = defaultCryptoPanes,
     this.cryptoInfoRight = false,
     this.cryptoCurrency = 'USD',
+    this.cryptoBookLevels,
+    this.cryptoBookSteps = const {},
     this.cryptoPaneHeights = const {},
     this.order = dashboardModules,
     this.favorites = const ['weather'],
@@ -80,6 +98,8 @@ class DashboardPreferences {
   List<String> cryptoOverlays, cryptoPanes;
   bool cryptoInfoRight;
   String cryptoCurrency;
+  int? cryptoBookLevels;
+  Map<String, double> cryptoBookSteps;
   Map<String, double> cryptoPaneHeights;
   List<String> order;
   List<String> favorites;
@@ -148,6 +168,8 @@ class DashboardPreferences {
       if (const ['USD', 'CNY'].contains(json['cryptoCurrency'])) {
         prefs.cryptoCurrency = json['cryptoCurrency'] as String;
       }
+      prefs.cryptoBookLevels = cleanCryptoBookLevels(json['cryptoBookLevels']);
+      prefs.cryptoBookSteps = cleanCryptoBookSteps(json['cryptoBookSteps']);
       prefs.cryptoInfoRight = json['cryptoInfoRight'] == true;
       prefs.cryptoPaneHeights = cleanCryptoPaneHeights(
         json['cryptoPaneHeights'],
@@ -186,6 +208,8 @@ class DashboardPreferences {
     'cryptoPanes': cryptoPanes,
     'cryptoInfoRight': cryptoInfoRight,
     'cryptoCurrency': cryptoCurrency,
+    'cryptoBookLevels': cleanCryptoBookLevels(cryptoBookLevels),
+    'cryptoBookSteps': cleanCryptoBookSteps(cryptoBookSteps),
     'cryptoPaneHeights': cleanCryptoPaneHeights(cryptoPaneHeights),
     'order': order,
     'favorites': favorites,

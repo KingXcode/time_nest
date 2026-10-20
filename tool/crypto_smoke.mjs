@@ -312,9 +312,20 @@ try {
   assert.ok(!(await labels()).some(e=>e.label?.startsWith('卖盘 ')),'single bid view hides asks');
   await activate('显示买卖盘');await activate('显示档位');await activate('20 档');
   assert.ok((await labels()).some(e=>e.label?.startsWith('卖盘 20 档')),'twenty levels can be shown in landscape');
+  const bookRules=await page.evaluate(`timeNestDashboard.request('cryptoBookRules','{}').then(JSON.parse)`);
+  assert.equal(bookRules.stale,false);
+  assert.equal(bookRules.data.rules.find(r=>r.symbol==='BTCUSDT').tickSize,'0.01000000');
+  await activate('显示档位');await activate('5 档');
+  await activate('价格档位');
+  await waitFor(async()=>{const menu=await labels();return ['0.01','0.1','1','10','100'].every(step=>menu.some(e=>e.label===step));},'all five BTC price steps appear in the menu');
+  await page.screenshot('23-orderbook-price-steps.png');
+  await activate('10');
+  const savedBook=JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()'));
+  assert.equal(savedBook.cryptoBookSteps.BTCUSDT,10);assert.equal(savedBook.cryptoBookLevels,5);
   passed('order-book side filters and level menu work in the live landscape browser');
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});await delay(500);
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(500);
+  assert.ok((await labels()).some(e=>e.label?.includes('实时 · 5档')),'explicit five-level choice survives desktop orientation');
   passed('order book sits right on desktop and landscape phones and below charts in portrait');
   await page.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
   await delay(500);
@@ -427,6 +438,10 @@ try {
   await waitFor(() => page.evaluate(`JSON.parse(timeNestDashboard.readPreferences()).cryptoSymbol === 'ETHUSDT'`), 'ETH choice saved');
   await waitFor(async () => (await labels()).some(item => item.label === 'ETH / USDT'), 'ETH selection rendered');
   await waitFor(() => [...requests].some(url => url.includes('symbol=ETHUSDT') && url.includes('interval=1h')), 'ETH hourly request');
+  await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'ETH book inherits saved level count');
+  await activate('价格档位');await activate('1');
+  const perSymbolSteps=JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoBookSteps;
+  assert.deepEqual(perSymbolSteps,{BTCUSDT:10,ETHUSDT:1});
   await activate('日线');
   await waitFor(() => page.evaluate(`JSON.parse(timeNestDashboard.readPreferences()).cryptoInterval === '1d'`), 'daily period saved');
   await waitFor(() => [...requests].some(url => url.includes('symbol=ETHUSDT') && url.includes('interval=1d')), 'ETH daily request');
@@ -450,11 +465,14 @@ try {
   // Reopening a route is covered in widget tests at 320 px and 2x text.
   const restored = await page.evaluate(`JSON.parse(timeNestDashboard.readPreferences())`);
   assert.equal(restored.cryptoSymbol, 'ETHUSDT'); assert.equal(restored.cryptoInterval, '1d');
+  assert.equal(restored.cryptoBookLevels,5);assert.deepEqual(restored.cryptoBookSteps,{BTCUSDT:10,ETHUSDT:1});
   assert.equal(restored.cryptoPaneHeights.vol,storedHeight);
   assert.ok(!restored.order?.includes('fx'));
   await activate('数字货币行情');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('主图 8/8 · 副图 8/8')), '8+8 chart settings restored');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'restored stream live');
+  await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'five-level book restores on fresh page');
+  passed('per-symbol price steps and displayed level count persist across currency, series, orientation and full page reload');
   const restoredHeight=await page.evaluate(`(() => {
     const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('VOL 成交量 副图，'));
     return e.getBoundingClientRect().height;

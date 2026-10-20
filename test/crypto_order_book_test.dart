@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/crypto_chart.dart';
 import 'package:time_nest/dashboard/crypto_order_book.dart';
 import 'package:time_nest/dashboard/crypto_panel.dart';
+import 'package:time_nest/dashboard/crypto_market.dart';
+import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/dashboard_client.dart';
 
 import 'crypto_live_widget_test.dart' show Client, Feed;
@@ -32,7 +35,8 @@ Map<String, dynamic> depth({int id = 10, String symbol = 'BTCUSDT'}) => {
 };
 
 Widget bookPage(Client client, Feed feed, {double scale = 1}) {
-  var symbol = 'BTCUSDT', interval = '1h';
+  final prefs = DashboardPreferences.decode(client.readPreferences());
+  var symbol = prefs.cryptoSymbol, interval = prefs.cryptoInterval;
   return fixture.app(
     Scaffold(
       body: SingleChildScrollView(
@@ -42,6 +46,13 @@ Widget bookPage(Client client, Feed feed, {double scale = 1}) {
             feed: feed,
             symbol: symbol,
             interval: interval,
+            bookLevels: prefs.cryptoBookLevels,
+            bookSteps: prefs.cryptoBookSteps,
+            onBookSettingsChanged: (levels, steps) => update(() {
+              prefs.cryptoBookLevels = levels;
+              prefs.cryptoBookSteps = Map.of(steps);
+              client.writePreferences(prefs.encode());
+            }),
             onChanged: (s, i) => update(() {
               symbol = s;
               interval = i;
@@ -79,6 +90,159 @@ class RateClient extends Client {
 }
 
 void main() {
+  test(
+    'price steps follow symbol tick sizes including non-power-of-ten ticks',
+    () {
+      for (final example in [
+        ('BTCUSDT', '0.01000000', ['0.01', '0.1', '1', '10', '100']),
+        ('XRPUSDT', '0.00010000', ['0.0001', '0.001', '0.01', '0.1', '1']),
+        (
+          'DOGEUSDT',
+          '0.00001000',
+          ['0.00001', '0.0001', '0.001', '0.01', '0.1'],
+        ),
+        ('ETHUSDT', '0.05000000', ['0.05', '0.5', '5', '50', '500']),
+      ]) {
+        final rule = CryptoPriceRule.fromJson({
+          'symbol': example.$1,
+          'tickSize': example.$2,
+        });
+        expect(rule.steps.map(rule.label), example.$3);
+      }
+      for (final raw in ['0', '-0.01', 'NaN', '1e-2', '0.000000001']) {
+        expect(
+          () =>
+              CryptoPriceRule.fromJson({'symbol': 'BTCUSDT', 'tickSize': raw}),
+          throwsFormatException,
+        );
+      }
+      final book = CryptoBook.fromJson(
+        snapshot(),
+        symbol: 'BTCUSDT',
+        receivedAt: 1000,
+      );
+      final bids = book.grouped(bid: true, step: 10),
+          asks = book.grouped(bid: false, step: 10);
+      expect(bids.map((r) => r.price), [100, 90]);
+      expect(asks.single.price, 110);
+      expect(
+        bids.fold<double>(0, (sum, r) => sum + r.quantity),
+        book.bidQuantity,
+      );
+      expect(
+        asks.single.amount,
+        closeTo(book.asks.fold<double>(0, (sum, r) => sum + r.amount), 1e-9),
+      );
+    },
+  );
+
+  testWidgets(
+    'grouping and level choices persist separately per symbol and restore after recreation',
+    (tester) async {
+      final client = Client(), feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send(depth());
+      await tester.pumpAndSettle();
+      DropdownButton<double> grouping() =>
+          tester.widget<DropdownButton<double>>(
+            find.byKey(const Key('crypto-book-grouping')),
+          );
+      PopupMenuButton<int> levels() => tester.widget<PopupMenuButton<int>>(
+        find.byKey(const Key('crypto-book-levels')),
+      );
+      expect(grouping().items!.map((item) => (item.child as Text).data), [
+        '0.01',
+        '0.1',
+        '1',
+        '10',
+        '100',
+      ]);
+      grouping().onChanged!(10);
+      levels().onSelected!(5);
+      await tester.pumpAndSettle();
+      expect(grouping().value, 10);
+      expect(levels().initialValue, 5);
+      expect(find.text('实时 · 5档'), findsOneWidget);
+      var saved = DashboardPreferences.decode(client.preferences);
+      expect(saved.cryptoBookSteps, {'BTCUSDT': 10});
+      expect(saved.cryptoBookLevels, 5);
+      await tester.tap(find.byKey(const Key('crypto-select-XRPUSDT')));
+      await tester.pumpAndSettle();
+      feed.send(depth(symbol: 'XRPUSDT'));
+      await tester.pumpAndSettle();
+      expect(grouping().items!.map((item) => (item.child as Text).data), [
+        '0.0001',
+        '0.001',
+        '0.01',
+        '0.1',
+        '1',
+      ]);
+      expect(grouping().value, .0001);
+      expect(levels().initialValue, 5);
+      grouping().onChanged!(.001);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('crypto-select-BTCUSDT')));
+      await tester.pumpAndSettle();
+      feed.send(depth());
+      await tester.pumpAndSettle();
+      expect(grouping().value, 10);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(bookPage(client, Feed()));
+      await tester.pumpAndSettle();
+      expect(grouping().value, 10);
+      expect(levels().initialValue, 5);
+      saved = DashboardPreferences.decode(client.preferences);
+      expect(saved.cryptoBookSteps, {'BTCUSDT': 10, 'XRPUSDT': .001});
+      // An explicit device choice wins over the compact landscape default.
+      levels().onSelected!(20);
+      await tester.pumpAndSettle();
+      fixture.setSize(tester, const Size(844, 390));
+      await tester.pumpAndSettle();
+      expect(levels().initialValue, 20);
+      expect(jsonDecode(client.preferences!)['cryptoBookLevels'], 20);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'invalid saved steps fall back to live tick and integer depth does not change the options',
+    (tester) async {
+      final client = Client()
+        ..preferences =
+            '{"cryptoBookSteps":{"BTCUSDT":0.03},"cryptoBookLevels":10}';
+      final feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      final event = depth();
+      event['book'] = {
+        ...snapshot(),
+        'priceDecimals': 0,
+        'bids': [
+          {'price': 100, 'quantity': 1},
+        ],
+        'asks': [
+          {'price': 101, 'quantity': 1},
+        ],
+      };
+      feed.send(event);
+      await tester.pumpAndSettle();
+      final grouping = tester.widget<DropdownButton<double>>(
+        find.byKey(const Key('crypto-book-grouping')),
+      );
+      expect(grouping.value, .01);
+      expect(grouping.items!.map((item) => (item.child as Text).data), [
+        '0.01',
+        '0.1',
+        '1',
+        '10',
+        '100',
+      ]);
+      expect(find.text('100.00'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets(
     'middle price converts USD/CNY without changing USDT rows or reconnecting market feeds',
     (tester) async {
@@ -306,10 +470,10 @@ void main() {
         await tester.tap(bothButton);
         await tester.pumpAndSettle();
         tester
-            .widget<DropdownButton<int>>(
+            .widget<DropdownButton<double>>(
               find.byKey(const Key('crypto-book-grouping')),
             )
-            .onChanged!(10);
+            .onChanged!(.1);
         await tester.pumpAndSettle();
         expect(
           find.descendant(of: asks, matching: find.text('100.10')),
@@ -356,10 +520,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(bar('bid', 100.0).width, 2);
       tester
-          .widget<DropdownButton<int>>(
+          .widget<DropdownButton<double>>(
             find.byKey(const Key('crypto-book-grouping')),
           )
-          .onChanged!(10);
+          .onChanged!(.1);
       await tester.pumpAndSettle();
       expect(bar('ask', 100.1).width, askMax.width);
       expect(tester.takeException(), isNull);

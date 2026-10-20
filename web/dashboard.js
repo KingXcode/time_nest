@@ -17,6 +17,7 @@
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
     releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
+    cryptoBookRules: { ttl: HOUR, retain: DAY, gap: MINUTE, label: '价格档位' },
     cryptoConversion: { ttl: 5 * MINUTE, retain: DAY, gap: MINUTE, label: '折算汇率' },
     cryptoQuotes: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币报价' },
     cryptoCandles: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币 K 线' },
@@ -47,6 +48,10 @@
     const number = Number(value); requireValue(finite(number)); return number;
   }
   function timestamp(value) { return Number.isSafeInteger(value) && value > 0 && value < 8640000000000000; }
+  function validBookRule(rule) {
+    return object(rule) && cryptoSymbols.includes(rule.symbol) && typeof rule.tickSize === 'string'
+      && /^\d{1,12}(?:\.\d{1,8})?$/.test(rule.tickSize) && Number(rule.tickSize) > 0 && Number(rule.tickSize) <= 1e8;
+  }
   function validQuote(q) {
     return object(q) && cryptoSymbols.includes(q.symbol) && ['price', 'high', 'low'].every(k => finite(q[k]) && q[k] > 0)
       && q.high >= q.price && q.low <= q.price && finite(q.changePercent) && q.changePercent >= -100
@@ -89,6 +94,7 @@
         requireValue(/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?\/[a-zA-Z0-9_.-]{1,100}$/.test(repo) && !['.', '..'].includes(repo.split('/')[1]), '仓库格式应为 owner/repo，例如 flutter/flutter。');
         return { repo: repo.toLowerCase() };
       }
+      case 'cryptoBookRules':
       case 'cryptoConversion':
       case 'cryptoQuotes': return {};
       case 'cryptoCandles':
@@ -106,6 +112,7 @@
       case 'searchCities': return Array.isArray(data.cities) && data.cities.length <= 10 && data.cities.every(c => object(c) && typeof c.name === 'string' && finite(c.latitude) && Math.abs(c.latitude) <= 90 && finite(c.longitude) && Math.abs(c.longitude) <= 180);
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
       case 'releases': return typeof data.repo === 'string' && typeof data.noReleases === 'boolean' && Array.isArray(data.releases) && data.releases.length <= 5 && data.noReleases === (data.releases.length === 0) && data.releases.every(r => object(r) && typeof r.name === 'string' && typeof r.tag === 'string' && typeof r.body === 'string' && Number.isFinite(Date.parse(r.publishedAt)) && !!safeUrl(r.url));
+      case 'cryptoBookRules': return Array.isArray(data.rules) && data.rules.length === cryptoSymbols.length && new Set(data.rules.map(r => r?.symbol)).size === cryptoSymbols.length && data.rules.every(validBookRule);
       case 'cryptoConversion': return data.base === 'USDT' && ['USD', 'CNY'].every(k => finite(data[k]) && data[k] > 0);
       case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
       case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && (data.endTime === undefined || (timestamp(data.endTime) && data.endTime < Date.now())) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && (data.endTime === undefined || c.closeTime <= data.endTime) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
@@ -232,6 +239,18 @@
   }
   async function loadSource(module, args) {
     switch (module) {
+      case 'cryptoBookRules': {
+        const url = new URL(`https://${binanceHost}/api/v3/exchangeInfo`);
+        url.search = new URLSearchParams({ symbols: JSON.stringify(cryptoSymbols) });
+        const result = await jsonFetch(url.href);
+        requireValue(Array.isArray(result?.symbols) && result.symbols.length === cryptoSymbols.length);
+        const rules = result.symbols.map(row => {
+          requireValue(object(row) && Array.isArray(row.filters));
+          const price = row.filters.find(f => f?.filterType === 'PRICE_FILTER');
+          return { symbol: row.symbol, tickSize: price?.tickSize };
+        });
+        return { data: { rules } };
+      }
       case 'cryptoConversion': {
         const result = await jsonFetch('https://api.coinbase.com/v2/exchange-rates?currency=USDT');
         requireValue(object(result?.data) && result.data.currency === 'USDT' && object(result.data.rates));

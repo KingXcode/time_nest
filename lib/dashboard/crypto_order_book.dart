@@ -76,10 +76,27 @@ class CryptoBook {
   late final int updateId, priceDecimals;
   late final List<CryptoBookLevel> bids, asks;
 
-  List<CryptoBookLevel> grouped({required bool bid, int multiplier = 1}) {
+  List<CryptoBookLevel> grouped({
+    required bool bid,
+    int multiplier = 1,
+    double? step,
+  }) {
     final rows = bid ? bids : asks;
-    if (multiplier == 1) return rows;
-    final scale = math.pow(10, priceDecimals).toDouble();
+    if (step == null && multiplier == 1) return rows;
+    var decimals = priceDecimals;
+    if (step != null) {
+      if (!step.isFinite || step <= 0) {
+        throw const FormatException('Invalid grouping step');
+      }
+      final fraction = step
+          .toStringAsFixed(8)
+          .split('.')[1]
+          .replaceFirst(RegExp(r'0+$'), '');
+      decimals = math.max(decimals, fraction.length);
+    }
+    final scale = math.pow(10, decimals).toDouble();
+    if (step != null) multiplier = (step * scale).round();
+    if (multiplier < 1) throw const FormatException('Invalid grouping step');
     final groups = <int, CryptoBookLevel>{};
     for (final row in rows) {
       final ticks = (row.price * scale).round();
@@ -154,11 +171,19 @@ class CryptoOrderBook extends StatefulWidget {
     this.currency = 'USD',
     this.onCurrencyChanged,
     this.active = true,
+    this.levels,
+    this.priceStep,
+    this.onLevelsChanged,
+    this.onPriceStepChanged,
   });
   final String symbol, status, currency;
   final DashboardClient client;
   final ValueChanged<String>? onCurrencyChanged;
   final bool active;
+  final int? levels;
+  final double? priceStep;
+  final ValueChanged<int>? onLevelsChanged;
+  final ValueChanged<double>? onPriceStepChanged;
   final CryptoBook? book;
   final double? lastPrice;
   @override
@@ -168,8 +193,11 @@ class CryptoOrderBook extends StatefulWidget {
 class _CryptoOrderBookState extends State<CryptoOrderBook>
     with WidgetsBindingObserver {
   _BookView _view = _BookView.both;
-  int _multiplier = 1;
-  int? _visibleLevels;
+  late int? _visibleLevels = widget.levels;
+  late double? _selectedStep = widget.priceStep;
+  CryptoPriceRule? _rule;
+  DateTime? _ruleFetchedAt;
+  bool _rulesError = false;
   int _priceDirection = 0;
   String? _hoveredLevel;
   late String _currency = widget.currency == 'CNY' ? 'CNY' : 'USD';
@@ -196,31 +224,56 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     _rateTimer?.cancel();
     _ratesBusy = true;
     final serial = ++_rateSerial;
-    try {
-      final result = await widget.client.load('cryptoConversion', const {});
-      if (result.data['base'] != 'USDT' ||
-          !const ['USD', 'CNY'].every(
-            (key) =>
-                result.data[key] is num &&
-                (result.data[key] as num).isFinite &&
-                (result.data[key] as num) > 0,
-          )) {
-        throw const FormatException('Invalid conversion rates');
-      }
-      if (!mounted || serial != _rateSerial) return;
-      setState(() {
-        _rates = result;
-        _rateError = result.stale;
-      });
-    } catch (_) {
-      if (!mounted || serial != _rateSerial) return;
-      setState(() => _rateError = true);
-    } finally {
-      if (mounted && serial == _rateSerial) {
-        _ratesBusy = false;
-        if (_visible && widget.active) {
-          _rateTimer = Timer(Duration(minutes: _rateError ? 1 : 5), _loadRates);
+    Future<void> conversion() async {
+      try {
+        final result = await widget.client.load('cryptoConversion', const {});
+        if (result.data['base'] != 'USDT' ||
+            !const ['USD', 'CNY'].every(
+              (key) =>
+                  result.data[key] is num &&
+                  (result.data[key] as num).isFinite &&
+                  (result.data[key] as num) > 0,
+            )) {
+          throw const FormatException('Invalid conversion rates');
         }
+        if (!mounted || serial != _rateSerial) return;
+        setState(() {
+          _rates = result;
+          _rateError = result.stale;
+        });
+      } catch (_) {
+        if (mounted && serial == _rateSerial) setState(() => _rateError = true);
+      }
+    }
+
+    Future<void> rules() async {
+      try {
+        final result = await widget.client.load('cryptoBookRules', const {});
+        final rows = (result.data['rules'] as List).map(
+          (r) => CryptoPriceRule.fromJson(r as Map),
+        );
+        final rule = rows.firstWhere((r) => r.symbol == widget.symbol);
+        if (!mounted || serial != _rateSerial) return;
+        setState(() {
+          _rule = rule;
+          _ruleFetchedAt = result.fetchedAt;
+          _rulesError = result.stale;
+        });
+      } catch (_) {
+        if (mounted && serial == _rateSerial) {
+          setState(() => _rulesError = true);
+        }
+      }
+    }
+
+    await Future.wait([conversion(), rules()]);
+    if (mounted && serial == _rateSerial) {
+      _ratesBusy = false;
+      if (_visible && widget.active) {
+        _rateTimer = Timer(
+          Duration(minutes: _rateError || _rulesError ? 1 : 5),
+          _loadRates,
+        );
       }
     }
   }
@@ -249,6 +302,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
   @override
   void didUpdateWidget(CryptoOrderBook old) {
     super.didUpdateWidget(old);
+    if (old.levels != widget.levels) _visibleLevels = widget.levels;
+    if (old.priceStep != widget.priceStep) _selectedStep = widget.priceStep;
     if (old.currency != widget.currency) {
       _currency = widget.currency == 'CNY' ? 'CNY' : 'USD';
     }
@@ -256,7 +311,10 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
       _rateSerial++;
       _ratesBusy = false;
       _rateTimer?.cancel();
-      if (old.client != widget.client) _rates = null;
+      if (old.client != widget.client) {
+        _rates = null;
+        _rule = null;
+      }
       _loadRates();
     }
     if (old.lastPrice != null &&
@@ -345,21 +403,25 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
   @override
   Widget build(BuildContext context) {
     final book = widget.book;
-    final digits = book?.priceDecimals ?? 2;
+    final rule =
+        _ruleFetchedAt != null &&
+            DateTime.now().difference(_ruleFetchedAt!) <=
+                const Duration(days: 1)
+        ? _rule
+        : null;
+    final digits = math.max(book?.priceDecimals ?? 0, rule?.decimals ?? 2);
+    final steps = rule?.steps ?? <double>[];
+    final step = steps.contains(_selectedStep)
+        ? _selectedStep
+        : steps.firstOrNull;
     final size = MediaQuery.sizeOf(context);
     final compactLandscape = size.width > size.height && size.height < 600;
     final levels = _visibleLevels ?? (compactLandscape ? 5 : 20);
     final bids =
-        book
-            ?.grouped(bid: true, multiplier: _multiplier)
-            .take(levels)
-            .toList() ??
+        book?.grouped(bid: true, step: step).take(levels).toList() ??
         <CryptoBookLevel>[];
     final asks =
-        book
-            ?.grouped(bid: false, multiplier: _multiplier)
-            .take(levels)
-            .toList() ??
+        book?.grouped(bid: false, step: step).take(levels).toList() ??
         <CryptoBookLevel>[];
     final maxBidQty = bids.fold<double>(
       0,
@@ -384,7 +446,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
               ? '同步重试中'
               : '同步重试 · 旧快照'
         : live
-        ? '实时 · 20档'
+        ? '实时 · $levels档'
         : book == null
         ? '等待深度数据'
         : widget.status == 'live'
@@ -546,7 +608,10 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                   key: const Key('crypto-book-levels'),
                   tooltip: '显示档位',
                   initialValue: levels,
-                  onSelected: (value) => setState(() => _visibleLevels = value),
+                  onSelected: (value) {
+                    setState(() => _visibleLevels = value);
+                    widget.onLevelsChanged?.call(value);
+                  },
                   itemBuilder: (context) => [
                     for (final n in [5, 10, 20])
                       CheckedPopupMenuItem(
@@ -598,29 +663,31 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                     ),
                   ],
                 ),
-                DropdownButton<int>(
-                  key: const Key('crypto-book-grouping'),
-                  value: _multiplier,
-                  isDense: true,
-                  underline: const SizedBox(),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFFE7EEF8),
-                    fontFamily: 'ShikeSans',
+                Tooltip(
+                  message: '价格档位',
+                  child: DropdownButton<double>(
+                    key: const Key('crypto-book-grouping'),
+                    value: step,
+                    isDense: true,
+                    underline: const SizedBox(),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFE7EEF8),
+                      fontFamily: 'ShikeSans',
+                    ),
+                    items: [
+                      for (final n in steps)
+                        DropdownMenuItem(value: n, child: Text(rule!.label(n))),
+                    ],
+                    onChanged: book == null || rule == null
+                        ? null
+                        : (n) {
+                            if (n == null) return;
+                            setState(() => _selectedStep = n);
+                            widget.onPriceStepChanged?.call(n);
+                          },
+                    hint: Text(_rulesError ? '档位暂不可用' : '档位加载中…'),
                   ),
-                  items: [
-                    for (final n in [1, 10, 100])
-                      DropdownMenuItem(
-                        value: n,
-                        child: Text(
-                          (n / math.pow(10, digits)).toStringAsFixed(digits),
-                        ),
-                      ),
-                  ],
-                  onChanged: book == null
-                      ? null
-                      : (n) => setState(() => _multiplier = n!),
-                  hint: const Text('价格档位'),
                 ),
               ],
             ),
@@ -759,7 +826,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
               child: Text(
-                '显示$levels档 / 前20档数量占比 · 接收 ${cryptoTime(book.receivedAt, seconds: true).substring(11)}',
+                '最多$levels档 / 原始前20档数量占比 · 接收 ${cryptoTime(book.receivedAt, seconds: true).substring(11)}',
                 style: const TextStyle(fontSize: 9, color: dashboardMuted),
               ),
             ),
