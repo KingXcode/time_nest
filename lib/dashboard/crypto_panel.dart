@@ -695,6 +695,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             status: _tradeStatus,
             client: widget.client,
             rows: _view.tradeRows,
+            showAmount: _view.tradeAmount,
             active: _automatic && _visible,
           );
     return Column(

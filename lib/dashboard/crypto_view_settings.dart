@@ -2,12 +2,18 @@ class CryptoViewSettings {
   const CryptoViewSettings({
     this.orderBook = true,
     this.trades = true,
+    this.tradeAmount = true,
     this.timeline = true,
     this.indicatorValues = true,
     this.assessment = true,
     this.tradeRows = 50,
   });
-  final bool orderBook, trades, timeline, indicatorValues, assessment;
+  final bool orderBook,
+      trades,
+      tradeAmount,
+      timeline,
+      indicatorValues,
+      assessment;
   final int tradeRows;
 
   factory CryptoViewSettings.decode(Object? raw) {
@@ -16,6 +22,7 @@ class CryptoViewSettings {
     return CryptoViewSettings(
       orderBook: enabled('orderBook'),
       trades: enabled('trades'),
+      tradeAmount: enabled('tradeAmount'),
       timeline: enabled('timeline'),
       indicatorValues: enabled('indicatorValues'),
       assessment: enabled('assessment'),
@@ -29,6 +36,7 @@ class CryptoViewSettings {
   Map<String, dynamic> toJson() => {
     'orderBook': orderBook,
     'trades': trades,
+    'tradeAmount': tradeAmount,
     'timeline': timeline,
     'indicatorValues': indicatorValues,
     'assessment': assessment,

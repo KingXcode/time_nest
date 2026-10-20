@@ -69,6 +69,7 @@ void main() {
     expect(r.cryptoCurrency, 'CNY');
     expect(r.cryptoView.orderBook, false);
     expect(r.cryptoView.trades, false);
+    expect(r.cryptoView.tradeAmount, true);
     expect(r.cryptoView.timeline, false);
     expect(r.cryptoView.tradeRows, 100);
     expect(r.cryptoView.assessment, true);
@@ -82,6 +83,17 @@ void main() {
       expect(CryptoViewSettings.decode(value).tradeRows, 50);
     }
     expect(DashboardPreferences.decode('{}').cryptoView.trades, true);
+    expect(DashboardPreferences.decode('{}').cryptoView.tradeAmount, true);
+    for (final value in [null, 0, 'false', [], {}]) {
+      expect(
+        CryptoViewSettings.decode({'tradeAmount': value}).tradeAmount,
+        true,
+      );
+    }
+    p.cryptoView = p.cryptoView.change('tradeAmount', false);
+    final hiddenAmount = DashboardPreferences.decode(p.encode()).cryptoView;
+    expect(hiddenAmount.tradeAmount, false);
+    expect(hiddenAmount.change('tradeRows', 20).tradeAmount, false);
     expect(
       () => CryptoTrade.fromJson({...trade(1), 'quantity': double.nan}),
       throwsFormatException,
@@ -363,6 +375,7 @@ void main() {
       expect(saved.toJson(), {
         'orderBook': false,
         'trades': false,
+        'tradeAmount': true,
         'timeline': false,
         'indicatorValues': false,
         'assessment': false,
@@ -375,6 +388,127 @@ void main() {
       expect(restored.windows.single, (orderBook: false, trades: false));
       expect(find.byType(CryptoTrades), findsNothing);
       expect(find.byKey(const Key('crypto-view-settings')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'amount setting cancels safely, persists on apply and preserves frozen rows, count and subscriptions',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 1000));
+      final client = Client(), feed = Feed();
+      await tester.pumpWidget(page(client, feed));
+      await tester.pumpAndSettle();
+      feed.send(fills(102));
+      await tester.pumpAndSettle();
+      final tape = find.byType(CryptoTrades);
+      final originalState = tester.state(tape);
+      final chartState = tester.state(find.byType(CryptoChart));
+      final originalPreferences = client.preferences;
+      SwitchListTile setting() => tester.widget<SwitchListTile>(
+        find.byKey(const Key('crypto-setting-tradeAmount')),
+      );
+      Future<void> toggle() async {
+        await press(tester, 'crypto-setting-tradeAmount');
+      }
+
+      Future<void> finish(String label) async {
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+      }
+
+      Finder amountHeader() =>
+          find.descendant(of: tape, matching: find.text('金额(USDT)'));
+      await press(tester, 'crypto-view-settings');
+      expect(setting().value, true);
+      await toggle();
+      expect(setting().value, false);
+      await finish('取消');
+      expect(tester.widget<CryptoTrades>(tape).showAmount, true);
+      expect(amountHeader(), findsOneWidget);
+      expect(client.preferences, originalPreferences);
+      await press(tester, 'crypto-view-settings');
+      expect(setting().value, true);
+      await toggle();
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(client.preferences, originalPreferences);
+      expect(amountHeader(), findsOneWidget);
+
+      await press(tester, 'crypto-trades-freeze');
+      await press(tester, 'crypto-view-settings');
+      expect(setting().value, true);
+      await toggle();
+      await finish('应用');
+      expect(amountHeader(), findsNothing);
+      expect(find.byKey(const Key('crypto-trade-amount-102')), findsNothing);
+      expect(
+        find.descendant(of: tape, matching: find.byTooltip('40.73600500 USDT')),
+        findsNothing,
+      );
+      expect(find.text('已定格'), findsOneWidget);
+      expect(identical(tester.state(tape), originalState), true);
+      expect(
+        identical(tester.state(find.byType(CryptoChart)), chartState),
+        true,
+      );
+      expect(tester.widget<CryptoTrades>(tape).rows, 50);
+      expect(feed.selections, hasLength(1));
+      expect(feed.cancelled, 0);
+      expect(
+        DashboardPreferences.decode(client.preferences).cryptoView.tradeAmount,
+        false,
+      );
+      final row = find.byKey(const Key('crypto-trade-102'));
+      for (final value in ['81,472.01', '0.00050', '19:21:20']) {
+        expect(
+          find.descendant(of: row, matching: find.text(value)),
+          findsOneWidget,
+        );
+      }
+      final semantics = tester
+          .widgetList<Semantics>(
+            find.descendant(of: tape, matching: find.byType(Semantics)),
+          )
+          .where(
+            (widget) => widget.properties.label?.startsWith('成交 ') ?? false,
+          );
+      expect(semantics, isNotEmpty);
+      expect(
+        semantics.every((widget) => !widget.properties.label!.contains('金额')),
+        true,
+      );
+      feed.send(fills(103));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('crypto-trade-103')), findsNothing);
+      await press(tester, 'crypto-view-settings');
+      expect(setting().value, false);
+      await toggle();
+      await finish('应用');
+      expect(find.byKey(const Key('crypto-trade-amount-102')), findsOneWidget);
+      expect(find.text('已定格'), findsOneWidget);
+      await press(tester, 'crypto-trades-freeze');
+      expect(find.byKey(const Key('crypto-trade-103')), findsOneWidget);
+      expect(feed.selections, hasLength(1));
+
+      await press(tester, 'crypto-view-settings');
+      await toggle();
+      await finish('应用');
+      await tester.pumpWidget(const SizedBox());
+      final restored = Feed();
+      await tester.pumpWidget(page(client, restored));
+      await tester.pumpAndSettle();
+      restored.send(fills(104));
+      await tester.pumpAndSettle();
+      expect(tester.widget<CryptoTrades>(tape).showAmount, false);
+      expect(tester.widget<CryptoTrades>(tape).rows, 50);
+      expect(amountHeader(), findsNothing);
+      expect(find.byKey(const Key('crypto-trade-104')), findsOneWidget);
+      await press(tester, 'crypto-view-settings');
+      expect(setting().value, false);
+      await finish('取消');
+      expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -401,6 +535,19 @@ void main() {
       await tester.tap(pause);
       await tester.pumpAndSettle();
       final calls = client.candleRequests;
+      final subscriptions = feed.selections.length;
+      await press(tester, 'crypto-view-settings');
+      await press(tester, 'crypto-setting-tradeAmount');
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<CryptoTrades>(find.byType(CryptoTrades)).showAmount,
+        false,
+      );
+      expect(tester.widget<CryptoTrades>(find.byType(CryptoTrades)).rows, 100);
+      expect(feed.selections, hasLength(subscriptions));
+      expect(client.candleRequests, calls);
+      expect(find.textContaining('推送已暂停'), findsWidgets);
       await press(tester, 'crypto-view-settings');
       tester
           .widget<SwitchListTile>(
@@ -476,11 +623,63 @@ void main() {
         );
       }
       expect(tester.getSize(plot).height, cryptoPriceHeight);
+      final originalWidth = tester.getSize(tradeRow).width;
+      final horizontal = tester
+          .widget<SingleChildScrollView>(
+            find.descendant(
+              of: tape,
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is SingleChildScrollView &&
+                    widget.scrollDirection == Axis.horizontal,
+              ),
+            ),
+          )
+          .controller!;
+      horizontal.jumpTo(horizontal.position.maxScrollExtent);
+      await tester.pumpAndSettle();
       await press(tester, 'crypto-view-settings');
       expect(find.text('图表设置'), findsOneWidget);
+      await press(tester, 'crypto-setting-tradeAmount');
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(amount, findsNothing);
+      expect(
+        find.descendant(of: tape, matching: find.text('金额(USDT)')),
+        findsNothing,
+      );
+      expect(quantity, findsOneWidget);
+      expect(time, findsOneWidget);
+      expect(
+        tester.getTopLeft(time).dx,
+        greaterThan(tester.getTopLeft(quantity).dx),
+      );
+      expect(tester.getSize(tradeRow).width, lessThanOrEqualTo(originalWidth));
+      if (size.width == 320) {
+        expect(
+          tester.getSize(tradeRow).width,
+          closeTo(originalWidth - 160, .01),
+        );
+      }
+      expect(
+        horizontal.offset,
+        lessThanOrEqualTo(horizontal.position.maxScrollExtent),
+      );
+      expect(feed.selections, hasLength(1));
+      await press(tester, 'crypto-view-settings');
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.byKey(const Key('crypto-setting-tradeAmount')),
+            )
+            .value,
+        false,
+      );
+      await press(tester, 'crypto-setting-tradeAmount');
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
+      expect(amount, findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
   }

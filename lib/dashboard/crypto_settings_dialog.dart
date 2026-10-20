@@ -43,6 +43,20 @@ Future<CryptoViewSettings?> showCryptoViewSettings(
                         update(() => draft = draft.change(item.$1, value)),
                   ),
                 const Divider(height: 16),
+                const Text(
+                  '最新成交列表',
+                  style: TextStyle(color: dashboardMuted, fontSize: 12),
+                ),
+                SwitchListTile.adaptive(
+                  key: const Key('crypto-setting-tradeAmount'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
+                  title: const Text('显示金额', style: TextStyle(fontSize: 13)),
+                  value: draft.tradeAmount,
+                  onChanged: (value) =>
+                      update(() => draft = draft.change('tradeAmount', value)),
+                ),
                 Row(
                   children: [
                     const Expanded(

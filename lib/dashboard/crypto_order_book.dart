@@ -587,6 +587,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
       int precision, {
       bool abbreviate = false,
       Color? color,
+      TextAlign alignment = TextAlign.right,
       double? reservedTail,
       String label = '',
     }) {
@@ -604,7 +605,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
             ),
             child: Text(
               text,
-              textAlign: TextAlign.right,
+              textAlign: alignment,
               style: rowStyle.copyWith(color: color),
               maxLines: 1,
             ),
@@ -715,6 +716,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                         level.price,
                         digits,
                         color: color,
+                        alignment: TextAlign.left,
                         label: '价格(USDT)',
                       ),
                     ),
@@ -898,6 +900,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                   flex: columnFlex[0],
                   child: Text(
                     '价格(USDT)',
+                    textAlign: TextAlign.left,
                     style: TextStyle(fontSize: 10, color: dashboardMuted),
                   ),
                 ),

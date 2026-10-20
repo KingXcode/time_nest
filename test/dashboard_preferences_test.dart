@@ -211,6 +211,7 @@ void main() {
     active['cryptoView'] = {
       'orderBook': false,
       'trades': false,
+      'tradeAmount': false,
       'timeline': false,
       'indicatorValues': false,
       'assessment': false,

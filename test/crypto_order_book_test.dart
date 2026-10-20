@@ -192,7 +192,7 @@ void main() {
   });
 
   testWidgets(
-    'cached rules render first, fresh rules update the table without restarting feeds, and numeric decimals align',
+    'cached rules render first, fresh rules update without restarting feeds, prices align left and numeric decimals align',
     (tester) async {
       fixture.setSize(tester, const Size(1280, 900));
       final client = RulesClient()
@@ -250,7 +250,12 @@ void main() {
         return tester.getTopLeft(f).dx + box.left;
       }
 
-      for (var column = 0; column < 3; column++) {
+      for (final row in [rowA, rowB, rowC]) {
+        expect(tester.widget<Text>(row[0]).textAlign, TextAlign.left);
+        expect(tester.getTopLeft(row[0]).dx, tester.getTopLeft(rowA[0]).dx);
+      }
+      for (var column = 1; column < 3; column++) {
+        expect(tester.widget<Text>(rowA[column]).textAlign, TextAlign.right);
         expect(dot(rowA[column]), closeTo(dot(rowB[column]), .25));
         expect(dot(rowA[column]), closeTo(dot(rowC[column]), .25));
       }
@@ -814,6 +819,27 @@ void main() {
         await tester.pumpAndSettle();
         final plot = find.byKey(const Key('crypto-price-plot'));
         final book = find.byKey(const Key('crypto-order-book'));
+        final priceHeader = find.descendant(
+          of: book,
+          matching: find.text('价格(USDT)'),
+        );
+        expect(tester.widget<Text>(priceHeader).textAlign, TextAlign.left);
+        void expectAlignment(String id) {
+          final cells = find.descendant(
+            of: find.byKey(Key('crypto-book-row-$id')),
+            matching: find.byType(Text),
+          );
+          expect(tester.widget<Text>(cells.at(0)).textAlign, TextAlign.left);
+          expect(
+            tester.getTopLeft(cells.at(0)).dx,
+            closeTo(tester.getTopLeft(priceHeader).dx, .01),
+          );
+          expect(tester.widget<Text>(cells.at(1)).textAlign, TextAlign.right);
+          expect(tester.widget<Text>(cells.at(2)).textAlign, TextAlign.right);
+        }
+
+        expectAlignment('bid-100.0');
+        expectAlignment('ask-100.01');
         if (viewport.$3) {
           final surface = find.byKey(const Key('crypto-chart-surface'));
           expect(
@@ -860,6 +886,13 @@ void main() {
         await tester.pumpAndSettle();
         expect(asks, findsNothing);
         expect(find.byKey(const Key('crypto-book-bids')), findsOneWidget);
+        expectAlignment('bid-100.0');
+        final asksButton = find.byKey(const Key('crypto-book-view-asks'));
+        await tester.ensureVisible(asksButton);
+        await tester.tap(asksButton);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('crypto-book-bids')), findsNothing);
+        expectAlignment('ask-100.01');
         final bothButton = find.byKey(const Key('crypto-book-view-both'));
         await tester.ensureVisible(bothButton);
         await tester.tap(bothButton);

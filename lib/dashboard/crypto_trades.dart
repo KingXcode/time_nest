@@ -44,13 +44,14 @@ class CryptoTrades extends StatefulWidget {
     required this.status,
     required this.client,
     this.rows = 50,
+    this.showAmount = true,
     this.active = true,
   });
   final String symbol, status;
   final List<CryptoTrade> trades;
   final DashboardClient client;
   final int rows;
-  final bool active;
+  final bool active, showAmount;
   @override
   State<CryptoTrades> createState() => _CryptoTradesState();
 }
@@ -206,21 +207,23 @@ class _CryptoTradesState extends State<CryptoTrades> {
             maxLines: 1,
           ),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          flex: 4,
-          child: Tooltip(
-            message: exactAmount == null ? '金额 (USDT)' : '$exactAmount USDT',
-            excludeFromSemantics: true,
-            child: Text(
-              amount,
-              key: amountKey,
-              style: numeric,
-              textAlign: TextAlign.right,
-              maxLines: 1,
+        if (widget.showAmount) ...[
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: Tooltip(
+              message: exactAmount == null ? '金额 (USDT)' : '$exactAmount USDT',
+              excludeFromSemantics: true,
+              child: Text(
+                amount,
+                key: amountKey,
+                style: numeric,
+                textAlign: TextAlign.right,
+                maxLines: 1,
+              ),
             ),
           ),
-        ),
+        ],
         const SizedBox(width: 8),
         Expanded(
           flex: 3,
@@ -305,14 +308,15 @@ class _CryptoTradesState extends State<CryptoTrades> {
               builder: (context, box) {
                 final scale = MediaQuery.textScalerOf(context).scale(11) / 11;
                 final rowHeight = math.max(22.0, 20 * scale);
+                final minWidth = (widget.showAmount ? 312 : 232) * scale;
                 return Scrollbar(
                   controller: _horizontal,
-                  thumbVisibility: box.maxWidth < 312 * scale,
+                  thumbVisibility: box.maxWidth < minWidth,
                   child: SingleChildScrollView(
                     controller: _horizontal,
                     scrollDirection: Axis.horizontal,
                     child: SizedBox(
-                      width: math.max(box.maxWidth, 312 * scale),
+                      width: math.max(box.maxWidth, minWidth),
                       child: Column(
                         children: [
                           Padding(
@@ -390,7 +394,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
                                     ).split(' ').last;
                                     return Semantics(
                                       label:
-                                          '成交 ${trade.id}，${trade.buyerMaker ? '主动卖出' : '主动买入'}，价格 $price，数量 $quantity，金额 $exactAmount USDT，时间 $time',
+                                          '成交 ${trade.id}，${trade.buyerMaker ? '主动卖出' : '主动买入'}，价格 $price，数量 $quantity${widget.showAmount ? '，金额 $exactAmount USDT' : ''}，时间 $time',
                                       child: Tooltip(
                                         message:
                                             '${cryptoTime(trade.time, seconds: true)} UTC+8',

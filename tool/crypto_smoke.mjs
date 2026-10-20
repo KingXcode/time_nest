@@ -652,7 +652,7 @@ try {
   assert.ok(!hiddenSocket.url.includes('@depth') && !hiddenSocket.url.includes('@trade'));
   await waitFor(async()=>{const nodes=await labels();return !nodes.some(e=>e.label==='订单簿面板' || e.label==='最新成交面板' || e.label==='历史时间轴');},'disabled windows are removed');
   let view=JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoView;
-  assert.deepEqual(view,{orderBook:false,trades:false,timeline:false,indicatorValues:false,assessment:false,tradeRows:100});
+  assert.deepEqual(view,{orderBook:false,trades:false,tradeAmount:true,timeline:false,indicatorValues:false,assessment:false,tradeRows:100});
   await waitFor(()=>streamFrames.some(f=>f.id===hiddenSocket.requestId && f.data?.e==='kline'),'K line continues with both market windows hidden');
   await activate('图表设置');
   for(const name of ['订单簿','最新成交','历史时间轴','指标数值','技术参考']) await activate(name);
@@ -731,7 +731,7 @@ try {
   assert.equal(restored.cryptoSymbol, 'ETHUSDT'); assert.equal(restored.cryptoInterval, '1d');
   assert.equal(restored.cryptoBookLevels,5);assert.deepEqual(restored.cryptoBookSteps,{BTCUSDT:10,ETHUSDT:0.01});
   assert.equal(restored.cryptoPaneHeights.vol,storedHeight);
-  assert.deepEqual(restored.cryptoView,{orderBook:true,trades:true,timeline:true,indicatorValues:true,assessment:true,tradeRows:100});
+  assert.deepEqual(restored.cryptoView,{orderBook:true,trades:true,tradeAmount:true,timeline:true,indicatorValues:true,assessment:true,tradeRows:100});
   assert.ok(!restored.order?.includes('fx'));
   await activate('数字货币行情');
   await waitFor(()=>page.evaluate('window.__rulesHeld === true'),'expired exchange rules refresh in background');
