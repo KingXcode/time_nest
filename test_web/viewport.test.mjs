@@ -12,7 +12,10 @@ class Events {
   }
   emit(name) { for (const callback of this.listeners.get(name) || []) callback(); }
 }
-function browser({ noViewport = false, hidden = false } = {}) {
+function browser({
+  noViewport = false, hidden = false, installed = false, legacyStandalone = false,
+  noMatchMedia = false, insets = {},
+} = {}) {
   const events = new Events();
   const document = new Events();
   document.visibilityState = hidden ? 'hidden' : 'visible';
@@ -22,15 +25,28 @@ function browser({ noViewport = false, hidden = false } = {}) {
     getPropertyValue: key => values.get(key) || '',
     setProperty: (key, value) => { writes++; values.set(key, value); },
   } };
-  document.getElementById = id => id === 'app' ? host : null;
+  const layout = { width: 390, height: 844 };
+  const probe = { getBoundingClientRect: () => layout };
+  document.getElementById = id => id === 'app' ? host : id === 'viewport-probe' ? probe : null;
+  const displayMode = Object.assign(new Events(), { matches: installed });
   const viewport = Object.assign(new Events(), {
     width: 390, height: 740, offsetLeft: 0, offsetTop: 24, scale: 1,
   });
   const frames = new Map(), timers = new Map();
+  let observeResize;
   let id = 0;
   const context = {
     document, visualViewport: noViewport ? undefined : viewport,
     innerWidth: 390, innerHeight: 844,
+    navigator: { standalone: legacyStandalone },
+    matchMedia: noMatchMedia ? undefined : () => displayMode,
+    getComputedStyle: () => ({
+      getPropertyValue: key => `${insets[key.replace('padding-', '')] || 0}px`,
+    }),
+    ResizeObserver: class {
+      constructor(callback) { observeResize = callback; }
+      observe(element) { assert.equal(element, probe); }
+    },
     addEventListener: events.addEventListener.bind(events),
     requestAnimationFrame: callback => { frames.set(++id, callback); return id; },
     cancelAnimationFrame: id => frames.delete(id),
@@ -39,7 +55,8 @@ function browser({ noViewport = false, hidden = false } = {}) {
   };
   vm.runInNewContext(source, context, { filename: 'viewport.js' });
   return {
-    context, document, events, viewport, frames, timers,
+    context, document, events, viewport, frames, timers, layout, insets, displayMode,
+    resizeProbe: () => observeResize(),
     get: name => values.get(`--app-viewport-${name}`), writes: () => writes,
     frame() {
       for (const [id, callback] of [...frames]) { frames.delete(id); callback(); }
@@ -127,8 +144,144 @@ test('legacy browsers use window dimensions; transient zero measurements cannot 
   assert.equal(b.get('height'), '390px');
 });
 
+test('standalone uses the full CSS viewport and removes safe areas only once', () => {
+  const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
+  b.viewport.height = 763; // WebKit may already exclude the 81px safe areas.
+  b.context.innerHeight = 763; // innerHeight is not a reliable replacement either.
+  b.viewport.offsetTop = 0;
+  b.viewport.emit('resize'); b.frame();
+  assert.equal(b.get('top'), '47px');
+  assert.equal(b.get('height'), '763px');
+  assert.equal(Number.parseFloat(b.get('top')) + Number.parseFloat(b.get('height')), 810);
+  assert.equal(b.get('width'), '390px');
+});
+
+test('late safe-area changes resize the host without a window resize', () => {
+  const b = browser({ installed: true });
+  assert.equal(b.get('height'), '844px');
+  Object.assign(b.insets, { top: 47, bottom: 34 });
+  b.resizeProbe(); b.frame();
+  assert.equal(b.get('top'), '47px');
+  assert.equal(b.get('height'), '763px');
+  const writes = b.writes();
+  b.resizeProbe(); b.frame();
+  assert.equal(b.writes(), writes, 'independent probe observation must not create a resize loop');
+});
+
+test('standalone keyboard intersects safe bounds, then restores with the same focused field', () => {
+  const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
+  b.document.activeElement = { shadowRoot: { activeElement: { tagName: 'INPUT', type: 'search' } } };
+  b.viewport.height = 510; b.viewport.offsetTop = 0;
+  b.document.emit('focusin'); b.frame();
+  assert.equal(b.get('top'), '47px');
+  assert.equal(b.get('height'), '463px', 'no extra home-indicator gutter above the keyboard');
+  b.viewport.offsetTop = 60; b.viewport.height = 450;
+  b.viewport.emit('scroll'); b.frame();
+  assert.equal(b.get('top'), '60px', 'do not add the notch inset to an already panned viewport');
+  assert.equal(b.get('height'), '450px');
+  b.viewport.offsetTop = 0; b.viewport.height = 763;
+  b.viewport.emit('resize'); b.frame();
+  assert.equal(b.get('top'), '47px');
+  assert.equal(b.get('height'), '763px', 'keyboard dismissal need not blur the field');
+});
+
+test('hardware keyboards, readonly inputs and non-editable focus do not shorten standalone', () => {
+  const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
+  b.viewport.height = 763; b.viewport.offsetTop = 0;
+  b.document.activeElement = { tagName: 'TEXTAREA' };
+  b.document.emit('focusin'); b.frame();
+  assert.equal(b.get('height'), '763px');
+  b.viewport.height = 510;
+  for (const element of [
+    { tagName: 'INPUT', type: 'checkbox' },
+    { tagName: 'INPUT', type: 'text', readOnly: true },
+    { tagName: 'TEXTAREA', disabled: true },
+    { tagName: 'BUTTON' },
+  ]) {
+    b.document.activeElement = element; b.document.emit('focusin'); b.frame();
+    assert.equal(b.get('height'), '763px');
+  }
+});
+
+test('rapid blur and refocus cannot cache a shrunken standalone viewport', () => {
+  const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
+  b.viewport.height = 510; b.viewport.offsetTop = 0;
+  b.document.activeElement = { isContentEditable: true };
+  b.document.emit('focusin'); b.frame();
+  assert.equal(b.get('height'), '463px');
+  b.document.activeElement = null; b.document.emit('focusout'); b.frame();
+  assert.equal(b.get('height'), '763px');
+  b.document.activeElement = { isContentEditable: true };
+  b.document.emit('focusin'); b.frame();
+  assert.equal(b.get('height'), '463px');
+  b.viewport.height = 763; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.get('height'), '763px');
+});
+
+test('standalone rotates into landscape side safe areas and survives repeated resume', () => {
+  const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
+  Object.assign(b.layout, { width: 844, height: 390 });
+  Object.assign(b.insets, { top: 0, right: 47, bottom: 21, left: 47 });
+  Object.assign(b.viewport, { width: 750, height: 369, offsetTop: 0, offsetLeft: 0 });
+  b.events.emit('orientationchange'); b.frame();
+  assert.equal(b.get('left'), '47px');
+  assert.equal(b.get('top'), '0px');
+  assert.equal(b.get('width'), '750px');
+  assert.equal(b.get('height'), '369px');
+  b.document.activeElement = { tagName: 'INPUT', type: 'text' };
+  b.viewport.height = 210; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.get('left'), '47px');
+  assert.equal(b.get('width'), '750px', 'a vertical keyboard must not double-subtract side insets');
+  assert.equal(b.get('height'), '210px');
+  b.viewport.height = 369; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.get('height'), '369px');
+  b.document.activeElement = null;
+  for (let n = 0; n < 3; n++) {
+    b.document.visibilityState = 'hidden'; b.document.emit('visibilitychange');
+    b.events.emit('pagehide');
+    assert.equal(b.frames.size + b.timers.size, 0);
+    b.document.visibilityState = 'visible'; b.events.emit('pageshow'); b.frame();
+    b.timer(100); b.frame(); b.timer(500); b.frame();
+    assert.equal(b.get('height'), '369px');
+    assert.equal(b.frames.size + b.timers.size, 0);
+  }
+});
+
+test('legacy standalone, no visual viewport and no safe insets remain supported', () => {
+  for (const options of [
+    { installed: true, noViewport: true },
+    { legacyStandalone: true, noMatchMedia: true },
+  ]) {
+    const b = browser(options);
+    assert.equal(b.get('height'), '844px');
+    assert.equal(b.get('top'), '0px');
+    b.layout.height = 0; b.events.emit('resize'); b.frame();
+    assert.equal(b.get('height'), '844px', 'ignore invalid transitional CSS bounds');
+  }
+});
+
+test('standalone keeps its layout through pinch zoom, and display-mode changes resync', () => {
+  const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
+  b.viewport.scale = 2; b.viewport.height = 381.5; b.viewport.width = 195;
+  b.viewport.emit('resize'); b.frame();
+  assert.equal(b.get('height'), '763px');
+  b.viewport.scale = 1; b.viewport.height = 740; b.viewport.width = 390;
+  b.viewport.offsetTop = 24;
+  b.displayMode.matches = false; b.displayMode.emit('change'); b.frame();
+  assert.equal(b.get('height'), '659px', 'regular tab keeps the original visible viewport policy');
+  assert.equal(b.get('top'), '71px');
+  b.displayMode.matches = true; b.displayMode.emit('change'); b.frame();
+  assert.equal(b.get('height'), '763px');
+  assert.equal(b.get('top'), '47px');
+});
+
 test('viewport synchronization is loaded before the engine and safe insets remain in CSS', async () => {
   const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
   assert.ok(html.indexOf('src="viewport.js"') < html.indexOf('src="flutter_bootstrap.js"'));
   for (const edge of ['top', 'bottom', 'left', 'right']) assert.ok(html.includes(`env(safe-area-inset-${edge}, 0px)`));
+  assert.match(html, /id="viewport-probe" aria-hidden="true"/);
+  assert.match(html, /width: 100vw; height: 100vh/);
+  assert.match(html, /height: var\(--app-viewport-height, calc\(100vh/);
+  assert.doesNotMatch(html, /calc\(var\(--app-viewport-(height|width|top|left)/,
+    'final JS bounds must not receive the safe-area insets twice');
 });

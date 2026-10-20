@@ -163,6 +163,65 @@ try {
   const missingLoader = await connect();
   await missingLoader.navigate(origin + '/no-loading/'); await ready(missingLoader);
   passed('missing optional startup script does not block the complete app');
+
+  // Real Chromium DOM/Flutter sizing with explicitly simulated installed-WebKit
+  // metrics. This is not an iOS device or an on-screen keyboard test.
+  const installed = await connect();
+  await installed.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await installed.send('Page.addScriptToEvaluateOnNewDocument', { source: `
+    Object.defineProperty(navigator, 'standalone', { value: true });
+    window.testViewport = Object.assign(new EventTarget(), {
+      width: 390, height: 763, offsetLeft: 0, offsetTop: 0, scale: 1,
+    });
+    Object.defineProperty(window, 'visualViewport', { value: window.testViewport });
+  ` });
+  await installed.navigate(origin + '/'); await ready(installed);
+  async function viewportBounds(expected, label) {
+    await waitFor(() => installed.evaluate(`(() => {
+      const host = document.getElementById('app').getBoundingClientRect();
+      const view = document.querySelector('flutter-view').getBoundingClientRect();
+      const expected = ${JSON.stringify(expected)};
+      return ['x', 'y', 'width', 'height'].every(key =>
+        Math.abs(host[key] - expected[key]) < 1 && Math.abs(view[key] - host[key]) < 1);
+    })()`), label);
+  }
+  await installed.evaluate(`
+    document.getElementById('viewport-probe').style.padding = '47px 0px 34px';
+    window.dispatchEvent(new Event('resize'));
+  `);
+  await viewportBounds({ x: 0, y: 47, width: 390, height: 763 }, 'standalone safe host and Flutter canvas');
+  await installed.screenshot('viewport-standalone-portrait.png');
+  await installed.evaluate(`
+    window.testField = document.createElement('input');
+    testField.style.cssText = 'position:fixed;top:100px;left:10px;width:120px';
+    document.body.append(testField); testField.focus({ preventScroll: true });
+    Object.assign(testViewport, { height: 450, offsetTop: 60 });
+    testViewport.dispatchEvent(new Event('resize'));
+  `);
+  await viewportBounds({ x: 0, y: 60, width: 390, height: 450 }, 'simulated keyboard and panned viewport');
+  await installed.evaluate(`
+    Object.assign(testViewport, { height: 763, offsetTop: 0 });
+    testViewport.dispatchEvent(new Event('resize'));
+  `);
+  await viewportBounds({ x: 0, y: 47, width: 390, height: 763 }, 'keyboard dismissal without blur');
+  assert.equal(await installed.evaluate('document.activeElement === testField'), true);
+  await installed.evaluate('testField.remove()');
+  await installed.send('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
+  await installed.evaluate(`
+    document.getElementById('viewport-probe').style.padding = '0px 47px 21px';
+    Object.assign(testViewport, { width: 750, height: 369, offsetTop: 0 });
+    window.dispatchEvent(new Event('orientationchange'));
+  `);
+  await viewportBounds({ x: 47, y: 0, width: 750, height: 369 }, 'standalone landscape side safe areas');
+  for (let n = 0; n < 3; n++) {
+    await installed.evaluate(`
+      window.dispatchEvent(new Event('pagehide'));
+      window.dispatchEvent(new Event('pageshow'));
+    `);
+    await viewportBounds({ x: 47, y: 0, width: 750, height: 369 }, 'standalone repeated resume');
+  }
+  await installed.screenshot('viewport-standalone-landscape.png');
+  passed('simulated standalone safe areas, keyboard dismissal, rotation and resume keep Flutter inside the host');
   page = await connect();
   await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `sessionStorage.setItem('smoke-loads', String(Number(sessionStorage.getItem('smoke-loads') || 0) + 1));` });
   await page.navigate(origin + '/');
