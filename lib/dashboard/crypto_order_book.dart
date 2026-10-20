@@ -155,25 +155,56 @@ class CryptoBook {
       : bidQuantity / (bidQuantity + askQuantity);
 }
 
-/// The chart keeps its full price height; only horizontal space is shared.
+/// Keep the chart tall. Wide screens read chart → book → trades; medium
+/// landscape stacks the side panels, and portrait puts them below the chart.
 class CryptoBookLayout extends StatelessWidget {
   const CryptoBookLayout({
     super.key,
     required this.chart,
-    required this.orderBook,
+    this.orderBook,
+    this.trades,
   });
   final Widget Function(Widget? belowChart) chart;
-  final Widget orderBook;
+  final Widget? orderBook, trades;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
+      final panels = <Widget>[?orderBook, ?trades];
+      if (panels.isEmpty) return chart(null);
       final size = MediaQuery.sizeOf(context);
       final side =
           box.maxWidth >= 900 ||
           (size.width > size.height && box.maxWidth >= 520);
+      Widget stack() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < panels.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            panels[i],
+          ],
+        ],
+      );
       if (!side) {
         return chart(
-          Padding(padding: const EdgeInsets.only(top: 10), child: orderBook),
+          Padding(padding: const EdgeInsets.only(top: 10), child: stack()),
+        );
+      }
+      if (panels.length == 2 && box.maxWidth >= 1180) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: chart(null)),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: (box.maxWidth * .21).clamp(220.0, 300.0),
+              child: orderBook,
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: (box.maxWidth * .19).clamp(210.0, 260.0),
+              child: trades,
+            ),
+          ],
         );
       }
       return Row(
@@ -183,7 +214,7 @@ class CryptoBookLayout extends StatelessWidget {
           const SizedBox(width: 8),
           SizedBox(
             width: (box.maxWidth * .30).clamp(220.0, 320.0),
-            child: orderBook,
+            child: stack(),
           ),
         ],
       );

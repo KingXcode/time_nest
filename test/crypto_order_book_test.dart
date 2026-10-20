@@ -659,7 +659,13 @@ void main() {
       await tester.tap(find.text('人民币 CNY'));
       await tester.pumpAndSettle();
       expect(find.text('≈ ¥710.00 CNY'), findsOneWidget);
-      expect(find.text('价格(USDT)'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CryptoOrderBook),
+          matching: find.text('价格(USDT)'),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('金额(USDT)'), findsOneWidget);
       expect(feed.controllers.length, subscriptions);
       expect(client.rateCalls, inInclusiveRange(1, 2));

@@ -3,7 +3,12 @@ import 'crypto_feed_stub.dart'
     as implementation;
 
 abstract class CryptoFeed {
-  Stream<Map<String, dynamic>> subscribe(String symbol, String interval);
+  Stream<Map<String, dynamic>> subscribe(
+    String symbol,
+    String interval, {
+    bool orderBook = true,
+    bool trades = false,
+  });
 
   /// Rebootstrap the active order book without interrupting quotes or candles.
   /// Returns its new generation, or null when no subscription is active.

@@ -7,6 +7,10 @@ class _UnavailableFeed implements CryptoFeed {
   int? resetOrderBook() => null;
 
   @override
-  Stream<Map<String, dynamic>> subscribe(String symbol, String interval) =>
-      Stream.value({'type': 'status', 'status': 'unavailable'});
+  Stream<Map<String, dynamic>> subscribe(
+    String symbol,
+    String interval, {
+    bool orderBook = true,
+    bool trades = false,
+  }) => Stream.value({'type': 'status', 'status': 'unavailable'});
 }

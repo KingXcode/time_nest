@@ -21,14 +21,24 @@ class _WebFeed implements CryptoFeed {
       _activeId == null ? null : _resetBook(_activeId!)?.toDartInt;
 
   @override
-  Stream<Map<String, dynamic>> subscribe(String symbol, String interval) {
+  Stream<Map<String, dynamic>> subscribe(
+    String symbol,
+    String interval, {
+    bool orderBook = true,
+    bool trades = false,
+  }) {
     JSString? id;
     late StreamController<Map<String, dynamic>> controller;
     controller = StreamController(
       onListen: () {
         try {
           id = _subscribe(
-            jsonEncode({'symbol': symbol, 'interval': interval}).toJS,
+            jsonEncode({
+              'symbol': symbol,
+              'interval': interval,
+              'orderBook': orderBook,
+              'trades': trades,
+            }).toJS,
             ((JSString raw) {
               if (controller.isClosed) return;
               try {

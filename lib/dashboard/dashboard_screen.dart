@@ -388,6 +388,9 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         overlays: preferences.cryptoOverlays,
         panes: preferences.cryptoPanes,
         infoRight: preferences.cryptoInfoRight,
+        viewSettings: preferences.cryptoView,
+        onViewSettingsChanged: (settings) =>
+            _save(() => preferences.cryptoView = settings),
         bookLevels: preferences.cryptoBookLevels,
         bookSteps: preferences.cryptoBookSteps,
         onBookSettingsChanged: (levels, steps) => _save(() {

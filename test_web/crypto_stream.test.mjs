@@ -22,7 +22,7 @@ function harness(options = {}) {
   vm.runInNewContext(source,context);
   function advance(ms){const target=now+ms;for(;;){const ready=[...timers].filter(([,t])=>t.at<=target).sort((a,b)=>a[1].at-b[1].at)[0];if(!ready)break;now=ready[1].at;timers.delete(ready[0]);ready[1].fn();}now=target;}
   return {api:context.timeNestDashboard,events,sockets,timers,document,advance,requests,storage,now:()=>now,
-    start:(symbol='BTCUSDT',interval='1h')=>context.timeNestDashboard.subscribeCrypto(JSON.stringify({symbol,interval}),raw=>events.push(JSON.parse(raw))),
+    start:(symbol='BTCUSDT',interval='1h',windows={})=>context.timeNestDashboard.subscribeCrypto(JSON.stringify({symbol,interval,...windows}),raw=>events.push(JSON.parse(raw))),
     visibility:hidden=>{document.hidden=hidden;listeners.get('visibilitychange')?.();},listeners};
 }
 function ticker(time=START,symbol='BTCUSDT',price='100') {return {stream:`${symbol.toLowerCase()}@ticker`,data:{e:'24hrTicker',E:time,s:symbol,c:price,P:'1.2',h:'110',l:'90',v:'20',q:'2000',O:time-86400000,C:time}};}
@@ -329,4 +329,67 @@ test('growth beyond 10000 known prices per side restarts instead of publishing a
   ws.frame(depth(12,{U:12,b:Array.from({length:6000},(_,i)=>[(99999.9999-i*.0001).toFixed(4),'1'])}));
   assert.equal(copies(h).length,before);assert.equal(bookStatus(h),'syncing');
   h.api.unsubscribeCrypto(id);
+});
+
+function fill(id,{symbol='BTCUSDT',time=START,price='100.01',quantity='0.00100',maker=false}={}) {
+  return {stream:`${symbol.toLowerCase()}@trade`,data:{e:'trade',E:time,s:symbol,t:id,p:price,q:quantity,T:time,m:maker}};
+}
+const tradeCopies=h=>h.events.filter(e=>e.type==='trades');
+const tradeRow=(id,price='100.00')=>({id,price,qty:'0.01000',time:START-100,isBuyerMaker:true});
+
+test('raw trades share the selected socket and merge a late REST snapshot by ID, keeping same-millisecond executions',async()=>{
+  const pending=deferred(),h=harness({fetch:()=>pending.promise}),id=h.start('BTCUSDT','1h',{orderBook:false,trades:true}),ws=h.sockets[0];ws.open();
+  assert.ok(ws.url.includes('btcusdt@trade'));assert.ok(!ws.url.includes('@depth'));
+  assert.equal(new URL(h.requests[0].url).pathname,'/api/v3/trades');
+  assert.equal(new URL(h.requests[0].url).searchParams.get('limit'),'100');
+  ws.frame(fill(102));ws.frame(fill(103,{maker:true}));ws.frame(fill(102,{price:'999'}));
+  assert.equal(tradeCopies(h).length,0);h.advance(250);
+  assert.deepEqual(tradeCopies(h).at(-1).trades.map(t=>t.id),[103,102]);
+  assert.equal(tradeCopies(h).at(-1).trades[1].price,100.01);
+  pending.resolve(response([tradeRow(100),tradeRow(101),tradeRow(102,'999.00')]));await settle();h.advance(250);
+  const rows=tradeCopies(h).at(-1).trades;
+  assert.deepEqual(rows.map(t=>t.id),[103,102,101,100]);assert.equal(rows[1].price,100.01);
+  assert.equal(rows[0].buyerMaker,true);assert.equal(rows[1].buyerMaker,false);
+  ws.frame(ticker(h.now()));ws.frame(candle(h.now()));
+  assert.equal(h.events.at(-1).status,'live');assert.equal(h.sockets.length,1);
+  assert.ok(![...h.storage.values()].some(v=>v.includes('buyerMaker')));
+  h.api.unsubscribeCrypto(id);assert.equal(h.timers.size,0);
+});
+
+test('trade bursts publish at most four batches a second, cap retention, and reject foreign and malformed fills',async()=>{
+  const h=harness({fetch:()=>response([])}),id=h.start('BTCUSDT','1h',{orderBook:false,trades:true}),ws=h.sockets[0];ws.open();await settle();
+  for(let i=1000;i<2000;i++) ws.frame(fill(i));
+  assert.equal(tradeCopies(h).length,0);h.advance(250);
+  assert.equal(tradeCopies(h).length,1);assert.equal(tradeCopies(h)[0].trades.length,100);
+  assert.equal(tradeCopies(h)[0].trades[0].id,1999);assert.equal(tradeCopies(h)[0].trades.at(-1).id,1900);
+  const count=tradeCopies(h).length;
+  ws.frame(fill(3000,{symbol:'ETHUSDT'}));ws.frame(fill(3001,{quantity:'0'}));ws.frame(fill(3002,{maker:'false'}));ws.frame(fill(3003,{price:'NaN'}));
+  h.advance(250);assert.equal(tradeCopies(h).length,count);
+  h.api.unsubscribeCrypto(id);assert.equal(h.timers.size,0);
+});
+
+test('trade bootstrap aborts on hidden/unsubscribe; late old snapshots and callbacks cannot enter a new symbol',async()=>{
+  const pending=deferred(),h=harness({fetch:()=>pending.promise}),id=h.start('BTCUSDT','1h',{orderBook:false,trades:true}),ws=h.sockets[0];ws.open();
+  ws.frame(fill(100));const obsolete=ws.onmessage;h.visibility(true);
+  assert.equal(h.requests[0].init.signal.aborted,true);assert.equal(h.timers.size,0);
+  h.api.unsubscribeCrypto(id);h.document.hidden=false;
+  const eth=h.start('ETHUSDT','1d',{orderBook:false,trades:false});h.sockets.at(-1).open();
+  assert.ok(!h.sockets.at(-1).url.includes('@trade'));assert.ok(!h.sockets.at(-1).url.includes('@depth'));
+  pending.resolve(response([tradeRow(99)]));obsolete({data:JSON.stringify(fill(101))});await settle();h.advance(250);
+  assert.equal(tradeCopies(h).length,0);assert.equal(h.requests.length,1);
+  h.api.unsubscribeCrypto(eth);assert.equal(h.timers.size,0);
+});
+
+test('failed or malformed trade snapshots retry independently, without losing live rows or reconnecting charts',async()=>{
+  const h=harness({fetch:n=>n===1?response({error:'offline'},503):n===2?response([tradeRow(10),{...tradeRow(11),qty:'-1'}]):response([tradeRow(10)])});
+  const id=h.start('BTCUSDT','1h',{orderBook:false,trades:true}),ws=h.sockets[0];ws.open();await settle();
+  assert.equal(h.events.at(-1).status,'retrying');ws.frame(fill(20));h.advance(250);
+  assert.equal(tradeCopies(h).at(-1).trades[0].id,20);
+  h.advance(750);await settle();assert.equal(h.requests.length,2);h.advance(250);
+  assert.equal(tradeCopies(h).at(-1).trades.length,1);
+  h.advance(1750);await settle();h.advance(250);
+  assert.deepEqual(tradeCopies(h).at(-1).trades.map(t=>t.id),[20,10]);
+  assert.equal(h.sockets.length,1);assert.notEqual(ws.closed,true);
+  h.api.unsubscribeCrypto(id);assert.equal(h.timers.size,0);
+  assert.throws(()=>h.start('BTCUSDT','1h',{trades:'yes'}));
 });

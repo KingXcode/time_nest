@@ -9,6 +9,9 @@ import 'crypto_feed.dart';
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
 import 'crypto_order_book.dart';
+import 'crypto_trades.dart';
+import 'crypto_view_settings.dart';
+import 'crypto_settings_dialog.dart';
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
@@ -32,6 +35,8 @@ class CryptoPanel extends StatefulWidget {
     this.paneHeights = const {},
     this.onPaneHeightsChanged,
     this.onChartChanged,
+    this.viewSettings = const CryptoViewSettings(),
+    this.onViewSettingsChanged,
   });
   final DashboardClient client;
   final String symbol, interval, currency;
@@ -43,6 +48,8 @@ class CryptoPanel extends StatefulWidget {
   final CryptoFeed? feed;
   final List<String> overlays, panes;
   final bool infoRight;
+  final CryptoViewSettings viewSettings;
+  final ValueChanged<CryptoViewSettings>? onViewSettingsChanged;
   final Map<String, double> paneHeights;
   final ValueChanged<Map<String, double>>? onPaneHeightsChanged;
   final void Function(
@@ -60,7 +67,9 @@ class CryptoPanel extends StatefulWidget {
 class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   DashboardData? _quoteData, _candleData;
   CryptoBook? _book;
-  String _bookStatus = 'syncing';
+  String _bookStatus = 'syncing', _tradeStatus = 'syncing';
+  List<CryptoTrade> _trades = [];
+  late CryptoViewSettings _view = widget.viewSettings;
   int _bookEpoch = 0;
   GlobalKey _chartKey = GlobalKey();
   List<CryptoQuote> _quotes = [];
@@ -106,6 +115,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(CryptoPanel old) {
     super.didUpdateWidget(old);
+    if (old.viewSettings != widget.viewSettings) _view = widget.viewSettings;
     if (old.bookLevels != widget.bookLevels) {
       _bookLevels = cleanCryptoBookLevels(widget.bookLevels);
     }
@@ -158,6 +168,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       setState(() {
         _streamStatus = 'paused';
         _bookStatus = 'paused';
+        _tradeStatus = 'paused';
       });
     }
   }
@@ -359,9 +370,16 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     _streamStatus = 'connecting';
     _bookStatus = 'syncing';
     _bookEpoch = 0;
+    _tradeStatus = 'syncing';
+    _trades = [];
     final serial = _feedSerial;
     _subscription = _feed
-        .subscribe(widget.symbol, widget.interval)
+        .subscribe(
+          widget.symbol,
+          widget.interval,
+          orderBook: _view.orderBook,
+          trades: _view.trades,
+        )
         .listen(
           (event) {
             if (!mounted || serial != _feedSerial) return;
@@ -371,6 +389,13 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                 setState(() {
                   _streamStatus = event['status'] as String;
                   if (_streamStatus != 'live') {
+                    _tradeStatus =
+                        const [
+                          'connecting',
+                          'connected',
+                        ].contains(_streamStatus)
+                        ? 'syncing'
+                        : _streamStatus;
                     _bookStatus =
                         const [
                           'connecting',
@@ -382,8 +407,49 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                 });
                 if (event['resync'] == true) {
                   _book = null;
+                  _trades = [];
                   _historySynchronized = false;
                   _refresh(refresh: true);
+                }
+                return;
+              }
+              if (type == 'tradeStatus') {
+                if (_view.trades &&
+                    event['symbol'] == widget.symbol &&
+                    const [
+                      'syncing',
+                      'retrying',
+                      'live',
+                    ].contains(event['status'])) {
+                  setState(() => _tradeStatus = event['status'] as String);
+                }
+                return;
+              }
+              if (type == 'trades') {
+                if (!_view.trades || event['symbol'] != widget.symbol) return;
+                try {
+                  final raw = event['trades'] as List;
+                  if (raw.length > 100) return;
+                  final rows = raw
+                      .map((r) => CryptoTrade.fromJson(r as Map))
+                      .toList();
+                  if (rows.map((r) => r.id).toSet().length != rows.length) {
+                    return;
+                  }
+                  for (var i = 1; i < rows.length; i++) {
+                    if (rows[i].id >= rows[i - 1].id) return;
+                  }
+                  if (rows.isNotEmpty &&
+                      _trades.isNotEmpty &&
+                      rows.first.id < _trades.first.id) {
+                    return;
+                  }
+                  setState(() {
+                    _trades = rows;
+                    _tradeStatus = 'live';
+                  });
+                } catch (_) {
+                  /* Invalid trades cannot interrupt quote/candle state. */
                 }
                 return;
               }
@@ -479,6 +545,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               setState(() {
                 _streamStatus = 'error';
                 _bookStatus = 'error';
+                _tradeStatus = 'error';
               });
             }
           },
@@ -487,6 +554,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               setState(() {
                 _streamStatus = 'error';
                 _bookStatus = 'error';
+                _tradeStatus = 'error';
               });
             }
           },
@@ -561,37 +629,73 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     );
   }
 
+  Future<void> _showViewSettings() async {
+    final next = await showCryptoViewSettings(context, _view);
+    if (!mounted || next == null) return;
+    final subscriptionsChanged =
+        next.orderBook != _view.orderBook || next.trades != _view.trades;
+    setState(() {
+      _view = next;
+      if (subscriptionsChanged) {
+        _book = null;
+        _trades = [];
+        _startFeed();
+      }
+    });
+    widget.onViewSettingsChanged?.call(next);
+    if (subscriptionsChanged && _automatic && _visible) _refresh(refresh: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = _quotes
         .where((q) => q.symbol == widget.symbol)
         .firstOrNull;
-    final orderBook = CryptoOrderBook(
-      key: ValueKey('crypto-book-${widget.symbol}'),
-      symbol: widget.symbol,
-      book: _book,
-      status: _bookStatus,
-      lastPrice: selected?.price,
-      client: widget.client,
-      currency: widget.currency,
-      onCurrencyChanged: widget.onCurrencyChanged,
-      active: _automatic && _visible,
-      levels: _bookLevels,
-      priceStep: _bookSteps[widget.symbol],
-      onLevelsChanged: (levels) {
-        setState(() => _bookLevels = levels);
-        widget.onBookSettingsChanged?.call(_bookLevels, Map.of(_bookSteps));
-      },
-      onPriceStepChanged: (step) {
-        setState(() {
-          _bookSteps[widget.symbol] = step;
-          _book = null;
-          _bookStatus = _automatic && _visible ? 'syncing' : 'paused';
-          _bookEpoch = _feed.resetOrderBook() ?? _bookEpoch;
-        });
-        widget.onBookSettingsChanged?.call(_bookLevels, Map.of(_bookSteps));
-      },
-    );
+    final Widget? orderBook = !_view.orderBook
+        ? null
+        : CryptoOrderBook(
+            key: ValueKey('crypto-book-${widget.symbol}'),
+            symbol: widget.symbol,
+            book: _book,
+            status: _bookStatus,
+            lastPrice: selected?.price,
+            client: widget.client,
+            currency: widget.currency,
+            onCurrencyChanged: widget.onCurrencyChanged,
+            active: _automatic && _visible,
+            levels: _bookLevels,
+            priceStep: _bookSteps[widget.symbol],
+            onLevelsChanged: (levels) {
+              setState(() => _bookLevels = levels);
+              widget.onBookSettingsChanged?.call(
+                _bookLevels,
+                Map.of(_bookSteps),
+              );
+            },
+            onPriceStepChanged: (step) {
+              setState(() {
+                _bookSteps[widget.symbol] = step;
+                _book = null;
+                _bookStatus = _automatic && _visible ? 'syncing' : 'paused';
+                _bookEpoch = _feed.resetOrderBook() ?? _bookEpoch;
+              });
+              widget.onBookSettingsChanged?.call(
+                _bookLevels,
+                Map.of(_bookSteps),
+              );
+            },
+          );
+    final Widget? trades = !_view.trades
+        ? null
+        : CryptoTrades(
+            key: ValueKey('crypto-trades-${widget.symbol}'),
+            symbol: widget.symbol,
+            trades: _trades,
+            status: _tradeStatus,
+            client: widget.client,
+            rows: _view.tradeRows,
+            active: _automatic && _visible,
+          );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -618,6 +722,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                   setState(() {
                     _streamStatus = 'paused';
                     _bookStatus = 'paused';
+                    _tradeStatus = 'paused';
                   });
                 }
               },
@@ -718,9 +823,19 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         if (_candleData == null)
           CryptoBookLayout(
             orderBook: orderBook,
+            trades: trades,
             chart: (belowChart) => Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    key: const Key('crypto-view-settings'),
+                    tooltip: '图表设置',
+                    onPressed: _showViewSettings,
+                    icon: const Icon(Icons.settings_outlined, size: 17),
+                  ),
+                ),
                 const SizedBox(
                   height: cryptoPriceHeight,
                   child: Center(
@@ -737,8 +852,11 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         else
           CryptoChart(
             key: _chartKey,
+            viewSettings: _view,
+            onViewSettings: _showViewSettings,
             chartLayout: (plots) => CryptoBookLayout(
               orderBook: orderBook,
+              trades: trades,
               chart: (belowChart) => Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [plots, ?belowChart],
@@ -786,7 +904,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           ],
         ),
         const Text(
-          '24h 涨跌为滚动 24 小时变化，绿色上涨、红色下跌。这里只展示币安所选现货交易对，不代表全市场市值；USDT 不等同美元。后台暂停推送，断网时可能显示旧数据。',
+          '24h 涨跌为滚动 24 小时变化，行情与 K 线绿色上涨、红色下跌；最新成交绿色为主动买入、红色为主动卖出。这里只展示币安所选现货交易对，不代表全市场市值；USDT 不等同美元。后台暂停推送，断网时可能显示旧数据。',
           style: TextStyle(color: dashboardMuted, fontSize: 12, height: 1.7),
         ),
       ],

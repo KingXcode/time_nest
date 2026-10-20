@@ -26,6 +26,7 @@ List<Map<String, dynamic>> history() =>
 class Feed implements CryptoFeed {
   final controllers = <StreamController<Map<String, dynamic>>>[];
   final selections = <String>[];
+  final windows = <({bool orderBook, bool trades})>[];
   int cancelled = 0, bookEpoch = 0, bookResets = 0;
 
   @override
@@ -35,9 +36,15 @@ class Feed implements CryptoFeed {
   }
 
   @override
-  Stream<Map<String, dynamic>> subscribe(String symbol, String interval) {
+  Stream<Map<String, dynamic>> subscribe(
+    String symbol,
+    String interval, {
+    bool orderBook = true,
+    bool trades = false,
+  }) {
     bookEpoch = 0;
     selections.add('$symbol:$interval');
+    windows.add((orderBook: orderBook, trades: trades));
     final c = StreamController<Map<String, dynamic>>(
       sync: true,
       onCancel: () => cancelled++,

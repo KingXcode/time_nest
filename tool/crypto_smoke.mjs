@@ -169,7 +169,7 @@ async function labels(p = page) {
 }
 async function activate(label, p = page) {
   const locate = () => p.evaluate(`(() => {
-    const nodes = (${deepQuery})('[role="button"], [role="menuitem"], [role="menuitemcheckbox"], [role="checkbox"], [role="group"]');
+    const nodes = (${deepQuery})('[role="button"], [role="menuitem"], [role="menuitemcheckbox"], [role="checkbox"], [role="switch"], [role="group"]');
     const element = nodes.find(e => (e.getAttribute('aria-label') || e.textContent).trim().split('\\n').includes(${JSON.stringify(label)}));
     if (!element) throw new Error('Missing control: ' + ${JSON.stringify(label)} + ' available=' + nodes.map(e=>e.getAttribute('aria-label') || e.textContent).join('|'));
     const box = element.getBoundingClientRect(); return {x: box.x + box.width/2, y: box.y + box.height/2, viewport: innerHeight};
@@ -260,6 +260,18 @@ try {
   assert.ok(streamConnections.some(s=>s.url.includes('btcusdt@depth')));
   assert.ok([...requests].some(raw=>{try{const url=new URL(raw);return url.hostname==='data-api.binance.vision' && url.pathname==='/api/v3/depth' && url.searchParams.get('symbol')==='BTCUSDT' && url.searchParams.get('limit')==='5000';}catch{return false;}}),'local book bootstraps with a real REST snapshot');
   passed('actual Binance diff stream and REST snapshot bootstrap a synchronized local order book on the shared socket');
+  await waitFor(()=>streamFrames.some(f=>f.stream==='btcusdt@trade' && f.data?.e==='trade'),'actual raw market trade frames');
+  const tapeRows=()=>labels().then(nodes=>nodes.filter(e=>/^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\+8\n)?成交 \d+，/.test(e.label||'') && (e.label.match(/成交 \d+，/g)||[]).length===1));
+  await waitFor(async()=>(await tapeRows()).length>=10,'raw trades render in the live tape');
+  assert.ok(requestEvents.some(url=>url.includes('/api/v3/trades?symbol=BTCUSDT') && url.includes('limit=100')));
+  const initialFills=await tapeRows(), fillIds=initialFills.map(e=>Number(e.label.match(/成交 (\d+)，/)[1]));
+  assert.equal(new Set(fillIds).size,fillIds.length,'displayed fills never duplicate trade IDs');
+  assert.ok(fillIds.every((id,i)=>i===0 || id<fillIds[i-1]),'newest executions appear first');
+  assert.ok(initialFills.every(e=>/数量 [\d,]+\.\d{5}，时间 \d{2}:\d{2}:\d{2}/.test(e.label)),'BTC quantities use exchange precision and UTC+8 times');
+  const matched=initialFills.map(row=>({row,frame:streamFrames.find(f=>f.data?.e==='trade' && f.data.t===Number(row.label.match(/成交 (\d+)，/)[1]))})).filter(item=>item.frame);
+  assert.ok(matched.length>0,'displayed IDs match the actual raw stream');
+  for(const {row,frame} of matched) assert.ok(row.label.includes(frame.data.m?'主动卖出':'主动买入'));
+  passed('recent public fills bootstrap from REST and raw same-socket trades render newest-first with unique IDs, exchange precision and correct aggressor direction');
   const conversion = await page.evaluate(`timeNestDashboard.request('cryptoConversion','{}').then(JSON.parse)`);
   assert.equal(conversion.stale, false);
   assert.equal(conversion.data.base, 'USDT');
@@ -309,16 +321,20 @@ try {
     return page.evaluate(`(() => {
       const nodes=(${deepQuery})('flt-semantics, [aria-label]');
       const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix));if(!e)throw new Error('Missing geometry '+prefix);const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
-      return {plot:rect('K 线主图，'),frame:rect('K 线图表区域'),book:rect('订单簿面板'),lastPane:rect('RSI 相对强弱 副图，'),assessment:rect('技术指标 · 买入参考')};
+      return {plot:rect('K 线主图，'),frame:rect('K 线图表区域'),book:rect('订单簿面板'),lastPane:rect('RSI 相对强弱 副图，'),assessment:rect('技术指标 · 买入参考'),trades:rect('最新成交面板')};
     })()`);
   }
   let bookBoxes=await bookGeometry();
   assert.ok(bookBoxes.book.x>=bookBoxes.plot.right,'desktop book is to the right of the chart');
   assert.ok(Math.abs(bookBoxes.book.y-bookBoxes.frame.y)<1,'desktop order book and chart frame share a top border');
+  assert.ok(bookBoxes.trades.x>=bookBoxes.book.right,'latest trades are the far-right desktop column');
+  assert.ok(Math.abs(bookBoxes.trades.y-bookBoxes.frame.y)<1,'all three desktop panels share a top border');
+  await page.screenshot('33-latest-trades-desktop.png');
   await page.screenshot('19-orderbook-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});await delay(500);
   bookBoxes=await bookGeometry();
   assert.ok(bookBoxes.book.y>bookBoxes.lastPane.bottom && bookBoxes.book.y<bookBoxes.assessment.y,'portrait book is below subcharts and above assessment');
+  assert.ok(bookBoxes.trades.y>bookBoxes.book.bottom,'portrait latest trades follow the order book');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:bookBoxes.book.y-100});await delay(500);
   await page.screenshot('20-orderbook-portrait.png');
   await page.send('Emulation.setDeviceMetricsOverride',{width:844,height:390,deviceScaleFactor:1,mobile:false});await delay(500);
@@ -563,6 +579,42 @@ try {
   passed('dragging a subchart edge resizes only that pane within the connected chart');
   passed('two-finger zoom preserves tracking; long press and slide inspect bars without panning, and the small close button returns to navigation');
   passed('mouse and touch pan real charts; manual button loads contiguous older candles and live pushes keep the viewport');
+  // Applying layout settings must retain the historical view and pane sizes.
+  const beforeWindowsRange=await visibleRange(), beforeWindowsConnections=streamConnections.length;
+  await activate('图表设置');await page.screenshot('34-chart-settings-desktop.png');
+  await activate('订单簿');await activate('取消');
+  assert.equal(streamConnections.length,beforeWindowsConnections,'cancel never changes subscriptions');
+  assert.ok((await labels()).some(e=>e.label==='订单簿面板'));
+  await activate('图表设置');
+  for(const name of ['订单簿','最新成交','历史时间轴','指标数值','技术参考']) await activate(name);
+  await activate('50 条');await activate('100 条');await activate('应用');
+  await waitFor(()=>streamConnections.length>beforeWindowsConnections,'hidden data windows resubscribe without depth or raw trades');
+  const hiddenSocket=streamConnections.at(-1);
+  assert.ok(!hiddenSocket.url.includes('@depth') && !hiddenSocket.url.includes('@trade'));
+  await waitFor(async()=>{const nodes=await labels();return !nodes.some(e=>e.label==='订单簿面板' || e.label==='最新成交面板' || e.label==='历史时间轴');},'disabled windows are removed');
+  let view=JSON.parse(await page.evaluate('timeNestDashboard.readPreferences()')).cryptoView;
+  assert.deepEqual(view,{orderBook:false,trades:false,timeline:false,indicatorValues:false,assessment:false,tradeRows:100});
+  await waitFor(()=>streamFrames.some(f=>f.id===hiddenSocket.requestId && f.data?.e==='kline'),'K line continues with both market windows hidden');
+  await activate('图表设置');
+  for(const name of ['订单簿','最新成交','历史时间轴','指标数值','技术参考']) await activate(name);
+  await activate('应用');
+  await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'order book returns after settings apply');
+  await waitFor(async()=>(await labels()).some(e=>e.label?.includes('100/100 笔')),'restored tape retains the selected hundred recent fills');
+  assert.equal(await visibleRange(),beforeWindowsRange,'settings preserve historical chart viewport');
+  const beforeFreeze=streamConnections.length;
+  await activate('暂停成交列表');const frozen=(await tapeRows()).map(row=>row.label);
+  await delay(1000);assert.deepEqual((await tapeRows()).map(row=>row.label),frozen,'freezing the tape makes it readable while pushes continue');
+  await activate('继续成交列表');
+  await waitFor(async()=>(await tapeRows())[0]?.label!==frozen[0],'continuing the tape shows newer fills');
+  assert.equal(streamConnections.length,beforeFreeze,'tape freeze does not restart the market feed');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});await delay(400);
+  await activate('图表设置');await page.screenshot('35-chart-settings-mobile.png');await activate('取消');
+  let tapeBox=(await bookGeometry()).trades;
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:tapeBox.y-100});await delay(500);
+  await page.screenshot('36-latest-trades-mobile.png');
+  await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});await delay(400);
+  await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(500);
+  passed('chart settings cancel/apply preserve the viewport; window switches stop hidden subscriptions, persist on-device, and tape freeze/resume works on the shared feed');
   // Flutter semantics represents the entire card as one tappable node.
   const ethPoint = await page.evaluate(`(() => {
     const node = (${deepQuery})('flt-semantics, [aria-label]').find(e => (e.getAttribute('aria-label') || e.textContent || '').startsWith('ETH · 以太坊'));
@@ -620,6 +672,7 @@ try {
   assert.equal(restored.cryptoSymbol, 'ETHUSDT'); assert.equal(restored.cryptoInterval, '1d');
   assert.equal(restored.cryptoBookLevels,5);assert.deepEqual(restored.cryptoBookSteps,{BTCUSDT:10,ETHUSDT:0.01});
   assert.equal(restored.cryptoPaneHeights.vol,storedHeight);
+  assert.deepEqual(restored.cryptoView,{orderBook:true,trades:true,timeline:true,indicatorValues:true,assessment:true,tradeRows:100});
   assert.ok(!restored.order?.includes('fx'));
   await activate('数字货币行情');
   await waitFor(()=>page.evaluate('window.__rulesHeld === true'),'expired exchange rules refresh in background');

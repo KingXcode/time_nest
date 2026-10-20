@@ -594,21 +594,90 @@
       stop() { closed = true; cancelRequest(); local = null; rendered = null; buffer = []; },
     };
   }
+  // Public raw trades, not aggregated executions. Buyer-maker means the
+  // aggressor sold; IDs (not event timestamps) distinguish same-millisecond fills.
+  function maintainTrades(symbol, emit, current) {
+    let rows = new Map(), stopped = false, pending = null, flush = null, retry = null, failures = 0, status;
+    const valid = () => !stopped && current();
+    const state = value => {
+      if (valid() && value !== status) { status = value; emit({type:'tradeStatus',symbol,status:value}); }
+    };
+    function trade(raw, snapshot = false) {
+      requireValue(object(raw));
+      const id = snapshot ? raw.id : raw.t, time = snapshot ? raw.time : raw.T;
+      const price = decimal(snapshot ? raw.price : raw.p), quantity = decimal(snapshot ? raw.qty : raw.q);
+      const buyerMaker = snapshot ? raw.isBuyerMaker : raw.m;
+      requireValue(Number.isSafeInteger(id) && id >= 0 && timestamp(time) && time <= Date.now() + MINUTE
+        && typeof buyerMaker === 'boolean' && price > 0 && quantity > 0);
+      if (!snapshot) requireValue(raw.e === 'trade' && raw.s === symbol && timestamp(raw.E)
+        && raw.E <= Date.now() + MINUTE && Date.now() - raw.E < MINUTE && Math.abs(raw.E - time) < MINUTE);
+      return {id,time,price,quantity,buyerMaker};
+    }
+    function trim() {
+      const sorted = [...rows.values()].sort((a,b) => b.id-a.id).slice(0,100);
+      rows = new Map(sorted.map(row => [row.id,row])); return sorted;
+    }
+    function publish() {
+      flush = null;
+      if (!valid() || !rows.size) return;
+      emit({type:'trades',symbol,eventTime:Date.now(),trades:trim()}); state('live');
+    }
+    function schedule() {
+      if (flush === null) flush = setTimeout(publish,250);
+    }
+    function insert(row) {
+      if (!rows.has(row.id)) rows.set(row.id,row);
+      if (rows.size > 200) trim();
+    }
+    async function snapshot() {
+      if (!valid() || pending) return;
+      const wait = (limits[binanceHost] || 0) - Date.now();
+      if (wait > 0) { retry = setTimeout(snapshot,wait); return; }
+      const controller = new AbortController(); pending = controller;
+      try {
+        const data = await jsonFetch(`https://${binanceHost}/api/v3/trades?symbol=${symbol}&limit=100`, {signal:controller.signal});
+        if (!valid()) return;
+        requireValue(Array.isArray(data) && data.length <= 100);
+        const parsed = data.map(row => trade(row,true)); // Validate atomically.
+        requireValue(new Set(parsed.map(row => row.id)).size === parsed.length);
+        for (const row of parsed) insert(row);
+        failures = 0; schedule();
+      } catch (_) {
+        if (!valid()) return;
+        if (!rows.size) state('retrying');
+        retry = setTimeout(snapshot,Math.min(30000,1000 * 2 ** Math.min(failures++,5)));
+      } finally { if (pending === controller) pending = null; }
+    }
+    state('syncing');
+    return {
+      start: snapshot,
+      push(raw) {
+        if (!valid()) return false;
+        try { insert(trade(raw)); schedule(); return true; }
+        catch (_) { return false; }
+      },
+      stop() { stopped = true; pending?.abort(); pending = null; clearTimeout(flush); clearTimeout(retry); rows.clear(); },
+    };
+  }
   // Public market-only streams. Browsers handle WebSocket protocol ping/pong.
   const cryptoSessions = new Map();
   let cryptoSessionId = 0;
   function subscribeCrypto(raw, callback) {
-    const args = normalizeArgs('cryptoCandles', JSON.parse(raw));
+    const options = JSON.parse(raw);
+    const args = normalizeArgs('cryptoCandles', options);
+    requireValue(['orderBook','trades'].every(key => options[key] === undefined || typeof options[key] === 'boolean'));
+    const showBook = options.orderBook !== false, showTrades = options.trades === true;
     requireValue(typeof callback === 'function');
     const id = String(++cryptoSessionId);
     let socket, retryTimer, watchdog, rotation, stopped = false, generation = 0, failures = 0;
-    let opened = false, localDepth, bookEpoch = 0;
+    let opened = false, localDepth, localTrades, bookEpoch = 0;
     const selected = args.symbol.toLowerCase();
-    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), `${selected}@depth`, `${selected}@kline_${args.interval}`];
+    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), ...(showBook ? [`${selected}@depth`] : []), ...(showTrades ? [`${selected}@trade`] : []), `${selected}@kline_${args.interval}`];
     const emit = event => { if (!stopped) callback(JSON.stringify(event)); };
     function clear() {
       generation++;
       localDepth?.stop(); localDepth = null;
+      localTrades?.stop(); localTrades = null;
       clearTimeout(retryTimer); clearTimeout(watchdog); clearTimeout(rotation);
       if (socket) { socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null; socket.close(); socket = null; }
     }
@@ -629,11 +698,12 @@
       try { socket = new WebSocket(`wss://data-stream.binance.vision/stream?streams=${streams.join('/')}`); }
       catch (_) { retry(); return; }
       const valid = () => !stopped && epoch === generation;
-      localDepth = maintainSpotBook(args.symbol,event => emit({...event,bookEpoch}),valid);
+      if (showBook) localDepth = maintainSpotBook(args.symbol,event => emit({...event,bookEpoch}),valid);
+      if (showTrades) localTrades = maintainTrades(args.symbol,emit,valid);
       function check() {
         if (!valid()) return;
         const now = Date.now();
-        if ([`${selected}@ticker`, `${selected}@kline_${args.interval}`, `${selected}@depth`].some(key => now - (received.get(key) || start) > 15000)) { retry(); return; }
+        if ([`${selected}@ticker`, `${selected}@kline_${args.interval}`, ...(showBook ? [`${selected}@depth`] : [])].some(key => now - (received.get(key) || start) > 15000)) { retry(); return; }
         watchdog = setTimeout(check, 5000);
       }
       const start = Date.now();
@@ -641,6 +711,7 @@
       socket.onopen = () => {
         if (!valid()) return;
         emit({type:'status',status:'connected',resync:opened}); opened = true;
+        localTrades?.start();
         rotation = setTimeout(retry, 23 * HOUR + 50 * MINUTE);
       };
       socket.onmessage = message => {
@@ -649,9 +720,10 @@
           const envelope = JSON.parse(message.data), data = envelope.data;
           if (data?.e === 'serverShutdown' || envelope.e === 'serverShutdown') { retry(); return; }
           if (envelope.stream === `${selected}@depth`) {
-            if (localDepth.push(data)) received.set(envelope.stream,Date.now());
+            if (localDepth?.push(data)) received.set(envelope.stream,Date.now());
             return;
           }
+          if (envelope.stream === `${selected}@trade`) { localTrades?.push(data); return; }
           requireValue(streams.includes(envelope.stream) && object(data) && timestamp(data.E) && data.E <= Date.now() + MINUTE && Date.now() - data.E < MINUTE);
           if (data.E <= (times.get(envelope.stream) || 0)) return;
           let event;

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'market_config.dart';
 import 'crypto_market.dart';
 import 'crypto_indicators.dart';
+import 'crypto_view_settings.dart';
 
 const dashboardModules = ['weather', 'releases', 'news', 'market', 'crypto'];
 
@@ -84,6 +85,7 @@ class DashboardPreferences {
     this.cryptoBookLevels,
     this.cryptoBookSteps = const {},
     this.cryptoPaneHeights = const {},
+    this.cryptoView = const CryptoViewSettings(),
     this.order = dashboardModules,
     this.favorites = const ['weather'],
   });
@@ -97,6 +99,7 @@ class DashboardPreferences {
   String cryptoInterval;
   List<String> cryptoOverlays, cryptoPanes;
   bool cryptoInfoRight;
+  CryptoViewSettings cryptoView;
   String cryptoCurrency;
   int? cryptoBookLevels;
   Map<String, double> cryptoBookSteps;
@@ -171,6 +174,7 @@ class DashboardPreferences {
       prefs.cryptoBookLevels = cleanCryptoBookLevels(json['cryptoBookLevels']);
       prefs.cryptoBookSteps = cleanCryptoBookSteps(json['cryptoBookSteps']);
       prefs.cryptoInfoRight = json['cryptoInfoRight'] == true;
+      prefs.cryptoView = CryptoViewSettings.decode(json['cryptoView']);
       prefs.cryptoPaneHeights = cleanCryptoPaneHeights(
         json['cryptoPaneHeights'],
       );
@@ -211,6 +215,7 @@ class DashboardPreferences {
     'cryptoBookLevels': cleanCryptoBookLevels(cryptoBookLevels),
     'cryptoBookSteps': cleanCryptoBookSteps(cryptoBookSteps),
     'cryptoPaneHeights': cleanCryptoPaneHeights(cryptoPaneHeights),
+    'cryptoView': cryptoView.toJson(),
     'order': order,
     'favorites': favorites,
   });
