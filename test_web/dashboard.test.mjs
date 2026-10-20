@@ -554,7 +554,7 @@ test('conversion rate limit persists independently of Binance market requests', 
 });
 
 
-const priceRules = () => ({ symbols: ['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','DOGEUSDT'].map(symbol => ({symbol,filters:[{filterType:'PRICE_FILTER',tickSize:symbol==='XRPUSDT'?'0.00010000':symbol==='DOGEUSDT'?'0.00001000':'0.01000000'}]})) });
+const priceRules = () => ({ symbols: ['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','DOGEUSDT'].map(symbol => ({symbol,baseAssetPrecision:8,quoteAssetPrecision:8,filters:[{filterType:'PRICE_FILTER',tickSize:symbol==='XRPUSDT'?'0.00010000':symbol==='DOGEUSDT'?'0.00001000':'0.01000000'},{filterType:'LOT_SIZE',stepSize:symbol==='BTCUSDT'?'0.00001000':symbol==='ETHUSDT'?'0.00010000':symbol==='XRPUSDT'?'0.10000000':symbol==='DOGEUSDT'?'1.00000000':'0.00100000'}]})) });
 test('book price increments come from exchangeInfo PRICE_FILTER for each supported symbol', async () => {
   const shared = storage();
   const h = harness(() => response(priceRules()), {storage: shared});
@@ -569,11 +569,11 @@ test('book price increments come from exchangeInfo PRICE_FILTER for each support
   const reload = harness(() => {throw new Error('offline');},{storage:shared,now:START+30*minute});
   assert.equal((await reload.request('cryptoBookRules',{})).cached,true);
   assert.equal(reload.calls.length,0);
-  reload.advance(hour);
+  reload.advance(8 * hour);
   const stale = await reload.request('cryptoBookRules',{});
   assert.equal(stale.stale,true); assert.equal(stale.fetchedAt,result.fetchedAt);
   const expired = harness(() => {throw new Error('offline');},{storage:shared,now:START+day+1});
-  await assert.rejects(expired.request('cryptoBookRules',{}),/加载失败/);
+  assert.equal((await expired.request('cryptoBookRules',{})).stale,true);
 });
 
 test('missing, duplicate or invalid price filters never fabricate grouping rules', async () => {
@@ -588,4 +588,57 @@ test('missing, duplicate or invalid price filters never fabricate grouping rules
     const h=harness(()=>response(raw));
     await assert.rejects(h.request('cryptoBookRules',{}),/格式异常/);
   }
+});
+
+
+test('exchange rules cache lasts eight hours, then returns old data immediately while one background refresh notifies views', async () => {
+  const shared=storage();
+  const first=harness(()=>response(priceRules()),{storage:shared});
+  const original=await first.request('cryptoBookRules',{});
+  assert.equal(original.data.rules[0].stepSize,'0.00001000');
+  assert.equal(original.data.rules[0].quoteAssetPrecision,8);
+  assert.ok(shared.values.has('shike.crypto.rules.v2'));
+  const fresh=harness(()=>{throw new Error('must use cache');},{storage:shared,now:START+8*hour-1});
+  assert.equal((await fresh.request('cryptoBookRules',{})).stale,false);
+  assert.equal(fresh.calls.length,0);
+  let resolve;
+  const expired=harness(()=>new Promise(done=>resolve=done),{storage:shared,now:START+8*hour});
+  const updates=[];
+  expired.api.subscribeCryptoRules(()=>{throw new Error('closed view');});
+  const id=expired.api.subscribeCryptoRules(raw=>updates.push(JSON.parse(raw)));
+  const cached=await expired.request('cryptoBookRules',{});
+  assert.equal(cached.stale,true);assert.equal(cached.fetchedAt,original.fetchedAt);
+  assert.deepEqual(cached.data,original.data);assert.equal(expired.calls.length,1);
+  await expired.request('cryptoBookRules',{});
+  const waiting=expired.request('cryptoBookRules',{},true);
+  assert.equal(expired.calls.length,1,'concurrent refreshes share the pending fetch');
+  const changed=priceRules();changed.symbols[0].filters[0].tickSize='0.10000000';changed.symbols[0].filters[1].stepSize='0.00100000';changed.symbols[0].quoteAssetPrecision=6;
+  resolve(response(changed));const updated=await waiting;
+  assert.equal(updated.stale,false);assert.equal(updates.length,1);
+  assert.equal(updates[0].data.rules[0].tickSize,'0.10000000');
+  assert.equal(updates[0].data.rules[0].stepSize,'0.00100000');assert.equal(updates[0].data.rules[0].quoteAssetPrecision,6);
+  assert.equal((await expired.request('cryptoBookRules',{})).data.rules[0].stepSize,'0.00100000');
+  expired.api.unsubscribeCryptoRules(id);
+  const reopened=harness(()=>{throw new Error('no refetch');},{storage:shared,now:START+9*hour});
+  assert.equal((await reopened.request('cryptoBookRules',{})).data.rules[0].quoteAssetPrecision,6);
+  assert.equal(reopened.calls.length,0);
+});
+
+test('old exchange rules survive failures and cache eviction without changing their original time', async () => {
+  const shared=storage();
+  const initial=harness(()=>response(priceRules()),{storage:shared});
+  const original=await initial.request('cryptoBookRules',{});
+  shared.removeItem(CACHE_KEY);
+  const offline=harness(()=>{throw new Error('offline');},{storage:shared,now:START+60*day});
+  const old=await offline.request('cryptoBookRules',{});
+  assert.equal(old.stale,true);assert.deepEqual(old.data,original.data);
+  const failed=await offline.request('cryptoBookRules',{},true);
+  assert.equal(failed.fetchedAt,original.fetchedAt);assert.equal(offline.calls.length,1);
+  const invalid=priceRules();delete invalid.symbols[0].quoteAssetPrecision;
+  offline.advance(minute);
+  // Invalid cached input is never admitted as a new successful specification.
+  const bad=harness(()=>response(invalid),{storage:shared,now:START+61*day});
+  const result=await bad.request('cryptoBookRules',{},true);
+  assert.equal(result.stale,true);assert.equal(result.fetchedAt,original.fetchedAt);
+  assert.deepEqual(result.data,original.data);
 });

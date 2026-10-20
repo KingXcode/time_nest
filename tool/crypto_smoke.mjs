@@ -476,6 +476,25 @@ try {
   // A fresh page restores a demanding 8+8 saved configuration.
   await page.evaluate(`(() => { const p=JSON.parse(timeNestDashboard.readPreferences());p.cryptoOverlays=['ma','ema','wma','boll','donchian','keltner','vwma','hma'];p.cryptoPanes=['vol','amount','macd','rsi','kdj','stoch','cci','adx'];p.cryptoInfoRight=true;timeNestDashboard.writePreferences(JSON.stringify(p)); })()`);
   await page.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1280,deviceScaleFactor:1,mobile:false});
+  await page.evaluate(`(() => {
+    const key='shike.crypto.rules.v2', entry=JSON.parse(localStorage.getItem(key));
+    entry.at=Date.now()-9*3600000;
+    const rule=entry.data.rules.find(r=>r.symbol==='ETHUSDT');rule.stepSize='0.00100000';rule.quoteAssetPrecision=6;
+    localStorage.setItem(key,JSON.stringify(entry));
+  })()`);
+  await page.send('Page.addScriptToEvaluateOnNewDocument',{source:`{
+    const originalFetch=window.fetch;
+    window.fetch=(...args)=>{
+      if(String(args[0]).includes('/api/v3/exchangeInfo') && !window.__rulesReleased) {
+        window.__rulesHeld=true;
+        return new Promise((resolve,reject)=>{
+          window.__releaseRules=()=>{window.__rulesReleased=true;originalFetch(...args).then(resolve,reject);};
+          args[1]?.signal?.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});
+        });
+      }
+      return originalFetch(...args);
+    };
+  }`});
   await page.send('Page.reload'); await ready(); await enableSemantics();
   await activate('每日看板');
   // Reopening a route is covered in widget tests at 320 px and 2x text.
@@ -485,6 +504,17 @@ try {
   assert.equal(restored.cryptoPaneHeights.vol,storedHeight);
   assert.ok(!restored.order?.includes('fx'));
   await activate('数字货币行情');
+  await waitFor(()=>page.evaluate('window.__rulesHeld === true'),'expired exchange rules refresh in background');
+  await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'cached rules and the restored depth are ready',6500);
+  await activate('价格档位');await activate('0.01');
+  await waitFor(async()=>(await labels()).some(e=>/^数量\(ETH\) [\d,]+\.\d{3}$/.test(e.label||'')),'cached exchange rules render quantity with three decimals',7000);
+  await page.screenshot('26-orderbook-cached-rules.png');
+  await page.evaluate('window.__releaseRules()');
+  await waitFor(async()=>(await labels()).some(e=>/^数量\(ETH\) [\d,]+\.\d{4}$/.test(e.label||'')),'fresh exchange rules automatically reformat to four decimals');
+  assert.equal(await page.evaluate("JSON.parse(localStorage.getItem('shike.crypto.rules.v2')).data.rules.find(r=>r.symbol==='ETHUSDT').quoteAssetPrecision"),8);
+  await page.screenshot('27-orderbook-fresh-rules.png');
+  await activate('价格档位');await activate('1');
+  passed('expired persistent rules render immediately; a held background refresh updates quantity and amount precision without a page reload');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('主图 8/8 · 副图 8/8')), '8+8 chart settings restored');
   await waitFor(async()=> (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'restored stream live');
   await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'five-level book restores on fresh page');

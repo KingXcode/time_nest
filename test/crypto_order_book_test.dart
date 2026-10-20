@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/crypto_chart.dart';
 import 'package:time_nest/dashboard/crypto_order_book.dart';
@@ -89,6 +90,38 @@ class RateClient extends Client {
   }
 }
 
+class RulesClient extends Client implements CryptoRulesUpdates {
+  final updates = StreamController<DashboardData>.broadcast(sync: true);
+  DashboardData? savedRules;
+  @override
+  Stream<DashboardData> watchCryptoRules() => updates.stream;
+  @override
+  Future<DashboardData> load(
+    String module,
+    Map<String, dynamic> args, {
+    bool refresh = false,
+  }) async {
+    if (module == 'cryptoBookRules' && savedRules != null) return savedRules!;
+    return super.load(module, args, refresh: refresh);
+  }
+}
+
+Map<String, dynamic> precisionRules({
+  String tick = '0.01000000',
+  String step = '0.00001000',
+  int quote = 8,
+}) => {
+  'rules': [
+    {
+      'symbol': 'BTCUSDT',
+      'tickSize': tick,
+      'stepSize': step,
+      'baseAssetPrecision': 8,
+      'quoteAssetPrecision': quote,
+    },
+  ],
+};
+
 Map<String, dynamic> deepSnapshot({double spacing = .5}) {
   final bids = [
     for (var i = 0; i < 5000; i++)
@@ -115,6 +148,139 @@ Map<String, dynamic> deepSnapshot({double spacing = .5}) {
 }
 
 void main() {
+  test('exchange precision separates price ticks, quantity steps and quote asset precision', () {
+    for (final entry in [
+      ('BTCUSDT', '0.00001000', 5),
+      ('ETHUSDT', '0.00010000', 4),
+      ('BNBUSDT', '0.00100000', 3),
+      ('XRPUSDT', '0.10000000', 1),
+      ('DOGEUSDT', '1.00000000', 0),
+    ]) {
+      final rule = CryptoPriceRule.fromJson({
+        'symbol': entry.$1,
+        'tickSize': '0.01000000',
+        'stepSize': entry.$2,
+        'baseAssetPrecision': 8,
+        'quoteAssetPrecision': 8,
+      });
+      expect(rule.decimals, 2);
+      expect(rule.quantityDecimals, entry.$3);
+      expect(rule.amountDecimals, 8);
+    }
+    for (final invalid in [
+      {
+        'stepSize': '0.00001000',
+        'baseAssetPrecision': 4,
+        'quoteAssetPrecision': 8,
+      },
+      {'stepSize': '0', 'baseAssetPrecision': 8, 'quoteAssetPrecision': 8},
+      {
+        'stepSize': '0.00001000',
+        'baseAssetPrecision': 8,
+        'quoteAssetPrecision': 21,
+      },
+    ]) {
+      expect(
+        () => CryptoPriceRule.fromJson({
+          'symbol': 'BTCUSDT',
+          'tickSize': '0.01',
+          ...invalid,
+        }),
+        throwsFormatException,
+      );
+    }
+  });
+
+  testWidgets(
+    'cached rules render first, fresh rules update the table without restarting feeds, and numeric decimals align',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 900));
+      final client = RulesClient()
+        ..savedRules = DashboardData(
+          data: precisionRules(),
+          fetchedAt: DateTime.now().subtract(const Duration(days: 60)),
+          stale: true,
+          cached: true,
+        );
+      final feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send({
+        ...depth(),
+        'book': {
+          ...snapshot(),
+          'bids': [
+            {'price': 100.0, 'quantity': .00007},
+            {'price': 99.99, 'quantity': 20.12345},
+            {'price': 9.99, 'quantity': .1},
+          ],
+          'asks': [
+            {'price': 100.01, 'quantity': .00014},
+            {'price': 100.02, 'quantity': 10.0},
+            {'price': 1000.03, 'quantity': 10000.0},
+          ],
+        },
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('0.00007'), findsOneWidget);
+      expect(find.text('20.12345'), findsOneWidget);
+      expect(find.text('0.00700000'), findsOneWidget);
+      expect(find.text('1.00K'), findsOneWidget);
+      List<Finder> cells(String id) => find
+          .descendant(
+            of: find.byKey(ValueKey('crypto-book-row-$id')),
+            matching: find.byType(Text),
+          )
+          .evaluate()
+          .map((e) => find.byWidget(e.widget))
+          .toList();
+      final rowA = cells('bid-100.0'),
+          rowB = cells('bid-99.99'),
+          rowC = cells('ask-1000.03');
+      double dot(Finder f) {
+        final text = tester.widget<Text>(f).data!;
+        final index = text.indexOf('.');
+        expect(index, greaterThanOrEqualTo(0));
+        final paragraph = tester.renderObject<RenderParagraph>(f);
+        final box = paragraph
+            .getBoxesForSelection(
+              TextSelection(baseOffset: index, extentOffset: index + 1),
+            )
+            .single;
+        return tester.getTopLeft(f).dx + box.left;
+      }
+
+      for (var column = 0; column < 3; column++) {
+        expect(dot(rowA[column]), closeTo(dot(rowB[column]), .25));
+        expect(dot(rowA[column]), closeTo(dot(rowC[column]), .25));
+      }
+      final subscriptions = feed.controllers.length;
+      final now = DateTime.now();
+      client.updates.add(
+        DashboardData(
+          data: precisionRules(
+            tick: '0.10000000',
+            step: '0.00100000',
+            quote: 6,
+          ),
+          fetchedAt: now,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('20.123'), findsOneWidget);
+      expect(find.text('0.007000'), findsOneWidget);
+      expect(find.text('100.0'), findsOneWidget);
+      expect(feed.controllers.length, subscriptions);
+      client.updates.add(client.savedRules!);
+      await tester.pumpAndSettle();
+      expect(find.text('20.123'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      expect(client.updates.hasListener, isFalse);
+      await client.updates.close();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test('full trusted depth is merged before limiting, retains totals and caches immutable groups', () {
     final value = deepSnapshot();
     final book = CryptoBook.fromJson(
@@ -254,6 +420,9 @@ void main() {
         final rule = CryptoPriceRule.fromJson({
           'symbol': example.$1,
           'tickSize': example.$2,
+          'stepSize': '0.00001000',
+          'baseAssetPrecision': 8,
+          'quoteAssetPrecision': 8,
         });
         expect(rule.steps.map(rule.label), example.$3);
       }
@@ -628,7 +797,7 @@ void main() {
           findsOneWidget,
         );
         expect(
-          find.descendant(of: asks, matching: find.text('700.11')),
+          find.descendant(of: asks, matching: find.text('700.11000000')),
           findsOneWidget,
         );
         expect(client.candleRequests, calls);
@@ -653,9 +822,9 @@ void main() {
       final bidMax = bar('bid', 99.96), askMax = bar('ask', 100.01);
       expect(bar('bid', 100.0).width, closeTo(bidMax.width * 2 / 3, .01));
       expect(bar('ask', 100.02).width, closeTo(askMax.width / 2, .01));
-      expect(bar('bid', 100.0).right, bidMax.right);
-      expect(bar('ask', 100.02).right, askMax.right);
-      expect(bidMax.width, askMax.width);
+      expect(bar('bid', 100.0).right, closeTo(bidMax.right, .001));
+      expect(bar('ask', 100.02).right, closeTo(askMax.right, .001));
+      expect(bidMax.width, closeTo(askMax.width, .001));
       final event = depth(id: 11);
       event['book'] = {
         ...snapshot(id: 11),
@@ -673,7 +842,15 @@ void main() {
           )
           .onChanged!(.1);
       await tester.pumpAndSettle();
-      expect(bar('ask', 100.1).width, askMax.width);
+      expect(
+        bar('ask', 100.1).width,
+        closeTo(
+          tester
+              .getSize(find.byKey(const ValueKey('crypto-book-row-ask-100.1')))
+              .width,
+          .01,
+        ),
+      );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

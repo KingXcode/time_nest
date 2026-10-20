@@ -39,3 +39,8 @@ class DashboardException implements Exception {
   @override
   String toString() => message;
 }
+
+/// Optional live updates for cache-first exchange rules.
+abstract interface class CryptoRulesUpdates {
+  Stream<DashboardData> watchCryptoRules();
+}

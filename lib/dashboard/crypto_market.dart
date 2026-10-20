@@ -125,6 +125,28 @@ class CryptoPriceRule {
         !RegExp(r'^\d{1,12}(?:\.\d{1,8})?$').hasMatch(raw)) {
       throw const FormatException('Invalid price rule');
     }
+    final step = value['stepSize'];
+    final base = value['baseAssetPrecision'],
+        quote = value['quoteAssetPrecision'];
+    if (step is! String ||
+        !RegExp(r'^\d{1,12}(?:\.\d{1,20})?$').hasMatch(step) ||
+        double.parse(step) <= 0 ||
+        double.parse(step) > 1e8 ||
+        base is! int ||
+        base < 0 ||
+        base > 20 ||
+        quote is! int ||
+        quote < 0 ||
+        quote > 20) {
+      throw const FormatException('Invalid asset precision');
+    }
+    quantityDecimals = (step.contains('.') ? step.split('.')[1] : '')
+        .replaceFirst(RegExp(r'0+$'), '')
+        .length;
+    if (quantityDecimals > base) {
+      throw const FormatException('Invalid quantity precision');
+    }
+    amountDecimals = quote;
     symbol = value['symbol'] as String;
     tickSize = double.parse(raw);
     if (!tickSize.isFinite || tickSize <= 0 || tickSize > 1e8) {
@@ -135,7 +157,7 @@ class CryptoPriceRule {
   }
   late final String symbol;
   late final double tickSize;
-  late final int decimals;
+  late final int decimals, quantityDecimals, amountDecimals;
   List<double> get steps => [
     for (final multiplier in [1, 10, 100, 1000, 10000])
       double.parse((tickSize * multiplier).toStringAsFixed(decimals)),

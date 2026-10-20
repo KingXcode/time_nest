@@ -8,6 +8,7 @@
   const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
   const CACHE_KEY = 'shike.dashboard.cache.v1';
   const LIMIT_KEY = 'shike.dashboard.limits.v1';
+  const RULES_KEY = 'shike.crypto.rules.v2';
   const PREF_KEY = 'shike.dashboard.preferences.v1';
   const MAX_CACHE_ENTRIES = 80, MAX_CACHE_BYTES = 900_000;
   const cryptoSymbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
@@ -17,7 +18,7 @@
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
     releases: { ttl: HOUR, retain: 14 * DAY, gap: MINUTE, label: 'GitHub 发布' },
-    cryptoBookRules: { ttl: HOUR, retain: DAY, gap: MINUTE, label: '价格档位' },
+    cryptoBookRules: { ttl: 8 * HOUR, retain: Infinity, gap: MINUTE, label: '价格档位' },
     cryptoConversion: { ttl: 5 * MINUTE, retain: DAY, gap: MINUTE, label: '折算汇率' },
     cryptoQuotes: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币报价' },
     cryptoCandles: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币 K 线' },
@@ -50,7 +51,10 @@
   function timestamp(value) { return Number.isSafeInteger(value) && value > 0 && value < 8640000000000000; }
   function validBookRule(rule) {
     return object(rule) && cryptoSymbols.includes(rule.symbol) && typeof rule.tickSize === 'string'
-      && /^\d{1,12}(?:\.\d{1,8})?$/.test(rule.tickSize) && Number(rule.tickSize) > 0 && Number(rule.tickSize) <= 1e8;
+      && /^\d{1,12}(?:\.\d{1,8})?$/.test(rule.tickSize) && Number(rule.tickSize) > 0 && Number(rule.tickSize) <= 1e8
+      && typeof rule.stepSize === 'string' && /^\d{1,12}(?:\.\d{1,20})?$/.test(rule.stepSize) && Number(rule.stepSize) > 0 && Number(rule.stepSize) <= 1e8
+      && ['baseAssetPrecision','quoteAssetPrecision'].every(k => Number.isInteger(rule[k]) && rule[k] >= 0 && rule[k] <= 20)
+      && (rule.stepSize.split('.')[1] || '').replace(/0+$/, '').length <= rule.baseAssetPrecision;
   }
   function validQuote(q) {
     return object(q) && cryptoSymbols.includes(q.symbol) && ['price', 'high', 'low'].every(k => finite(q[k]) && q[k] > 0)
@@ -247,7 +251,9 @@
         const rules = result.symbols.map(row => {
           requireValue(object(row) && Array.isArray(row.filters));
           const price = row.filters.find(f => f?.filterType === 'PRICE_FILTER');
-          return { symbol: row.symbol, tickSize: price?.tickSize };
+          const lot = row.filters.find(f => f?.filterType === 'LOT_SIZE');
+          return { symbol: row.symbol, tickSize: price?.tickSize, stepSize: lot?.stepSize,
+            baseAssetPrecision: row.baseAssetPrecision, quoteAssetPrecision: row.quoteAssetPrecision };
         });
         return { data: { rules } };
       }
@@ -365,11 +371,68 @@
       }
     }
   }
+  const ruleListeners = new Map();
+  let ruleListenerId = 0, rulesCache = null;
+  function readRules() {
+    const saved = readObject(RULES_KEY);
+    if (object(saved) && finite(saved.at) && saved.at > 0 && saved.at <= Date.now() + 5 * MINUTE && validData('cryptoBookRules', saved.data)) {
+      if (!rulesCache || saved.at > rulesCache.at) rulesCache = saved;
+    }
+    return rulesCache;
+  }
+  function notifyRules(entry) {
+    const raw = JSON.stringify(envelope(entry, false));
+    for (const callback of ruleListeners.values()) {
+      try { callback(raw); } catch (_) { /* One closed view cannot block the others. */ }
+    }
+  }
+  function refreshRules() {
+    if (inflight.has(RULES_KEY)) return inflight.get(RULES_KEY);
+    const previous = attempts.get(RULES_KEY);
+    if (previous && Date.now() - previous.at < MINUTE) {
+      return previous.error ? Promise.reject(new Error(previous.error)) : Promise.resolve(envelope(rulesCache, true));
+    }
+    attempts.set(RULES_KEY, {at:Date.now()});
+    const pending = (async () => {
+      try {
+        const {data} = await loadSource('cryptoBookRules', {});
+        requireValue(validData('cryptoBookRules', data));
+        rulesCache = {at:Date.now(),data};
+        saveObject(RULES_KEY, rulesCache);
+        notifyRules(rulesCache);
+        return envelope(rulesCache, false);
+      } catch (error) {
+        attempts.set(RULES_KEY, {at:Date.now(),error:error.message || '交易规范更新失败。'});
+        throw error;
+      } finally { inflight.delete(RULES_KEY); }
+    })();
+    inflight.set(RULES_KEY,pending);
+    return pending;
+  }
+  async function requestRules(refresh) {
+    const old = readRules();
+    if (old && !refresh) {
+      const stale = Date.now() - old.at >= 8 * HOUR;
+      if (stale) refreshRules().catch(() => {});
+      return envelope(old, true, stale, stale ? '正在使用已缓存的交易规范，后台更新中。' : undefined);
+    }
+    try { return await refreshRules(); }
+    catch (error) {
+      if (old) return envelope(old, true, true, '交易规范更新失败，保留上次缓存。');
+      throw error;
+    }
+  }
+  globalThis.addEventListener?.('storage', event => {
+    if (event.key !== RULES_KEY) return;
+    const before = rulesCache, updated = readRules();
+    if (updated && updated !== before) notifyRules(updated);
+  });
   async function requestData(module, rawArgs, refresh) {
     let args;
     try { args = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs; }
     catch (_) { throw new Error('看板参数不是有效 JSON。'); }
     args = normalizeArgs(module, args);
+    if (module === 'cryptoBookRules') return requestRules(refresh);
     const key = `${module}:${JSON.stringify(args)}`, now = Date.now();
     cleanCache();
     const old = cache[key];
@@ -625,6 +688,11 @@
   cleanLimits();
   globalThis.timeNestDashboard = Object.freeze({
     subscribeCrypto, unsubscribeCrypto,
+    subscribeCryptoRules(callback) {
+      requireValue(typeof callback === 'function');
+      const id = String(++ruleListenerId); ruleListeners.set(id, callback); return id;
+    },
+    unsubscribeCryptoRules(id) { ruleListeners.delete(id); },
     async request(module, rawArgs, refresh = false) {
       return JSON.stringify(await requestData(module, rawArgs, refresh === true));
     },

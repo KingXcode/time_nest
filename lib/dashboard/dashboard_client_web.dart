@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:js_interop';
 
@@ -9,6 +10,10 @@ external JSPromise<JSString> _request(
   JSString args,
   JSBoolean refresh,
 );
+@JS('timeNestDashboard.subscribeCryptoRules')
+external JSString _subscribeRules(JSFunction callback);
+@JS('timeNestDashboard.unsubscribeCryptoRules')
+external void _unsubscribeRules(JSString id);
 @JS('timeNestDashboard.readPreferences')
 external JSString? _readPreferences();
 @JS('timeNestDashboard.writePreferences')
@@ -18,7 +23,47 @@ external void _openUrl(JSString url);
 
 DashboardClient createDashboardClient() => WebDashboardClient();
 
-class WebDashboardClient implements DashboardClient {
+DashboardData _decodeData(String raw) {
+  final envelope = jsonDecode(raw) as Map<String, dynamic>;
+  final data = envelope['data'];
+  final fetchedAt = DateTime.tryParse(envelope['fetchedAt'] as String? ?? '');
+  if (data is! Map<String, dynamic> || fetchedAt == null) {
+    throw const DashboardException('数据服务返回格式异常，请稍后重试。');
+  }
+  return DashboardData(
+    data: data,
+    fetchedAt: fetchedAt,
+    stale: envelope['stale'] == true,
+    cached: envelope['cached'] == true,
+    warning: envelope['warning'] as String?,
+  );
+}
+
+class WebDashboardClient implements DashboardClient, CryptoRulesUpdates {
+  @override
+  Stream<DashboardData> watchCryptoRules() {
+    JSString? id;
+    late StreamController<DashboardData> controller;
+    controller = StreamController(
+      onListen: () {
+        id = _subscribeRules(
+          ((JSString raw) {
+            if (controller.isClosed) return;
+            try {
+              controller.add(_decodeData(raw.toDart));
+            } catch (_) {
+              /* Ignore invalid updates. */
+            }
+          }).toJS,
+        );
+      },
+      onCancel: () {
+        if (id != null) _unsubscribeRules(id!);
+      },
+    );
+    return controller.stream;
+  }
+
   @override
   String? readPreferences() {
     try {

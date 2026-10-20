@@ -57,6 +57,17 @@ class FixtureDashboardClient implements DashboardClient {
           ])
             {
               'symbol': symbol,
+              'stepSize': symbol == 'BTCUSDT'
+                  ? '0.00001000'
+                  : symbol == 'ETHUSDT'
+                  ? '0.00010000'
+                  : symbol == 'XRPUSDT'
+                  ? '0.10000000'
+                  : symbol == 'DOGEUSDT'
+                  ? '1.00000000'
+                  : '0.00100000',
+              'baseAssetPrecision': 8,
+              'quoteAssetPrecision': 8,
               'tickSize': symbol == 'XRPUSDT'
                   ? '0.00010000'
                   : symbol == 'DOGEUSDT'

@@ -230,6 +230,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
   late double? _selectedStep = widget.priceStep;
   CryptoPriceRule? _rule;
   DateTime? _ruleFetchedAt;
+  StreamSubscription<DashboardData>? _ruleUpdates;
+  int _ruleWatchSerial = 0;
   bool _rulesError = false;
   int _priceDirection = 0;
   String? _hoveredLevel;
@@ -249,7 +251,39 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
         state == null ||
         state == AppLifecycleState.resumed ||
         state == AppLifecycleState.inactive;
+    _watchRules();
     _loadRates();
+  }
+
+  void _watchRules() {
+    final token = ++_ruleWatchSerial;
+    _ruleUpdates?.cancel();
+    final client = widget.client;
+    _ruleUpdates = client is CryptoRulesUpdates
+        ? (client as CryptoRulesUpdates).watchCryptoRules().listen((data) {
+            if (mounted && token == _ruleWatchSerial) _applyRules(data);
+          }, onError: (Object _) {})
+        : null;
+  }
+
+  void _applyRules(DashboardData result) {
+    try {
+      final rows = (result.data['rules'] as List).map(
+        (r) => CryptoPriceRule.fromJson(r as Map),
+      );
+      final rule = rows.firstWhere((r) => r.symbol == widget.symbol);
+      if (_ruleFetchedAt != null &&
+          result.fetchedAt.isBefore(_ruleFetchedAt!)) {
+        return;
+      }
+      setState(() {
+        _rule = rule;
+        _ruleFetchedAt = result.fetchedAt;
+        _rulesError = result.stale;
+      });
+    } catch (_) {
+      /* An invalid update must not replace usable cached rules. */
+    }
   }
 
   Future<void> _loadRates() async {
@@ -282,16 +316,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     Future<void> rules() async {
       try {
         final result = await widget.client.load('cryptoBookRules', const {});
-        final rows = (result.data['rules'] as List).map(
-          (r) => CryptoPriceRule.fromJson(r as Map),
-        );
-        final rule = rows.firstWhere((r) => r.symbol == widget.symbol);
         if (!mounted || serial != _rateSerial) return;
-        setState(() {
-          _rule = rule;
-          _ruleFetchedAt = result.fetchedAt;
-          _rulesError = result.stale;
-        });
+        _applyRules(result);
       } catch (_) {
         if (mounted && serial == _rateSerial) {
           setState(() => _rulesError = true);
@@ -327,6 +353,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _ruleWatchSerial++;
+    _ruleUpdates?.cancel();
     _rateSerial++;
     _rateTimer?.cancel();
     super.dispose();
@@ -347,6 +375,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
       if (old.client != widget.client) {
         _rates = null;
         _rule = null;
+        _ruleFetchedAt = null;
+        _watchRules();
       }
       _loadRates();
     }
@@ -361,7 +391,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     final abs = value.abs();
     if (abs >= 1000000) return '${(value / 1000000).toStringAsFixed(2)}M';
     if (abs >= 1000) return '${(value / 1000).toStringAsFixed(2)}K';
-    return value.toStringAsFixed(precision).replaceFirst(RegExp(r'\.?0+$'), '');
+    return value.toStringAsFixed(precision);
   }
 
   String price(double value, int digits) {
@@ -436,13 +466,10 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
   @override
   Widget build(BuildContext context) {
     final book = widget.book;
-    final rule =
-        _ruleFetchedAt != null &&
-            DateTime.now().difference(_ruleFetchedAt!) <=
-                const Duration(days: 1)
-        ? _rule
-        : null;
-    final digits = math.max(book?.priceDecimals ?? 0, rule?.decimals ?? 2);
+    final rule = _rule;
+    final digits = rule?.decimals ?? book?.priceDecimals ?? 2;
+    final quantityDigits = rule?.quantityDecimals ?? 8;
+    final amountDigits = rule?.amountDecimals ?? 8;
     final steps = rule?.steps ?? <double>[];
     final step = steps.contains(_selectedStep)
         ? _selectedStep
@@ -497,9 +524,105 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
       compactLandscape ? 17.0 : 19.0,
       textScale * 14 + 3,
     );
-    const rowStyle = TextStyle(
-      fontSize: 11,
-      fontFeatures: [FontFeature.tabularFigures()],
+    final rowStyle = DefaultTextStyle.of(context).style.merge(
+      const TextStyle(
+        fontSize: 11,
+        fontFeatures: [FontFeature.tabularFigures()],
+      ),
+    );
+    double textWidth(String text) => (TextPainter(
+      text: TextSpan(text: text, style: rowStyle),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout()).width;
+    String number(double value, int precision, bool abbreviate) => abbreviate
+        ? compact(value, precision: precision)
+        : price(value, precision);
+    String tail(String text) {
+      final dot = text.indexOf('.');
+      return dot >= 0
+          ? text.substring(dot)
+          : RegExp(r'[KM]$').firstMatch(text)?.group(0) ?? '';
+    }
+
+    final quantityTail = textWidth(
+      '${quantityDigits > 0 || [...bids, ...asks].any((r) => r.quantity >= 1000) ? '.' : ''}${'0' * math.max(quantityDigits, [...bids, ...asks].any((r) => r.quantity >= 1000) ? 2 : 0)}M',
+    );
+    final amountTail = textWidth('.${'0' * math.max(amountDigits, 2)}M');
+    Widget cell(
+      double value,
+      int precision, {
+      bool abbreviate = false,
+      Color? color,
+      double? reservedTail,
+      String label = '',
+    }) {
+      final text = number(value, precision, abbreviate);
+      final reserve = reservedTail ?? textWidth(tail(text));
+      return Semantics(
+        label: '$label $text',
+        container: true,
+        excludeSemantics: true,
+        child: Tooltip(
+          message: price(value, precision),
+          child: Padding(
+            padding: EdgeInsets.only(
+              right: math.max(0, reserve - textWidth(tail(text))),
+            ),
+            child: Text(
+              text,
+              textAlign: TextAlign.right,
+              style: rowStyle.copyWith(color: color),
+              maxLines: 1,
+            ),
+          ),
+        ),
+      );
+    }
+
+    double requiredColumnWidth(
+      double Function(CryptoBookLevel) value,
+      int precision,
+      bool abbreviate,
+      double? reserve,
+    ) {
+      return [...bids, ...asks].fold<double>(0, (width, row) {
+        final text = number(value(row), precision, abbreviate);
+        return math.max(
+          width,
+          textWidth(text) +
+              math.max(
+                0,
+                (reserve ?? textWidth(tail(text))) - textWidth(tail(text)),
+              ),
+        );
+      });
+    }
+
+    final columnWidths = [
+      math.max(
+        55 * textScale,
+        requiredColumnWidth((r) => r.price, digits, false, null),
+      ),
+      math.max(
+        55 * textScale,
+        requiredColumnWidth(
+          (r) => r.quantity,
+          quantityDigits,
+          true,
+          quantityTail,
+        ),
+      ),
+      math.max(
+        60 * textScale,
+        requiredColumnWidth((r) => r.amount, amountDigits, true, amountTail),
+      ),
+    ];
+    final columnFlex = [for (final width in columnWidths) (width * 100).ceil()];
+    final tableWidth = math.max(
+      220 * textScale,
+      12 + columnWidths.reduce((a, b) => a + b),
     );
     Widget row(CryptoBookLevel level, bool bid) {
       final color = bid ? cryptoUp : cryptoDown;
@@ -555,29 +678,32 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                 child: Row(
                   children: [
                     Expanded(
-                      flex: 36,
-                      child: Text(
-                        price(level.price, digits),
-                        style: rowStyle.copyWith(color: color),
-                        maxLines: 1,
+                      flex: columnFlex[0],
+                      child: cell(
+                        level.price,
+                        digits,
+                        color: color,
+                        label: '价格(USDT)',
                       ),
                     ),
                     Expanded(
-                      flex: 31,
-                      child: Text(
-                        compact(level.quantity, precision: 8),
-                        textAlign: TextAlign.right,
-                        style: rowStyle,
-                        maxLines: 1,
+                      flex: columnFlex[1],
+                      child: cell(
+                        level.quantity,
+                        quantityDigits,
+                        abbreviate: true,
+                        reservedTail: quantityTail,
+                        label: '数量(${cryptoAssets[widget.symbol]!.$1})',
                       ),
                     ),
                     Expanded(
-                      flex: 33,
-                      child: Text(
-                        compact(level.amount, precision: 2),
-                        textAlign: TextAlign.right,
-                        style: rowStyle,
-                        maxLines: 1,
+                      flex: columnFlex[2],
+                      child: cell(
+                        level.amount,
+                        amountDigits,
+                        abbreviate: true,
+                        reservedTail: amountTail,
+                        label: '金额(USDT)',
                       ),
                     ),
                   ],
@@ -737,14 +863,14 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
             child: Row(
               children: [
                 Expanded(
-                  flex: 36,
+                  flex: columnFlex[0],
                   child: Text(
                     '价格(USDT)',
                     style: TextStyle(fontSize: 10, color: dashboardMuted),
                   ),
                 ),
                 Expanded(
-                  flex: 31,
+                  flex: columnFlex[1],
                   child: Text(
                     '数量(${cryptoAssets[widget.symbol]!.$1})',
                     textAlign: TextAlign.right,
@@ -752,7 +878,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                   ),
                 ),
                 Expanded(
-                  flex: 33,
+                  flex: columnFlex[2],
                   child: Text(
                     '金额(USDT)',
                     textAlign: TextAlign.right,
@@ -795,7 +921,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                 children: [
                   Text(
                     widget.lastPrice != null
-                        ? '${cryptoPrice(widget.lastPrice!)}${_priceDirection > 0
+                        ? '${price(widget.lastPrice!, digits)}${_priceDirection > 0
                               ? ' ↑'
                               : _priceDirection < 0
                               ? ' ↓'
@@ -891,7 +1017,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
         builder: (context, box) => SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: SizedBox(
-            width: math.max(box.maxWidth, 220 * textScale),
+            width: math.max(box.maxWidth, tableWidth),
             child: panel,
           ),
         ),
