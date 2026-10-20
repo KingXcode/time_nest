@@ -244,11 +244,12 @@ try {
     return page.evaluate(`(() => {
       const nodes=(${deepQuery})('flt-semantics, [aria-label]');
       const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix));if(!e)throw new Error('Missing geometry '+prefix);const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
-      return {plot:rect('K 线主图，'),book:rect('订单簿 BTC'),lastPane:rect('RSI 相对强弱 副图，'),assessment:rect('技术指标 · 买入参考')};
+      return {plot:rect('K 线主图，'),frame:rect('K 线图表区域'),book:rect('订单簿面板'),lastPane:rect('RSI 相对强弱 副图，'),assessment:rect('技术指标 · 买入参考')};
     })()`);
   }
   let bookBoxes=await bookGeometry();
   assert.ok(bookBoxes.book.x>=bookBoxes.plot.right,'desktop book is to the right of the chart');
+  assert.ok(Math.abs(bookBoxes.book.y-bookBoxes.frame.y)<1,'desktop order book and chart frame share a top border');
   await page.screenshot('19-orderbook-desktop.png');
   await page.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:false});await delay(500);
   bookBoxes=await bookGeometry();
@@ -258,6 +259,7 @@ try {
   await page.send('Emulation.setDeviceMetricsOverride',{width:844,height:390,deviceScaleFactor:1,mobile:false});await delay(500);
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:200,deltaX:0,deltaY:-10000});await delay(500);
   bookBoxes=await bookGeometry();assert.ok(bookBoxes.book.x>=bookBoxes.plot.right,'phone landscape book is to the right');
+  assert.ok(Math.abs(bookBoxes.book.y-bookBoxes.frame.y)<1,'landscape order book and chart frame share a top border');
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:200,deltaX:0,deltaY:bookBoxes.plot.y-150});await delay(500);
   await page.screenshot('21-orderbook-landscape.png');
   await activate('只看买盘');

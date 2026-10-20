@@ -161,6 +161,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
   int _multiplier = 1;
   int? _visibleLevels;
   int _priceDirection = 0;
+  String? _hoveredLevel;
   @override
   void didUpdateWidget(CryptoOrderBook old) {
     super.didUpdateWidget(old);
@@ -206,10 +207,14 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
             .take(levels)
             .toList() ??
         <CryptoBookLevel>[];
-    final maxQty = [
-      ...bids,
-      ...asks,
-    ].fold<double>(0, (max, r) => math.max(max, r.quantity));
+    final maxBidQty = bids.fold<double>(
+      0,
+      (max, r) => math.max(max, r.quantity),
+    );
+    final maxAskQty = asks.fold<double>(
+      0,
+      (max, r) => math.max(max, r.quantity),
+    );
     final live =
         book != null &&
         widget.status == 'live' &&
@@ -228,58 +233,94 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
       compactLandscape ? 17.0 : 19.0,
       textScale * 14 + 3,
     );
+    const rowStyle = TextStyle(
+      fontSize: 11,
+      fontFeatures: [FontFeature.tabularFigures()],
+    );
     Widget row(CryptoBookLevel level, bool bid) {
       final color = bid ? cryptoUp : cryptoDown;
-      return SizedBox(
-        height: rowHeight,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: FractionallySizedBox(
-                  heightFactor: 1,
-                  widthFactor: maxQty > 0
-                      ? (level.quantity / maxQty).clamp(0.0, 1.0)
-                      : 0,
-                  child: ColoredBox(color: color.withValues(alpha: .12)),
+      final id = '${bid ? 'bid' : 'ask'}-${level.price}';
+      final maxQty = bid ? maxBidQty : maxAskQty;
+      final ratio = maxQty > 0
+          ? (level.quantity / maxQty).clamp(0.0, 1.0)
+          : 0.0;
+      return MouseRegion(
+        onEnter: (_) => setState(() => _hoveredLevel = id),
+        onExit: (_) {
+          if (_hoveredLevel == id) setState(() => _hoveredLevel = null);
+        },
+        child: SizedBox(
+          key: ValueKey('crypto-book-row-$id'),
+          height: rowHeight,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: LayoutBuilder(
+                  builder: (context, box) => Align(
+                    alignment: Alignment.centerRight,
+                    // Keep very small positive orders findable without changing
+                    // the displayed quantities or the otherwise linear scale.
+                    child: SizedBox(
+                      key: ValueKey('crypto-book-depth-$id'),
+                      width: math.min(
+                        box.maxWidth,
+                        math.max(2, box.maxWidth * ratio),
+                      ),
+                      height: rowHeight,
+                      child: ColoredBox(color: color.withValues(alpha: .23)),
+                    ),
+                  ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: 36,
-                    child: Text(
-                      price(level.price, digits),
-                      style: TextStyle(color: color, fontSize: 11),
-                      maxLines: 1,
+              if (_hoveredLevel == id)
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: .045),
+                      border: Border.symmetric(
+                        horizontal: BorderSide(
+                          color: color.withValues(alpha: .45),
+                          width: .5,
+                        ),
+                      ),
                     ),
                   ),
-                  Expanded(
-                    flex: 31,
-                    child: Text(
-                      compact(level.quantity, precision: 8),
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(fontSize: 11),
-                      maxLines: 1,
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 36,
+                      child: Text(
+                        price(level.price, digits),
+                        style: rowStyle.copyWith(color: color),
+                        maxLines: 1,
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    flex: 33,
-                    child: Text(
-                      compact(level.amount, precision: 2),
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(fontSize: 11),
-                      maxLines: 1,
+                    Expanded(
+                      flex: 31,
+                      child: Text(
+                        compact(level.quantity, precision: 8),
+                        textAlign: TextAlign.right,
+                        style: rowStyle,
+                        maxLines: 1,
+                      ),
                     ),
-                  ),
-                ],
+                    Expanded(
+                      flex: 33,
+                      child: Text(
+                        compact(level.amount, precision: 2),
+                        textAlign: TextAlign.right,
+                        style: rowStyle,
+                        maxLines: 1,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
@@ -569,12 +610,17 @@ class _CryptoOrderBookState extends State<CryptoOrderBook> {
         ],
       ),
     );
-    return LayoutBuilder(
-      builder: (context, box) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SizedBox(
-          width: math.max(box.maxWidth, 220 * textScale),
-          child: panel,
+    return Semantics(
+      label: '订单簿面板',
+      container: true,
+      explicitChildNodes: true,
+      child: LayoutBuilder(
+        builder: (context, box) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: math.max(box.maxWidth, 220 * textScale),
+            child: panel,
+          ),
         ),
       ),
     );

@@ -502,6 +502,13 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     final selected = _quotes
         .where((q) => q.symbol == widget.symbol)
         .firstOrNull;
+    final orderBook = CryptoOrderBook(
+      key: ValueKey('crypto-book-${widget.symbol}'),
+      symbol: widget.symbol,
+      book: _book,
+      status: _streamStatus,
+      lastPrice: selected?.price,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -622,59 +629,58 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             '正在补齐历史 K 线，技术建议暂时暂停。',
             style: TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
           ),
-        CryptoBookLayout(
-          orderBook: CryptoOrderBook(
-            key: ValueKey('crypto-book-${widget.symbol}'),
-            symbol: widget.symbol,
-            book: _book,
-            status: _streamStatus,
-            lastPrice: selected?.price,
-          ),
-          chart: (belowChart) => _candleData == null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const SizedBox(
-                      height: cryptoPriceHeight,
-                      child: Center(
-                        child: Text(
-                          '等待 K 线数据…',
-                          style: TextStyle(color: dashboardMuted),
-                        ),
-                      ),
+        if (_candleData == null)
+          CryptoBookLayout(
+            orderBook: orderBook,
+            chart: (belowChart) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(
+                  height: cryptoPriceHeight,
+                  child: Center(
+                    child: Text(
+                      '等待 K 线数据…',
+                      style: TextStyle(color: dashboardMuted),
                     ),
-                    ?belowChart,
-                  ],
-                )
-              : CryptoChart(
-                  key: _chartKey,
-                  afterCharts: belowChart,
-                  candles: _candles,
-                  asset: cryptoAssets[widget.symbol]!.$1,
-                  fetchedAt: _candleData!.fetchedAt,
-                  overlays: _overlays,
-                  panes: _panes,
-                  infoRight: _infoRight,
-                  paneHeights: _paneHeights,
-                  onPaneHeightsChanged: (heights) {
-                    setState(
-                      () => _paneHeights = cleanCryptoPaneHeights(heights),
-                    );
-                    widget.onPaneHeightsChanged?.call(Map.of(_paneHeights));
-                  },
-                  onSettingsChanged: _chartChanged,
-                  onLoadOlder: _loadOlder,
-                  loadingOlder: _olderBusy,
-                  hasMoreHistory: _hasMoreHistory,
-                  historyError: _olderError,
-                  canAdvise:
-                      _automatic &&
-                      _visible &&
-                      _streamStatus == 'live' &&
-                      _historySynchronized &&
-                      _candleError == null,
+                  ),
                 ),
-        ),
+                ?belowChart,
+              ],
+            ),
+          )
+        else
+          CryptoChart(
+            key: _chartKey,
+            chartLayout: (plots) => CryptoBookLayout(
+              orderBook: orderBook,
+              chart: (belowChart) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [plots, ?belowChart],
+              ),
+            ),
+            candles: _candles,
+            asset: cryptoAssets[widget.symbol]!.$1,
+            fetchedAt: _candleData!.fetchedAt,
+            overlays: _overlays,
+            panes: _panes,
+            infoRight: _infoRight,
+            paneHeights: _paneHeights,
+            onPaneHeightsChanged: (heights) {
+              setState(() => _paneHeights = cleanCryptoPaneHeights(heights));
+              widget.onPaneHeightsChanged?.call(Map.of(_paneHeights));
+            },
+            onSettingsChanged: _chartChanged,
+            onLoadOlder: _loadOlder,
+            loadingOlder: _olderBusy,
+            hasMoreHistory: _hasMoreHistory,
+            historyError: _olderError,
+            canAdvise:
+                _automatic &&
+                _visible &&
+                _streamStatus == 'live' &&
+                _historySynchronized &&
+                _candleError == null,
+          ),
         const SizedBox(height: 16),
         Wrap(
           spacing: 12,

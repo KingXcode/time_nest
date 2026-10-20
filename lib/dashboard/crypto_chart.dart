@@ -42,6 +42,7 @@ class CryptoChart extends StatefulWidget {
     this.onPaneHeightsChanged,
     this.onSettingsChanged,
     this.afterCharts,
+    this.chartLayout,
     this.canAdvise = false,
     this.onLoadOlder,
     this.loadingOlder = false,
@@ -54,6 +55,8 @@ class CryptoChart extends StatefulWidget {
   final List<String> overlays, panes;
   final bool infoRight, canAdvise;
   final Widget? afterCharts;
+  // Keep controls and state outside the responsive plot/order-book arrangement.
+  final Widget Function(Widget plots)? chartLayout;
   final Map<String, double> paneHeights;
   final ValueChanged<Map<String, double>>? onPaneHeightsChanged;
   final void Function(List<String>, List<String>, bool)? onSettingsChanged;
@@ -570,93 +573,30 @@ class _CryptoChartState extends State<CryptoChart> {
         );
       },
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            TextButton.icon(
-              key: const PageStorageKey('crypto-indicator-settings'),
-              onPressed: widget.onSettingsChanged == null
-                  ? null
-                  : _showSettings,
-              icon: const Icon(Icons.tune, size: 15),
-              label: const Text('指标设置'),
-            ),
-            Text(
-              '主图 ${widget.overlays.length}/8 · 副图 ${widget.panes.length}/8',
-              style: const TextStyle(color: dashboardMuted, fontSize: 11),
-            ),
-
-            TextButton.icon(
-              key: const Key('crypto-pan-older'),
-              onPressed: offset > 0 ? () => _pan(-_visibleCount) : null,
-              icon: const Icon(Icons.chevron_left),
-              label: const Text('更早'),
-            ),
-            TextButton.icon(
-              key: const Key('crypto-pan-newer'),
-              onPressed: offset + rows.length < all.length
-                  ? () => _pan(_visibleCount)
-                  : null,
-              icon: const Icon(Icons.chevron_right),
-              label: const Text('较新'),
-            ),
-            TextButton(
-              key: const Key('crypto-latest'),
-              onPressed: _viewportStartTime == null
-                  ? null
-                  : () => setState(() {
-                      _viewportStartTime = null;
-                      _selectedTime = null;
-                    }),
-              child: const Text('回到最新'),
-            ),
-            Text(
-              '已加载 ${all.length} 根',
-              key: const Key('crypto-history-count'),
-              style: const TextStyle(color: dashboardMuted, fontSize: 12),
-            ),
-            IconButton(
-              key: const Key('crypto-info-position'),
-              tooltip: widget.infoRight ? '信息靠左' : '信息靠右',
-              onPressed: widget.onSettingsChanged == null
-                  ? null
-                  : () => widget.onSettingsChanged!(
-                      widget.overlays,
-                      widget.panes,
-                      !widget.infoRight,
-                    ),
-              icon: Icon(
-                widget.infoRight
-                    ? Icons.format_align_left
-                    : Icons.format_align_right,
-                size: 15,
-              ),
-            ),
-          ],
+    final surface = Semantics(
+      label: 'K 线图表区域',
+      container: true,
+      explicitChildNodes: true,
+      child: DecoratedBox(
+        key: const Key('crypto-chart-surface'),
+        decoration: BoxDecoration(
+          color: _cryptoMainSurface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: dashboardBorder),
         ),
-        if (widget.historyError != null)
-          Text(
-            widget.historyError!,
-            key: const Key('crypto-history-error'),
-            style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
-          ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: _cryptoMainSurface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: dashboardBorder),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(7),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                constraints: const BoxConstraints(minHeight: 36),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                color: _cryptoPaneHeader,
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
@@ -681,9 +621,15 @@ class _CryptoChartState extends State<CryptoChart> {
                     Expanded(child: legend(overlays, right: widget.infoRight)),
                   ],
                 ),
-                const SizedBox(height: 6),
-                plot(),
-                ColoredBox(
+              ),
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: plot(),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: ColoredBox(
                   color: _cryptoTimelineSurface,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -761,29 +707,110 @@ class _CryptoChartState extends State<CryptoChart> {
                     ],
                   ),
                 ),
-                for (final id in widget.panes)
-                  if (_studies[id] case final study?) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 4,
-                      ),
-                      decoration: const BoxDecoration(
-                        color: _cryptoPaneHeader,
-                        border: Border(
-                          top: BorderSide(color: Color(0xFF49617B)),
-                          bottom: BorderSide(color: Color(0xFF2E4862)),
-                        ),
-                      ),
-                      child: paneHeader(study),
+              ),
+              for (final id in widget.panes)
+                if (_studies[id] case final study?) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 4,
                     ),
-                    plot(study: study),
-                    _resizeHandle(id),
-                  ],
-              ],
-            ),
+                    decoration: const BoxDecoration(
+                      color: _cryptoPaneHeader,
+                      border: Border(
+                        top: BorderSide(color: Color(0xFF49617B)),
+                        bottom: BorderSide(color: Color(0xFF2E4862)),
+                      ),
+                    ),
+                    child: paneHeader(study),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: plot(study: study),
+                  ),
+                  _resizeHandle(id),
+                ],
+            ],
           ),
         ),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            TextButton.icon(
+              key: const PageStorageKey('crypto-indicator-settings'),
+              onPressed: widget.onSettingsChanged == null
+                  ? null
+                  : _showSettings,
+              icon: const Icon(Icons.tune, size: 15),
+              label: const Text('指标设置'),
+            ),
+            Text(
+              '主图 ${widget.overlays.length}/8 · 副图 ${widget.panes.length}/8',
+              style: const TextStyle(color: dashboardMuted, fontSize: 11),
+            ),
+
+            TextButton.icon(
+              key: const Key('crypto-pan-older'),
+              onPressed: offset > 0 ? () => _pan(-_visibleCount) : null,
+              icon: const Icon(Icons.chevron_left),
+              label: const Text('更早'),
+            ),
+            TextButton.icon(
+              key: const Key('crypto-pan-newer'),
+              onPressed: offset + rows.length < all.length
+                  ? () => _pan(_visibleCount)
+                  : null,
+              icon: const Icon(Icons.chevron_right),
+              label: const Text('较新'),
+            ),
+            TextButton(
+              key: const Key('crypto-latest'),
+              onPressed: _viewportStartTime == null
+                  ? null
+                  : () => setState(() {
+                      _viewportStartTime = null;
+                      _selectedTime = null;
+                    }),
+              child: const Text('回到最新'),
+            ),
+            Text(
+              '已加载 ${all.length} 根',
+              key: const Key('crypto-history-count'),
+              style: const TextStyle(color: dashboardMuted, fontSize: 12),
+            ),
+            IconButton(
+              key: const Key('crypto-info-position'),
+              tooltip: widget.infoRight ? '信息靠左' : '信息靠右',
+              onPressed: widget.onSettingsChanged == null
+                  ? null
+                  : () => widget.onSettingsChanged!(
+                      widget.overlays,
+                      widget.panes,
+                      !widget.infoRight,
+                    ),
+              icon: Icon(
+                widget.infoRight
+                    ? Icons.format_align_left
+                    : Icons.format_align_right,
+                size: 15,
+              ),
+            ),
+          ],
+        ),
+        if (widget.historyError != null)
+          Text(
+            widget.historyError!,
+            key: const Key('crypto-history-error'),
+            style: const TextStyle(color: Color(0xFFFFCF70), fontSize: 12),
+          ),
+        widget.chartLayout?.call(surface) ?? surface,
         const SizedBox(height: 8),
         const Text(
           '左右拖动 · 双指缩放 · 点击查看十字线后可滚轮缩放，再次点击关闭 · 副图边缘拖动调高。UTC+8。',

@@ -139,6 +139,12 @@ void main() {
         final plot = find.byKey(const Key('crypto-price-plot'));
         final book = find.byKey(const Key('crypto-order-book'));
         if (viewport.$3) {
+          final surface = find.byKey(const Key('crypto-chart-surface'));
+          expect(
+            tester.getTopLeft(book).dy,
+            closeTo(tester.getTopLeft(surface).dy, .01),
+            reason: 'order book and plot frame start below the shared toolbar',
+          );
           expect(
             tester.getTopLeft(book).dx,
             greaterThanOrEqualTo(tester.getTopRight(plot).dx),
@@ -202,6 +208,47 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'depth bars use each side quantity scale, stay right aligned and update with grouping',
+    (tester) async {
+      fixture.setSize(tester, const Size(1280, 900));
+      final client = Client(), feed = Feed();
+      await tester.pumpWidget(bookPage(client, feed));
+      await tester.pumpAndSettle();
+      feed.send(depth());
+      await tester.pumpAndSettle();
+      Rect bar(String side, double price) => tester.getRect(
+        find.byKey(ValueKey('crypto-book-depth-$side-$price')),
+      );
+      final bidMax = bar('bid', 99.96), askMax = bar('ask', 100.01);
+      expect(bar('bid', 100.0).width, closeTo(bidMax.width * 2 / 3, .01));
+      expect(bar('ask', 100.02).width, closeTo(askMax.width / 2, .01));
+      expect(bar('bid', 100.0).right, bidMax.right);
+      expect(bar('ask', 100.02).right, askMax.right);
+      expect(bidMax.width, askMax.width);
+      final event = depth(id: 11);
+      event['book'] = {
+        ...snapshot(id: 11),
+        'bids': [
+          {'price': 100.0, 'quantity': .00000001},
+          {'price': 99.99, 'quantity': 100.0},
+        ],
+      };
+      feed.send(event);
+      await tester.pumpAndSettle();
+      expect(bar('bid', 100.0).width, 2);
+      tester
+          .widget<DropdownButton<int>>(
+            find.byKey(const Key('crypto-book-grouping')),
+          )
+          .onChanged!(10);
+      await tester.pumpAndSettle();
+      expect(bar('ask', 100.1).width, askMax.width);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets('landscape uses five closest levels and can reveal all twenty', (
     tester,
