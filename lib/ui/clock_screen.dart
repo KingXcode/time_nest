@@ -277,7 +277,11 @@ class _ClockScreenState extends State<ClockScreen>
               ),
               if (!_panelOpen)
                 if (_introVisible && _timer.mode == 'clock')
-                  _Intro(onDismiss: _dismissIntro, onStart: _startPresentation)
+                  _Intro(
+                    nativeApp: _browser.state.nativeApp,
+                    onDismiss: _dismissIntro,
+                    onStart: _startPresentation,
+                  )
                 else
                   SizedBox(height: _timer.mode == 'clock' ? 52 : 28),
             ],
@@ -597,7 +601,12 @@ class _UpdateNotice extends StatelessWidget {
 }
 
 class _Intro extends StatelessWidget {
-  const _Intro({required this.onDismiss, required this.onStart});
+  const _Intro({
+    required this.nativeApp,
+    required this.onDismiss,
+    required this.onStart,
+  });
+  final bool nativeApp;
   final VoidCallback onDismiss;
   final VoidCallback onStart;
 
@@ -607,16 +616,22 @@ class _Intro extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text(
-          '横放手机，让时间安静一点。',
+        Text(
+          nativeApp ? '让时间在桌面上安静一点。' : '横放手机，让时间安静一点。',
           textAlign: TextAlign.center,
-          style: TextStyle(color: Color(0xFFB5B9C1), fontSize: 13),
+          style: const TextStyle(color: Color(0xFFB5B9C1), fontSize: 13),
         ),
         const SizedBox(height: 5),
-        const Text(
-          'Safari 分享 → 添加到主屏幕 · 轻点屏幕打开设置',
+        Text(
+          nativeApp
+              ? '点击窗口打开设置 · 开始展示可进入全屏并保持常亮'
+              : 'Safari 分享 → 添加到主屏幕 · 轻点屏幕打开设置',
           textAlign: TextAlign.center,
-          style: TextStyle(color: Color(0xFF989DA5), fontSize: 11, height: 1.6),
+          style: const TextStyle(
+            color: Color(0xFF989DA5),
+            fontSize: 11,
+            height: 1.6,
+          ),
         ),
         const SizedBox(height: 6),
         Wrap(

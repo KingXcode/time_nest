@@ -119,6 +119,23 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('Mac introduction and settings describe native capabilities', (
+    tester,
+  ) async {
+    final browser = TestBrowser(introSeen: false)
+      ..current = const BrowserState(nativeApp: true);
+    await launch(tester, browser, size: const Size(1200, 900));
+    expect(find.text('让时间在桌面上安静一点。'), findsOneWidget);
+    expect(find.textContaining('Safari'), findsNothing);
+    await openSettings(tester);
+    expect(find.text('Mac 应用'), findsOneWidget);
+    expect(find.text('检查更新'), findsNothing);
+    expect(find.text('刷新页面'), findsNothing);
+    expect(find.textContaining('Safari'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('start explicitly enables wake preference', (tester) async {
     final browser = TestBrowser(introSeen: false);
     await launch(tester, browser);
