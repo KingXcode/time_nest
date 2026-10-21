@@ -161,8 +161,9 @@ class _Digits extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    // Roboto Mono has a 0.6 em advance. The constraint stays fixed across ticks.
-    width: characters * size * (usesAppleTheme(Theme.of(context)) ? .65 : .6),
+    // SF has proportional punctuation: use its actual text width. Tabular
+    // figures below keep each group stable across ticks. Roboto Mono is 0.6 em.
+    width: usesAppleTheme(Theme.of(context)) ? null : characters * size * .6,
     child: RepaintBoundary(
       child: ValueListenableBuilder<String>(
         valueListenable: value,
