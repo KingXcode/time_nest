@@ -36,7 +36,8 @@ class CryptoBook {
     required this.symbol,
     required this.receivedAt,
   }) {
-    if (!cryptoAssets.containsKey(symbol) ||
+    if (!isCryptoSymbol(symbol) ||
+        (value.containsKey('symbol') && value['symbol'] != symbol) ||
         receivedAt <= 0 ||
         receivedAt >= 8640000000000000 ||
         value['lastUpdateId'] is! int ||
@@ -299,10 +300,14 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
 
   void _applyRules(DashboardData result) {
     try {
-      final rows = (result.data['rules'] as List).map(
-        (r) => CryptoPriceRule.fromJson(r as Map),
+      if (result.data['symbol'] != null &&
+          result.data['symbol'] != widget.symbol) {
+        return;
+      }
+      final raw = (result.data['rules'] as List).whereType<Map>().firstWhere(
+        (r) => r['symbol'] == widget.symbol,
       );
-      final rule = rows.firstWhere((r) => r.symbol == widget.symbol);
+      final rule = CryptoPriceRule.fromJson(raw);
       if (_ruleFetchedAt != null &&
           result.fetchedAt.isBefore(_ruleFetchedAt!)) {
         return;
@@ -322,10 +327,14 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     _rateTimer?.cancel();
     _ratesBusy = true;
     final serial = ++_rateSerial;
+    final symbol = widget.symbol;
+    final quoteAsset = cryptoQuoteAsset(symbol);
     Future<void> conversion() async {
       try {
-        final result = await widget.client.load('cryptoConversion', const {});
-        if (result.data['base'] != 'USDT' ||
+        final result = await widget.client.load('cryptoConversion', {
+          'base': quoteAsset,
+        });
+        if (result.data['base'] != quoteAsset ||
             !const ['USD', 'CNY'].every(
               (key) =>
                   result.data[key] is num &&
@@ -346,7 +355,9 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
 
     Future<void> rules() async {
       try {
-        final result = await widget.client.load('cryptoBookRules', const {});
+        final result = await widget.client.load('cryptoBookRules', {
+          'symbol': symbol,
+        });
         if (!mounted || serial != _rateSerial) return;
         _applyRules(result);
       } catch (_) {
@@ -400,19 +411,30 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     if (old.currency != widget.currency) {
       _currency = widget.currency == 'CNY' ? 'CNY' : 'USD';
     }
-    if (old.active != widget.active || old.client != widget.client) {
+    final changedPair = old.symbol != widget.symbol;
+    if (changedPair) {
+      _hoveredLevel = null;
+      _selectedStep = widget.priceStep;
+      _priceDirection = 0;
+    }
+    if (old.active != widget.active ||
+        old.client != widget.client ||
+        changedPair) {
       _rateSerial++;
       _ratesBusy = false;
       _rateTimer?.cancel();
-      if (old.client != widget.client) {
+      if (old.client != widget.client || changedPair) {
         _rates = null;
+        _rateError = false;
+        _rulesError = false;
         _rule = null;
         _ruleFetchedAt = null;
         _watchRules();
       }
       _loadRates();
     }
-    if (old.lastPrice != null &&
+    if (!changedPair &&
+        old.lastPrice != null &&
         widget.lastPrice != null &&
         old.lastPrice != widget.lastPrice) {
       _priceDirection = widget.lastPrice!.compareTo(old.lastPrice!);
@@ -439,6 +461,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     final rates = _rates;
     final freshEnough =
         rates != null &&
+        rates.data['base'] == cryptoQuoteAsset(widget.symbol) &&
         DateTime.now().difference(rates.fetchedAt) <= const Duration(days: 1);
     final rate = freshEnough ? (rates.data[_currency] as num).toDouble() : null;
     final amount = rate != null && widget.lastPrice != null
@@ -456,7 +479,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
         : '汇率暂不可用';
     final detail = rate == null
         ? '参考折算汇率暂不可用，稍后自动重试'
-        : 'Coinbase 参考汇率\n1 USDT ≈ $rate $_currency\n获取：${cryptoTime(rates!.fetchedAt.millisecondsSinceEpoch, seconds: true)} UTC+8${stale ? '\n当前使用旧汇率，稍后自动重试' : ''}';
+        : 'Coinbase 参考汇率\n1 ${cryptoQuoteAsset(widget.symbol)} ≈ $rate $_currency\n获取：${cryptoTime(rates!.fetchedAt.millisecondsSinceEpoch, seconds: true)} UTC+8${stale ? '\n当前使用旧汇率，稍后自动重试' : ''}';
     return PopupMenuButton<String>(
       key: const Key('crypto-book-currency'),
       tooltip: '切换折算货币',
@@ -497,8 +520,10 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
 
   @override
   Widget build(BuildContext context) {
-    final book = widget.book;
-    final rule = _rule;
+    final book = widget.book?.symbol == widget.symbol ? widget.book : null;
+    final rule = _rule?.symbol == widget.symbol ? _rule : null;
+    final asset = cryptoBaseAsset(widget.symbol);
+    final quoteAsset = cryptoQuoteAsset(widget.symbol);
     final digits = rule?.decimals ?? book?.priceDecimals ?? 2;
     final quantityDigits = rule?.quantityDecimals ?? 8;
     final amountDigits = rule?.amountDecimals ?? 8;
@@ -590,6 +615,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
       TextAlign alignment = TextAlign.right,
       double? reservedTail,
       String label = '',
+      String unit = '',
     }) {
       final text = number(value, precision, abbreviate);
       final reserve = reservedTail ?? textWidth(tail(text));
@@ -598,7 +624,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
         container: true,
         excludeSemantics: true,
         child: Tooltip(
-          message: price(value, precision),
+          message: '${price(value, precision)} $unit'.trim(),
           child: Padding(
             padding: EdgeInsets.only(
               right: math.max(0, reserve - textWidth(tail(text))),
@@ -717,7 +743,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                         digits,
                         color: color,
                         alignment: TextAlign.left,
-                        label: '价格(USDT)',
+                        label: '价格($quoteAsset)',
+                        unit: quoteAsset,
                       ),
                     ),
                     Expanded(
@@ -727,7 +754,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                         quantityDigits,
                         abbreviate: true,
                         reservedTail: quantityTail,
-                        label: '数量(${cryptoAssets[widget.symbol]!.$1})',
+                        label: '数量($asset)',
+                        unit: asset,
                       ),
                     ),
                     Expanded(
@@ -737,7 +765,8 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                         amountDigits,
                         abbreviate: true,
                         reservedTail: amountTail,
-                        label: '金额(USDT)',
+                        label: '金额($quoteAsset)',
+                        unit: quoteAsset,
                       ),
                     ),
                   ],
@@ -790,7 +819,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
               spacing: 6,
               children: [
                 Text(
-                  '订单簿 ${cryptoAssets[widget.symbol]!.$1}',
+                  '订单簿 $asset / $quoteAsset',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -899,7 +928,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                 Expanded(
                   flex: columnFlex[0],
                   child: Text(
-                    '价格(USDT)',
+                    '价格($quoteAsset)',
                     textAlign: TextAlign.left,
                     style: TextStyle(fontSize: 10, color: dashboardMuted),
                   ),
@@ -907,7 +936,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                 Expanded(
                   flex: columnFlex[1],
                   child: Text(
-                    '数量(${cryptoAssets[widget.symbol]!.$1})',
+                    '数量($asset)',
                     textAlign: TextAlign.right,
                     style: TextStyle(fontSize: 10, color: dashboardMuted),
                   ),
@@ -915,7 +944,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
                 Expanded(
                   flex: columnFlex[2],
                   child: Text(
-                    '金额(USDT)',
+                    '金额($quoteAsset)',
                     textAlign: TextAlign.right,
                     style: TextStyle(fontSize: 10, color: dashboardMuted),
                   ),

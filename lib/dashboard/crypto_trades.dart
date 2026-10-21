@@ -77,9 +77,13 @@ class _CryptoTradesState extends State<CryptoTrades> {
   void _apply(DashboardData data) {
     try {
       if (_ruleTime != null && data.fetchedAt.isBefore(_ruleTime!)) return;
-      final rule = (data.data['rules'] as List)
-          .map((r) => CryptoPriceRule.fromJson(r as Map))
-          .firstWhere((r) => r.symbol == widget.symbol);
+      if (data.data['symbol'] != null && data.data['symbol'] != widget.symbol) {
+        return;
+      }
+      final raw = (data.data['rules'] as List).whereType<Map>().firstWhere(
+        (r) => r['symbol'] == widget.symbol,
+      );
+      final rule = CryptoPriceRule.fromJson(raw);
       setState(() {
         _rule = rule;
         _ruleTime = data.fetchedAt;
@@ -107,7 +111,9 @@ class _CryptoTradesState extends State<CryptoTrades> {
     if (!widget.active) return;
     final serial = _serial;
     try {
-      final data = await widget.client.load('cryptoBookRules', const {});
+      final data = await widget.client.load('cryptoBookRules', {
+        'symbol': widget.symbol,
+      });
       if (mounted && serial == _serial) _apply(data);
     } catch (_) {
       if (mounted && serial == _serial) setState(() => _ruleError = true);
@@ -124,6 +130,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
       _serial++;
       _rule = null;
       _ruleTime = null;
+      _ruleError = false;
       _frozen = null;
       _watch();
       _load();
@@ -158,7 +165,8 @@ class _CryptoTradesState extends State<CryptoTrades> {
 
   @override
   Widget build(BuildContext context) {
-    final asset = cryptoAssets[widget.symbol]!.$1;
+    final asset = cryptoBaseAsset(widget.symbol);
+    final quoteAsset = cryptoQuoteAsset(widget.symbol);
     final rows = (_frozen ?? widget.trades).take(widget.rows).toList();
     final live = widget.status == 'live';
     final status = _frozen != null
@@ -212,7 +220,9 @@ class _CryptoTradesState extends State<CryptoTrades> {
           Expanded(
             flex: 4,
             child: Tooltip(
-              message: exactAmount == null ? '金额 (USDT)' : '$exactAmount USDT',
+              message: exactAmount == null
+                  ? '金额 ($quoteAsset)'
+                  : '$exactAmount $quoteAsset',
               excludeFromSemantics: true,
               child: Text(
                 amount,
@@ -259,7 +269,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
                 children: [
                   Expanded(
                     child: Text(
-                      '最新成交 $asset',
+                      '最新成交 $asset / $quoteAsset',
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -327,9 +337,9 @@ class _CryptoTradesState extends State<CryptoTrades> {
                             child: DefaultTextStyle.merge(
                               style: const TextStyle(color: dashboardMuted),
                               child: cells(
-                                '价格(USDT)',
+                                '价格($quoteAsset)',
                                 '数量($asset)',
-                                '金额(USDT)',
+                                '金额($quoteAsset)',
                                 '时间',
                               ),
                             ),
@@ -394,7 +404,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
                                     ).split(' ').last;
                                     return Semantics(
                                       label:
-                                          '成交 ${trade.id}，${trade.buyerMaker ? '主动卖出' : '主动买入'}，价格 $price，数量 $quantity${widget.showAmount ? '，金额 $exactAmount USDT' : ''}，时间 $time',
+                                          '成交 ${trade.id}，${trade.buyerMaker ? '主动卖出' : '主动买入'}，价格 $price $quoteAsset，数量 $quantity $asset${widget.showAmount ? '，金额 $exactAmount $quoteAsset' : ''}，时间 $time',
                                       child: Tooltip(
                                         message:
                                             '${cryptoTime(trade.time, seconds: true)} UTC+8',

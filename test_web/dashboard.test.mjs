@@ -30,7 +30,7 @@ function harness(fetcher, options = {}) {
     static now() { return now; }
   }
   const context = {
-    URL, URLSearchParams, AbortController, Date: TestDate, localStorage,
+    URL, URLSearchParams, AbortController, TextDecoder, Date: TestDate, localStorage,
     DOMParser: options.DOMParser,
     setTimeout: options.setTimeout ?? setTimeout,
     clearTimeout: options.clearTimeout ?? clearTimeout,
@@ -664,4 +664,250 @@ test('old exchange rules survive failures and cache eviction without changing th
   const result=await bad.request('cryptoBookRules',{},true);
   assert.equal(result.stale,true);assert.equal(result.fetchedAt,original.fetchedAt);
   assert.deepEqual(result.data,original.data);
+});
+
+const PAIRS_KEY = 'shike.crypto.pairs.v1';
+function spotPair(baseAsset, quoteAsset, extra = {}) {
+  return { symbol: baseAsset + quoteAsset, baseAsset, quoteAsset,
+    status: 'TRADING', isSpotTradingAllowed: true, permissions: [], permissionSets: [['SPOT', 'MARGIN']],
+    baseAssetPrecision: 8, quoteAssetPrecision: 8,
+    filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.00001000' }, { filterType: 'LOT_SIZE', stepSize: '0.00100000' }], ...extra };
+}
+const spotCatalog = () => ({ symbols: [
+  ...symbols.map(symbol => spotPair(symbol.slice(0, -4), 'USDT')),
+  spotPair('ETH', 'BTC'), spotPair('BTC', 'USDC'), spotPair('ETH', 'FDUSD'),
+] });
+const selectedQuote = (symbol, price = '100.25') => ({ ...binanceQuotes()[0], symbol, lastPrice: price });
+const settleCatalog = async () => { for (let i = 0; i < 8; i++) await new Promise(setImmediate); };
+
+test('pair catalog admits only real trading Spot pairs using modern or legacy permissions', async () => {
+  const catalog = spotCatalog();
+  catalog.symbols.push(spotPair('LTC', 'BTC', { permissions: ['SPOT'], permissionSets: undefined, isSpotTradingAllowed: undefined }),
+    spotPair('HALT', 'USDT', { status: 'HALT' }), spotPair('BREAK', 'USDC', { status: 'BREAK' }),
+    spotPair('MARGIN', 'USDT', { permissionSets: [['MARGIN']] }),
+    spotPair('NO', 'BTC', { isSpotTradingAllowed: false }), spotPair('EMPTY', 'BTC', { permissionSets: [] }));
+  const h = harness(() => response(catalog));
+  const result = await h.request('cryptoPairs', {});
+  const url = new URL(h.calls[0].url);
+  assert.equal(url.hostname, 'data-api.binance.vision');
+  assert.equal(url.pathname, '/api/v3/exchangeInfo');
+  assert.equal(url.searchParams.get('permissions'), 'SPOT');
+  assert.equal(url.searchParams.get('symbolStatus'), 'TRADING');
+  assert.equal(url.searchParams.get('showPermissionSets'), 'true');
+  assert.equal(result.data.pairs.length, 10);
+  assert.deepEqual(result.data.pairs.find(pair => pair.symbol === 'ETHBTC'), { symbol: 'ETHBTC', baseAsset: 'ETH', quoteAsset: 'BTC' });
+  assert.ok(result.data.pairs.some(pair => pair.symbol === 'LTCBTC'));
+  assert.ok(!result.data.pairs.some(pair => /HALT|BREAK|MARGIN|NO|EMPTY/.test(pair.symbol)));
+  assert.ok(h.storage.getItem(PAIRS_KEY).length <= 3_000_000);
+  assert.equal(h.storage.getItem(CACHE_KEY), null, 'metadata is not duplicated into the evictable market cache');
+});
+
+test('catalog count, duplicate identity, asset syntax and base/quote composition are validated', async () => {
+  for (const raw of [
+    { symbols: [] }, { symbols: Array.from({ length: 8001 }, () => spotPair('ETH', 'BTC')) },
+    { symbols: [spotPair('ETH', 'BTC'), spotPair('ETH', 'BTC')] },
+    { symbols: [spotPair('ETH', 'BTC', { symbol: 'ETHUSDT' })] },
+    { symbols: [spotPair('ETH', 'ETH')] },
+    { symbols: [spotPair('https://bad', 'USDT')] },
+    { symbols: [spotPair('A'.repeat(21), 'BTC')] },
+    { symbols: [spotPair('ETH', 'BTC', { status: 'BREAK' })] },
+  ]) {
+    const h = harness(() => response(raw));
+    await assert.rejects(h.request('cryptoPairs', {}), /格式异常/);
+    assert.equal(h.storage.getItem(PAIRS_KEY), null);
+  }
+});
+
+test('catalog response byte bounds abort excessive payloads before parsing or saving', async () => {
+  const declared = harness(() => response({}, 200, { 'content-length': '16000001' }));
+  await assert.rejects(declared.request('cryptoPairs', {}), /响应过大/);
+  assert.equal(declared.calls[0].init.signal.aborted, true);
+  const streamed = harness(() => response(' '.repeat(16_000_001)));
+  await assert.rejects(streamed.request('cryptoPairs', {}), /响应过大/);
+  assert.equal(streamed.calls[0].init.signal.aborted, true);
+  assert.equal(streamed.storage.getItem(PAIRS_KEY), null);
+});
+
+test('catalog fetches deduplicate, cache for eight hours, and expose dated stale fallback for at most seven days', async () => {
+  let finish;
+  const shared = storage(), h = harness(() => new Promise(resolve => { finish = resolve; }), { storage: shared });
+  const first = h.request('cryptoPairs', {}), second = h.request('cryptoPairs', {}, true);
+  assert.equal(h.calls.length, 1); finish(response(spotCatalog()));
+  const original = await first;
+  assert.deepEqual(await second, original);
+  assert.equal((await h.request('cryptoPairs', {}, true)).cached, true);
+  assert.equal(h.calls.length, 1);
+  const fresh = harness(() => { throw new Error('offline'); }, { storage: shared, now: START + 8 * hour - 1 });
+  assert.equal((await fresh.request('cryptoPairs', {})).stale, false); assert.equal(fresh.calls.length, 0);
+  fresh.advance(1);
+  const stale = await fresh.request('cryptoPairs', {});
+  assert.equal(stale.stale, true); assert.equal(stale.fetchedAt, original.fetchedAt);
+  await settleCatalog();
+  assert.equal((await fresh.request('cryptoPairs', {}, true)).stale, true); assert.equal(fresh.calls.length, 1);
+  const expired = harness(() => response({}, 500), { storage: shared, now: START + 7 * day + 1 });
+  await assert.rejects(expired.request('cryptoPairs', {}), /HTTP 500/);
+});
+
+test('selected quote, candles and rules resolve a non-USDT catalog pair without downloading other tickers', async () => {
+  const h = harness(url => response(url.includes('exchangeInfo') ? spotCatalog()
+    : url.includes('/ticker/') ? selectedQuote(new URL(url).searchParams.get('symbol')) : binanceCandles()));
+  const quotes = await h.request('cryptoQuotes', { symbol: 'ETHBTC' });
+  assert.deepEqual(quotes.data.quotes.map(row => row.symbol), ['ETHBTC']);
+  assert.equal(quotes.warning, undefined);
+  const quoteUrl = new URL(h.calls[1].url);
+  assert.equal(quoteUrl.searchParams.get('symbol'), 'ETHBTC');
+  assert.equal(quoteUrl.searchParams.has('symbols'), false);
+  const candles = await h.request('cryptoCandles', { symbol: 'ETHBTC', interval: '1h' });
+  assert.equal(candles.data.symbol, 'ETHBTC');
+  const rules = await h.request('cryptoBookRules', { symbol: 'ETHBTC' });
+  assert.equal(rules.data.rules.length, 1); assert.equal(rules.data.rules[0].symbol, 'ETHBTC');
+  assert.equal(h.calls.filter(call => call.url.includes('exchangeInfo')).length, 1);
+  assert.equal(h.calls.length, 3);
+  const unknown = h.request('cryptoQuotes', { symbol: 'ETHUSDC' });
+  await assert.rejects(unknown, /不在当前/);
+  assert.equal(h.calls.length, 3, 'never synthesize ETHUSDC merely because ETH and USDC were seen separately');
+});
+
+test('selected default quotes remain single-symbol before catalog bootstrap and overview keeps its six defaults', async () => {
+  const h = harness(url => response(new URL(url).searchParams.has('symbol') ? selectedQuote('BTCUSDT') : binanceQuotes()));
+  const selected = await h.request('cryptoQuotes', { symbol: 'BTCUSDT' });
+  assert.equal(selected.data.quotes.length, 1);
+  const overview = await h.request('cryptoQuotes', {});
+  assert.equal(overview.data.quotes.length, 6);
+  assert.equal(h.calls.length, 2); assert.ok(h.calls.every(call => call.url.includes('/ticker/')));
+  assert.equal((await h.request('cryptoQuotes', { symbol: 'BTCUSDT' })).data.quotes.length, 1);
+});
+
+test('selected quotes reject a foreign response and mismatched cached identities', async () => {
+  const wrong = harness(() => response(selectedQuote('ETHUSDT')));
+  await assert.rejects(wrong.request('cryptoQuotes', { symbol: 'BTCUSDT' }), /格式异常/);
+  const shared = storage(), valid = harness(() => response(selectedQuote('ETHUSDT')), { storage: shared });
+  await valid.request('cryptoQuotes', { symbol: 'ETHUSDT' });
+  const cache = JSON.parse(shared.getItem(CACHE_KEY));
+  cache['cryptoQuotes:{"symbol":"BTCUSDT"}'] = cache['cryptoQuotes:{"symbol":"ETHUSDT"}'];
+  shared.setItem(CACHE_KEY, JSON.stringify(cache));
+  const reload = harness(() => response(selectedQuote('BTCUSDT')), { storage: shared });
+  assert.equal((await reload.request('cryptoQuotes', { symbol: 'BTCUSDT' })).cached, false);
+  assert.equal(reload.calls.length, 1);
+});
+
+test('missing catalog price filters remain explicitly unavailable, without fabricated grouping increments', async () => {
+  const catalog = { symbols: [spotPair('ETH', 'BTC', { filters: [] })] };
+  const h = harness(() => response(catalog));
+  assert.equal((await h.request('cryptoPairs', {})).data.pairs.length, 1);
+  await assert.rejects(h.request('cryptoBookRules', { symbol: 'ETHBTC' }), /未提供有效/);
+  assert.equal(h.calls.length, 1);
+});
+
+test('non-USDT conversion sends the actual quote currency and never reuses another base or assumes parity', async () => {
+  const h = harness(url => {
+    const base = new URL(url).searchParams.get('currency');
+    return response({ data: { currency: base, rates: { USD: base === 'BTC' ? '67000.12' : '1.0002', CNY: base === 'BTC' ? '480000.25' : '7.0003' } } });
+  });
+  const btc = await h.request('cryptoConversion', { base: 'BTC' });
+  assert.deepEqual(btc.data, { base: 'BTC', USD: 67000.12, CNY: 480000.25 });
+  const usdc = await h.request('cryptoConversion', { base: 'USDC' });
+  assert.equal(usdc.data.USD, 1.0002); assert.equal(h.calls.length, 2);
+  assert.equal((await h.request('cryptoConversion', { base: 'BTC' })).cached, true);
+  const unsupported = harness(() => response({ data: { currency: 'USD', rates: { USD: '1', CNY: '7' } } }));
+  await assert.rejects(unsupported.request('cryptoConversion', { base: 'FDUSD' }), /格式异常/);
+  for (const base of [null, '', 'a&b', 'https://bad']) await assert.rejects(unsupported.request('cryptoConversion', { base }), /有效的计价币/);
+});
+
+test('cancelling selected REST aborts every interval and quote, but not overview or another symbol', async () => {
+  const pending = [];
+  const h = harness((url, init) => new Promise(resolve => { pending.push({ url, init, resolve }); }));
+  const a = h.request('cryptoQuotes', { symbol: 'BTCUSDT' });
+  const b = h.request('cryptoCandles', { symbol: 'BTCUSDT', interval: '1h' });
+  const c = h.request('cryptoQuotes', { symbol: 'ETHUSDT' });
+  const d = h.request('cryptoQuotes', {});
+  const rejectA = assert.rejects(a, /取消/), rejectB = assert.rejects(b, /取消/);
+  h.api.cancelCryptoRequests('BTCUSDT');
+  assert.deepEqual(pending.map(row => row.init.signal.aborted), [true, true, false, false]);
+  pending[0].resolve(response(selectedQuote('BTCUSDT'))); pending[1].resolve(response(binanceCandles()));
+  pending[2].resolve(response(selectedQuote('ETHUSDT'))); pending[3].resolve(response(binanceQuotes()));
+  await Promise.all([rejectA, rejectB, c, d]);
+  const keys = Object.keys(JSON.parse(h.storage.getItem(CACHE_KEY)));
+  assert.equal(keys.some(key => key.includes('BTCUSDT')), false);
+});
+
+test('immediate reselection gets a new REST request and late cancelled data cannot clear or overwrite it', async () => {
+  const pending = [], h = harness(() => new Promise(resolve => pending.push(resolve)));
+  const first = h.request('cryptoQuotes', { symbol: 'BTCUSDT' });
+  const rejected = assert.rejects(first, /取消/);
+  h.api.cancelCryptoRequests('BTCUSDT');
+  const second = h.request('cryptoQuotes', { symbol: 'BTCUSDT' });
+  assert.equal(h.calls.length, 2);
+  pending[0](response(selectedQuote('BTCUSDT', '99'))); await rejected;
+  const third = h.request('cryptoQuotes', { symbol: 'BTCUSDT' });
+  assert.equal(h.calls.length, 2, 'late finally must not remove the replacement inflight entry');
+  pending[1](response(selectedQuote('BTCUSDT', '102')));
+  assert.deepEqual(await third, await second);
+  assert.equal((await h.request('cryptoQuotes', { symbol: 'BTCUSDT' })).data.quotes[0].price, 102);
+});
+
+test('cancelling during shared catalog bootstrap prevents the obsolete market fetch without aborting metadata', async () => {
+  let finish;
+  const h = harness(url => url.includes('exchangeInfo') ? new Promise(resolve => { finish = resolve; }) : response(selectedQuote('BTCUSDC')));
+  const old = h.request('cryptoQuotes', { symbol: 'ETHBTC' }), rejected = assert.rejects(old, /取消/);
+  h.api.cancelCryptoRequests('ETHBTC');
+  const next = h.request('cryptoQuotes', { symbol: 'BTCUSDC' });
+  assert.equal(h.calls.length, 1); assert.equal(h.calls[0].init.signal.aborted, false);
+  finish(response(spotCatalog())); await rejected;
+  assert.equal((await next).data.quotes[0].symbol, 'BTCUSDC');
+  assert.equal(h.calls.length, 2);
+  assert.equal(new URL(h.calls[1].url).searchParams.get('symbol'), 'BTCUSDC');
+});
+
+test('visiting many catalog pairs keeps quote caches bounded rather than one durable store per symbol', async () => {
+  const catalog = { symbols: Array.from({ length: 120 }, (_, i) => spotPair(`COIN${i}`, 'BTC')) };
+  const shared = storage(), h = harness(url => response(url.includes('exchangeInfo') ? catalog : selectedQuote(new URL(url).searchParams.get('symbol'))), { storage: shared });
+  await h.request('cryptoPairs', {});
+  for (const pair of catalog.symbols) { await h.request('cryptoQuotes', { symbol: pair.symbol }); h.advance(1); }
+  assert.ok(Object.keys(JSON.parse(shared.getItem(CACHE_KEY))).length <= 80);
+  assert.ok(shared.getItem(CACHE_KEY).length <= 900000);
+  assert.ok(shared.values.size <= 3, 'one market cache, one catalog and one host-limits store only');
+});
+
+test('unsupported punctuation cannot poison or be relabeled within an otherwise valid catalog', async () => {
+  const h = harness(() => response({ symbols: [spotPair('ETH', 'BTC'), spotPair('BAD/NAME', 'USDT')] }));
+  const result = await h.request('cryptoPairs', {});
+  assert.deepEqual(result.data.pairs, [{ symbol: 'ETHBTC', baseAsset: 'ETH', quoteAsset: 'BTC' }]);
+  assert.match(result.warning, /1 个交易对名称暂不支持/);
+  assert.match((await h.request('cryptoPairs', {})).warning, /1 个交易对名称暂不支持/);
+});
+
+test('a fresh verified catalog removes delisted symbols even when their market data is still cached', async () => {
+  let catalog = spotCatalog();
+  const h = harness(url => response(url.includes('exchangeInfo') ? catalog : selectedQuote('ETHBTC')));
+  await h.request('cryptoQuotes', { symbol: 'ETHBTC' });
+  h.advance(minute);
+  catalog = { symbols: [spotPair('BTC', 'USDC')] };
+  await h.request('cryptoPairs', {}, true);
+  const count = h.calls.length;
+  await assert.rejects(h.request('cryptoQuotes', { symbol: 'ETHBTC' }), /不在当前/);
+  assert.equal(h.calls.length, count);
+});
+
+test('UTF-8 catalog symbols preserve exact assets in selected REST calls, rules and persisted cache', async () => {
+  const shared = storage(), symbol = '币安人生USDT';
+  const h = harness(url => {
+    const parsed = new URL(url);
+    if (url.includes('exchangeInfo')) return response({ symbols: [spotPair('币安人生', 'USDT')] });
+    assert.equal(parsed.searchParams.get('symbol'), symbol);
+    assert.ok(!url.includes('币安人生'), 'request URLs percent-encode UTF-8 names');
+    return response(url.includes('/ticker/') ? selectedQuote(symbol) : binanceCandles());
+  }, { storage: shared });
+  const catalog = await h.request('cryptoPairs', {});
+  assert.deepEqual(catalog.data.pairs, [{ symbol, baseAsset: '币安人生', quoteAsset: 'USDT' }]);
+  assert.equal(catalog.warning, undefined);
+  const quotes = await h.request('cryptoQuotes', { symbol });
+  assert.equal(quotes.data.quotes[0].symbol, symbol);
+  const candles = await h.request('cryptoCandles', { symbol, interval: '1h' });
+  assert.equal(candles.data.symbol, symbol);
+  assert.equal((await h.request('cryptoBookRules', { symbol })).data.rules[0].symbol, symbol);
+  const reload = harness(() => { throw new Error('must use cache'); }, { storage: shared });
+  assert.equal((await reload.request('cryptoQuotes', { symbol })).cached, true);
+  assert.equal((await reload.request('cryptoCandles', { symbol, interval: '1h' })).cached, true);
+  assert.equal(reload.calls.length, 0);
 });

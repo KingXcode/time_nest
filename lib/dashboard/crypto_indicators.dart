@@ -41,7 +41,7 @@ const cryptoIndicators = <String, IndicatorSpec>{
   'bbi': IndicatorSpec('BBI 多空均线', '(SMA3+SMA6+SMA12+SMA24)/4', overlay: true),
   'env': IndicatorSpec('ENV 包络线', 'SMA(20) 上下 2% 包络', overlay: true),
   'vol': IndicatorSpec('VOL 成交量', '基础币成交量及 SMA(5,10)'),
-  'amount': IndicatorSpec('AMOUNT 成交额', '计价币成交额（USDT）'),
+  'amount': IndicatorSpec('AMOUNT 成交额', '当前计价币成交额'),
   'macd': IndicatorSpec('MACD', 'DIF=EMA12−EMA26；DEA=EMA(DIF,9)；柱=DIF−DEA'),
   'rsi': IndicatorSpec('RSI 相对强弱', 'Wilder RMA(涨幅/跌幅,14)，平盘为50'),
   'kdj': IndicatorSpec('KDJ 随机指标', 'RSV(9)；K、D 递归平滑1/3，初始50；J=3K−2D'),

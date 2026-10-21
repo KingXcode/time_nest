@@ -31,7 +31,7 @@ Map<String, double> cleanCryptoBookSteps(Object? raw) {
   if (raw is! Map) return {};
   return {
     for (final entry in raw.entries)
-      if (cryptoAssets.containsKey(entry.key) &&
+      if (isCryptoSymbol(entry.key) &&
           entry.value is num &&
           (entry.value as num).isFinite &&
           (entry.value as num) > 0 &&
@@ -91,7 +91,7 @@ class DashboardPreferences {
       if (json['version'] == null && json['feed'] == 'top') {
         prefs.feed = 'sspai';
       }
-      if (cryptoAssets.containsKey(json['cryptoSymbol'])) {
+      if (isCryptoSymbol(json['cryptoSymbol'])) {
         prefs.cryptoSymbol = json['cryptoSymbol'] as String;
       }
       if (cryptoIntervals.containsKey(json['cryptoInterval'])) {

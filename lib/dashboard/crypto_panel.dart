@@ -9,6 +9,7 @@ import 'crypto_chart_controls.dart';
 import 'crypto_feed.dart';
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
+import 'crypto_pair_picker.dart';
 import 'crypto_order_book.dart';
 import 'crypto_trades.dart';
 import 'crypto_view_settings.dart';
@@ -79,6 +80,10 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   bool _quotesBusy = false, _candlesBusy = false, _automatic = true;
   bool _visible = true;
   int _quoteSerial = 0, _candleSerial = 0, _failures = 0;
+  int _pairSerial = 0;
+  bool _pairBusy = false, _pickerOpen = false;
+  String? _pairError;
+  bool get _pairReady => cryptoPairForSymbol(widget.symbol) != null;
   Timer? _timer;
   late CryptoFeed _feed = widget.feed ?? createCryptoFeed();
   StreamSubscription<Map<String, dynamic>>? _subscription;
@@ -109,8 +114,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         state == null ||
         state == AppLifecycleState.resumed ||
         state == AppLifecycleState.inactive;
-    _startFeed();
-    _refresh();
+    _activatePair();
   }
 
   @override
@@ -133,7 +137,28 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         old.interval != widget.interval ||
         old.client != widget.client ||
         old.feed != widget.feed) {
-      if (old.symbol != widget.symbol) _book = null;
+      final pairChanged =
+          old.symbol != widget.symbol || old.client != widget.client;
+      _stopFeed();
+      _cancelRequests(old.client, old.symbol);
+      _timer?.cancel();
+      _pairSerial++;
+      _pairBusy = false;
+      _pairError = null;
+      _quoteSerial++;
+      _quotesBusy = false;
+      if (pairChanged) {
+        _quotes = [];
+        _pushedQuotes.clear();
+        _quoteData = null;
+        _quoteError = null;
+        _failures = 0;
+      }
+      _book = null;
+      _trades = [];
+      _bookStatus = _tradeStatus = _automatic && _visible
+          ? 'syncing'
+          : 'paused';
       _chartKey = GlobalKey();
       _candleSerial++;
       _candlesBusy = false;
@@ -147,10 +172,67 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       _olderError = null;
       _lastCandleEvent = 0;
       _pendingCandles.clear();
-      _feed = widget.feed ?? _feed;
-      _startFeed();
-      _loadCandles();
+      _feed = widget.feed ?? (old.feed != null ? createCryptoFeed() : _feed);
+      _activatePair(refreshQuote: pairChanged || _quotes.isEmpty);
     }
+  }
+
+  void _cancelRequests(DashboardClient client, String symbol) {
+    if (client is CryptoRequestCancellation) {
+      (client as CryptoRequestCancellation).cancelCryptoRequests(symbol);
+    }
+  }
+
+  Future<void> _activatePair({bool refreshQuote = true}) async {
+    if (!_pairReady) {
+      final serial = ++_pairSerial;
+      _pairBusy = true;
+      try {
+        final data = await widget.client.load('cryptoPairs', {});
+        final pairs = readCryptoPairs(data.data);
+        if (!mounted || serial != _pairSerial) return;
+        if (!pairs.any((pair) => pair.symbol == widget.symbol)) {
+          throw const FormatException('Saved spot pair is unavailable');
+        }
+        registerCryptoPairs(pairs);
+        setState(() {
+          _pairBusy = false;
+          _pairError = null;
+        });
+      } catch (_) {
+        if (mounted && serial == _pairSerial) {
+          setState(() {
+            _pairBusy = false;
+            _pairError = '暂时无法确认已保存的交易对。请重试，或选择其他现货交易对。';
+          });
+        }
+        return;
+      }
+    }
+    if (!mounted) return;
+    _startFeed();
+    if (refreshQuote) {
+      _refresh();
+    } else {
+      _loadCandles().then((_) => _schedule());
+    }
+  }
+
+  Future<void> _choosePair({required bool chooseQuote}) async {
+    if (_pickerOpen) return;
+    _pickerOpen = true;
+    final selected = await showCryptoPairPicker(
+      context,
+      client: widget.client,
+      current:
+          cryptoPairForSymbol(widget.symbol) ?? cryptoPairForSymbol('BTCUSDT')!,
+      chooseQuote: chooseQuote,
+    );
+    _pickerOpen = false;
+    if (!mounted || selected == null || selected.symbol == widget.symbol) {
+      return;
+    }
+    widget.onChanged(selected.symbol, widget.interval);
   }
 
   @override
@@ -166,6 +248,11 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       _refresh(refresh: true);
     } else {
       _stopFeed();
+      _cancelRequests(widget.client, widget.symbol);
+      _quoteSerial++;
+      _candleSerial++;
+      _olderSerial++;
+      _quotesBusy = _candlesBusy = _olderBusy = false;
       setState(() {
         _streamStatus = 'paused';
         _bookStatus = 'paused';
@@ -176,7 +263,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
 
   void _schedule() {
     _timer?.cancel();
-    if (!mounted || !_visible || !_automatic) return;
+    if (!mounted || !_visible || !_automatic || !_pairReady) return;
     final seconds = math.min(300, 30 * (1 << _failures.clamp(0, 4)));
     _timer = Timer(Duration(seconds: seconds), () {
       if (_streamStatus == 'live' && _historySynchronized) {
@@ -189,7 +276,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
 
   Future<void> _refresh({bool refresh = false}) async {
     _timer?.cancel();
-    if (!_visible) return;
+    if (!_visible || !_pairReady) return;
     await Future.wait([
       _loadQuotes(refresh: refresh),
       _loadCandles(refresh: refresh),
@@ -210,19 +297,19 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       : error.toString().replaceFirst(RegExp(r'^Exception: '), '');
 
   Future<void> _loadQuotes({bool refresh = false}) async {
-    if (_quotesBusy || !_visible) return;
+    if (_quotesBusy || !_visible || !_pairReady) return;
     final serial = ++_quoteSerial;
+    final symbol = widget.symbol;
     setState(() => _quotesBusy = true);
     try {
-      final data = await widget.client.load(
-        'cryptoQuotes',
-        {},
-        refresh: refresh,
-      );
+      final data = await widget.client.load('cryptoQuotes', {
+        'symbol': symbol,
+      }, refresh: refresh);
       final rows = (data.data['quotes'] as List)
           .map((r) => CryptoQuote.fromJson(r as Map))
+          .where((quote) => quote.symbol == symbol)
           .toList();
-      if (rows.isEmpty) throw const FormatException('Empty quotes');
+      if (rows.length != 1) throw const FormatException('Empty quotes');
       if (!mounted || serial != _quoteSerial) return;
       setState(() {
         _quotes = [
@@ -247,7 +334,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
   }
 
   Future<void> _loadCandles({bool refresh = false}) async {
-    if (_candlesBusy || !_visible) return;
+    if (_candlesBusy || !_visible || !_pairReady) return;
     final serial = ++_candleSerial;
     final symbol = widget.symbol, interval = widget.interval;
     setState(() => _candlesBusy = true);
@@ -367,7 +454,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
 
   void _startFeed() {
     _stopFeed();
-    if (!_automatic || !_visible) return;
+    if (!_automatic || !_visible || !_pairReady) return;
     _streamStatus = 'connecting';
     _bookStatus = 'syncing';
     _bookEpoch = 0;
@@ -496,19 +583,14 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               final at = event['eventTime'] as int;
               if (type == 'quote') {
                 final quote = CryptoQuote.fromJson(event['quote'] as Map);
+                if (quote.symbol != widget.symbol) return;
                 if ((_pushedQuotes[quote.symbol]?.closeTime ?? 0) >=
                     quote.closeTime) {
                   return;
                 }
                 _pushedQuotes[quote.symbol] = quote;
                 setState(() {
-                  _quotes = [
-                    for (final id in cryptoAssets.keys)
-                      if (id == quote.symbol)
-                        quote
-                      else
-                        ?_quotes.where((q) => q.symbol == id).firstOrNull,
-                  ];
+                  _quotes = [quote];
                   _quoteData = DashboardData(
                     data: const {},
                     fetchedAt: DateTime.fromMillisecondsSinceEpoch(at),
@@ -590,6 +672,8 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _stopFeed();
+    _cancelRequests(widget.client, widget.symbol);
+    _pairSerial++;
     _quoteSerial++;
     _candleSerial++;
     _olderSerial++;
@@ -652,7 +736,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
     final selected = _quotes
         .where((q) => q.symbol == widget.symbol)
         .firstOrNull;
-    final Widget? orderBook = !_view.orderBook
+    final Widget? orderBook = !_view.orderBook || !_pairReady
         ? null
         : CryptoOrderBook(
             key: ValueKey('crypto-book-${widget.symbol}'),
@@ -686,7 +770,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               );
             },
           );
-    final Widget? trades = !_view.trades
+    final Widget? trades = !_view.trades || !_pairReady
         ? null
         : CryptoTrades(
             key: ValueKey('crypto-trades-${widget.symbol}'),
@@ -707,7 +791,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             const Text(
-              '币安现货 / USDT',
+              '币安现货',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
             FilterChip(
@@ -721,6 +805,11 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                   _refresh(refresh: true);
                 } else {
                   _stopFeed();
+                  _cancelRequests(widget.client, widget.symbol);
+                  _quoteSerial++;
+                  _candleSerial++;
+                  _olderSerial++;
+                  _quotesBusy = _candlesBusy = _olderBusy = false;
                   setState(() {
                     _streamStatus = 'paused';
                     _bookStatus = 'paused';
@@ -732,7 +821,8 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             TextButton.icon(
               onPressed: _quotesBusy || _candlesBusy
                   ? null
-                  : () => _refresh(refresh: true),
+                  : () =>
+                        _pairReady ? _refresh(refresh: true) : _activatePair(),
               icon: const Icon(Icons.refresh_rounded, size: 15),
               label: Text(_quotesBusy || _candlesBusy ? '更新中' : '刷新行情'),
             ),
@@ -760,36 +850,22 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           ],
         ),
         _status(_quoteData, _quoteError, _quotesBusy),
-        LayoutBuilder(
-          builder: (context, box) {
-            final scale = MediaQuery.textScalerOf(context).scale(1);
-            final width = math.max(132.0 * scale, (box.maxWidth - 5 * 6) / 6);
-            return SingleChildScrollView(
-              key: const Key('crypto-quote-strip'),
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final asset in cryptoAssets.entries)
-                    Padding(
-                      padding: EdgeInsets.only(
-                        right: asset.key == cryptoAssets.keys.last ? 0 : 6,
-                      ),
-                      child: SizedBox(
-                        width: width,
-                        child: _quoteCard(
-                          asset.key,
-                          _quotes
-                              .where((q) => q.symbol == asset.key)
-                              .firstOrNull,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 6),
+        if (_pairBusy)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('正在确认现货交易对…'),
+          ),
+        if (_pairError != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              _pairError!,
+              style: const TextStyle(color: Color(0xFFFFCA80)),
+            ),
+          ),
+        const SizedBox(height: 8),
+        _quoteCard(selected),
+        const SizedBox(height: 12),
         _status(_candleData, _candleError, _candlesBusy),
         if (_streamStatus == 'live' && !_historySynchronized)
           const Text(
@@ -804,7 +880,8 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 CryptoChartHeader(
-                  asset: cryptoAssets[widget.symbol]!.$1,
+                  asset: cryptoBaseAsset(widget.symbol),
+                  quoteAsset: cryptoQuoteAsset(widget.symbol),
                   interval: widget.interval,
                   quote: selected,
                   onIntervalChanged: (interval) =>
@@ -842,7 +919,8 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
               ),
             ),
             candles: _candles,
-            asset: cryptoAssets[widget.symbol]!.$1,
+            asset: cryptoBaseAsset(widget.symbol),
+            quoteAsset: cryptoQuoteAsset(widget.symbol),
             fetchedAt: _candleData!.fetchedAt,
             overlays: _overlays,
             panes: _panes,
@@ -883,69 +961,108 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
           ],
         ),
         const Text(
-          '24h 涨跌为滚动 24 小时变化，行情与 K 线绿色上涨、红色下跌；最新成交绿色为主动买入、红色为主动卖出。这里只展示币安所选现货交易对，不代表全市场市值；USDT 不等同美元。后台暂停推送，断网时可能显示旧数据。',
+          '24h 涨跌为滚动 24 小时变化，行情与 K 线绿色上涨、红色下跌；最新成交绿色为主动买入、红色为主动卖出。这里只展示币安所选现货交易对，不代表全市场市值；报价以所选计价币为单位，参考折算不代表可成交汇率。后台暂停推送，断网时可能显示旧数据。',
           style: TextStyle(color: dashboardMuted, fontSize: 12, height: 1.7),
         ),
       ],
     );
   }
 
-  Widget _quoteCard(String symbol, CryptoQuote? quote) {
-    final asset = cryptoAssets[symbol]!;
-    final active = symbol == widget.symbol;
+  Widget _quoteCard(CryptoQuote? quote) {
+    final base = cryptoBaseAsset(widget.symbol);
+    final unit = cryptoQuoteAsset(widget.symbol);
     final change = quote?.changePercent;
-    return Semantics(
-      label: '${asset.$1} · ${asset.$2}',
-      selected: active,
-      child: Material(
-        color: active ? const Color(0xFF263D5B) : dashboardBackground,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(7),
-          side: BorderSide(color: active ? dashboardAccent : dashboardBorder),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          key: ValueKey('crypto-select-$symbol'),
-          onTap: () => widget.onChanged(symbol, widget.interval),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  asset.$1,
+    return Container(
+      key: const Key('crypto-current-quote'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17283C),
+        border: Border.all(color: dashboardBorder),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          Widget selector(String asset, bool quote) => Tooltip(
+            message: quote ? '切换计价币' : '切换币种 · $unit 市场',
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+              child: TextButton.icon(
+                key: Key(
+                  quote ? 'crypto-quote-selector' : 'crypto-base-selector',
+                ),
+                onPressed: () => _choosePair(chooseQuote: quote),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 44),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  backgroundColor: quote
+                      ? dashboardBackground
+                      : const Color(0xFF263D5B),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                iconAlignment: IconAlignment.end,
+                icon: const Icon(Icons.expand_more_rounded, size: 20),
+                label: Text(
+                  asset,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  quote == null ? '暂无报价' : cryptoPrice(quote.price),
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  change == null
-                      ? 'USDT'
-                      : '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}% · 24h',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: change == null
-                        ? dashboardMuted
-                        : change >= 0
-                        ? cryptoUp
-                        : cryptoDown,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [selector(base, false), selector(unit, true)],
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        quote == null ? '暂无报价' : cryptoPrice(quote.price),
+                        key: const Key('crypto-current-price'),
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (change != null)
+                    Text(
+                      '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}% · 24h',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: change >= 0 ? cryptoUp : cryptoDown,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
       ),
     );
   }

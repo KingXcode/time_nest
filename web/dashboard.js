@@ -9,14 +9,17 @@
   const CACHE_KEY = 'shike.dashboard.cache.v1';
   const LIMIT_KEY = 'shike.dashboard.limits.v1';
   const RULES_KEY = 'shike.crypto.rules.v2';
+  const PAIRS_KEY = 'shike.crypto.pairs.v1';
   const PREF_KEY = 'shike.dashboard.preferences.v1';
   const MAX_CACHE_ENTRIES = 80, MAX_CACHE_BYTES = 900_000;
+  const MAX_PAIRS = 8000, MAX_PAIRS_BYTES = 3_000_000, MAX_METADATA_BYTES = 16_000_000;
   const cryptoSymbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
   const cryptoIntervals = { '15m': 900000, '1h': 3600000, '4h': 14400000, '1d': 86400000, '1w': 604800000 };
   const binanceHost = 'data-api.binance.vision';
   const settings = {
     searchCities: { ttl: DAY, retain: 30 * DAY, gap: 1000, label: '城市搜索' },
     weather: { ttl: 15 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '天气' },
+    cryptoPairs: { ttl: 8 * HOUR, retain: 7 * DAY, gap: MINUTE, label: '现货交易对' },
     cryptoBookRules: { ttl: 8 * HOUR, retain: Infinity, gap: MINUTE, label: '价格档位' },
     cryptoConversion: { ttl: 5 * MINUTE, retain: DAY, gap: MINUTE, label: '折算汇率' },
     cryptoQuotes: { ttl: 15_000, retain: 10 * MINUTE, gap: 5000, label: '数字货币报价' },
@@ -24,13 +27,15 @@
     news: { ttl: 10 * MINUTE, retain: 2 * DAY, gap: 10_000, label: '科技资讯' },
   };
   const inflight = new Map(), attempts = new Map(), itemCache = new Map();
+  const requestControllers = new Map();
   let cache = readObject(CACHE_KEY), limits = readObject(LIMIT_KEY);
+  let pairsCache = null, pairIndex = new Map();
 
   function object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-  function readObject(key) {
+  function readObject(key, maxBytes = MAX_CACHE_BYTES) {
     try {
       const raw = localStorage.getItem(key);
-      if (!raw || raw.length > MAX_CACHE_BYTES) return {};
+      if (!raw || raw.length > maxBytes) return {};
       const value = JSON.parse(raw);
       return object(value) ? value : {};
     } catch (_) { return {}; }
@@ -48,15 +53,21 @@
     const number = Number(value); requireValue(finite(number)); return number;
   }
   function timestamp(value) { return Number.isSafeInteger(value) && value > 0 && value < 8640000000000000; }
+  function validSymbol(value) { return typeof value === 'string' && /^[\p{L}\p{N}]{2,40}$/u.test(value); }
+  function validAsset(value) { return typeof value === 'string' && /^[\p{L}\p{N}]{1,20}$/u.test(value); }
+  function validPair(pair) {
+    return object(pair) && validSymbol(pair.symbol) && validAsset(pair.baseAsset) && validAsset(pair.quoteAsset)
+      && pair.baseAsset !== pair.quoteAsset && pair.symbol === pair.baseAsset + pair.quoteAsset;
+  }
   function validBookRule(rule) {
-    return object(rule) && cryptoSymbols.includes(rule.symbol) && typeof rule.tickSize === 'string'
+    return object(rule) && validSymbol(rule.symbol) && typeof rule.tickSize === 'string'
       && /^\d{1,12}(?:\.\d{1,8})?$/.test(rule.tickSize) && Number(rule.tickSize) > 0 && Number(rule.tickSize) <= 1e8
       && typeof rule.stepSize === 'string' && /^\d{1,12}(?:\.\d{1,20})?$/.test(rule.stepSize) && Number(rule.stepSize) > 0 && Number(rule.stepSize) <= 1e8
       && ['baseAssetPrecision','quoteAssetPrecision'].every(k => Number.isInteger(rule[k]) && rule[k] >= 0 && rule[k] <= 20)
       && (rule.stepSize.split('.')[1] || '').replace(/0+$/, '').length <= rule.baseAssetPrecision;
   }
   function validQuote(q) {
-    return object(q) && cryptoSymbols.includes(q.symbol) && ['price', 'high', 'low'].every(k => finite(q[k]) && q[k] > 0)
+    return object(q) && validSymbol(q.symbol) && ['price', 'high', 'low'].every(k => finite(q[k]) && q[k] > 0)
       && q.high >= q.price && q.low <= q.price && finite(q.changePercent) && q.changePercent >= -100
       && ['volume', 'quoteVolume'].every(k => finite(q[k]) && q[k] >= 0)
       && timestamp(q.openTime) && timestamp(q.closeTime) && q.closeTime > q.openTime && q.closeTime <= Date.now() + MINUTE;
@@ -92,11 +103,18 @@
       case 'weather':
         requireValue(finite(args.latitude) && Math.abs(args.latitude) <= 90 && finite(args.longitude) && Math.abs(args.longitude) <= 180, '城市坐标无效，请重新选择城市。');
         return { latitude: Math.round(args.latitude * 10000) / 10000, longitude: Math.round(args.longitude * 10000) / 10000 };
+      case 'cryptoPairs': return {};
       case 'cryptoBookRules':
-      case 'cryptoConversion':
-      case 'cryptoQuotes': return {};
+      case 'cryptoQuotes':
+        requireValue(args.symbol === undefined || validSymbol(args.symbol), '请选择支持的交易对。');
+        return args.symbol === undefined ? {} : { symbol: args.symbol };
+      case 'cryptoConversion': {
+        const base = args.base === undefined ? 'USDT' : args.base;
+        requireValue(validAsset(base), '请选择有效的计价币。');
+        return { base };
+      }
       case 'cryptoCandles':
-        requireValue(cryptoSymbols.includes(args.symbol) && Object.hasOwn(cryptoIntervals, args.interval), '请选择支持的交易对与 K 线周期。');
+        requireValue(validSymbol(args.symbol) && Object.hasOwn(cryptoIntervals, args.interval), '请选择支持的交易对与 K 线周期。');
         requireValue(args.endTime === undefined || (timestamp(args.endTime) && args.endTime < Date.now()), '历史 K 线时间无效。');
         return { symbol: args.symbol, interval: args.interval, ...(args.endTime === undefined ? {} : { endTime: args.endTime }) };
       case 'news':
@@ -109,27 +127,48 @@
     switch (module) {
       case 'searchCities': return Array.isArray(data.cities) && data.cities.length <= 10 && data.cities.every(c => object(c) && typeof c.name === 'string' && finite(c.latitude) && Math.abs(c.latitude) <= 90 && finite(c.longitude) && Math.abs(c.longitude) <= 180);
       case 'weather': return typeof data.timezone === 'string' && finite(data.utcOffsetSeconds) && Array.isArray(data.hours) && data.hours.length > 0 && data.hours.length <= 48 && data.hours.every(h => object(h) && typeof h.time === 'string' && Number.isFinite(Date.parse(h.time)) && (h.temperature === undefined || h.temperature === null || finite(h.temperature)) && ['feels', 'rain', 'wind', 'code'].every(k => h[k] === null || finite(h[k])));
-      case 'cryptoBookRules': return Array.isArray(data.rules) && data.rules.length === cryptoSymbols.length && new Set(data.rules.map(r => r?.symbol)).size === cryptoSymbols.length && data.rules.every(validBookRule);
-      case 'cryptoConversion': return data.base === 'USDT' && ['USD', 'CNY'].every(k => finite(data[k]) && data[k] > 0);
-      case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
-      case 'cryptoCandles': return cryptoSymbols.includes(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && (data.endTime === undefined || (timestamp(data.endTime) && data.endTime < Date.now())) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && (data.endTime === undefined || c.closeTime <= data.endTime) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
+      case 'cryptoPairs': return Array.isArray(data.pairs) && data.pairs.length > 0 && data.pairs.length <= MAX_PAIRS
+        && data.pairs.every(validPair) && new Set(data.pairs.map(p => p.symbol)).size === data.pairs.length;
+      case 'cryptoBookRules': return Array.isArray(data.rules) && data.rules.length > 0 && data.rules.length <= MAX_PAIRS && new Set(data.rules.map(r => r?.symbol)).size === data.rules.length && data.rules.every(validBookRule);
+      case 'cryptoConversion': return validAsset(data.base) && ['USD', 'CNY'].every(k => finite(data[k]) && data[k] > 0);
+      case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q?.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
+      case 'cryptoCandles': return validSymbol(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && (data.endTime === undefined || (timestamp(data.endTime) && data.endTime < Date.now())) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && (data.endTime === undefined || c.closeTime <= data.endTime) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
       case 'news':
         if (data.feed === 'sspai') return Array.isArray(data.stories) && data.stories.length <= 10 && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && s.source === '少数派' && finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY && !!sspaiUrl(s.url));
         return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
       default: return false;
     }
   }
+  function matchesArgs(module, data, args) {
+    if (module === 'cryptoQuotes') return args.symbol
+      ? data.quotes.length === 1 && data.quotes[0].symbol === args.symbol
+      : data.quotes.every(q => cryptoSymbols.includes(q.symbol));
+    if (module === 'cryptoConversion') return data.base === args.base;
+    return true;
+  }
   function cleanCache() {
     const now = Date.now();
     const entries = Object.entries(cache).filter(([key, entry]) => {
       const module = key.split(':', 1)[0], config = settings[module];
-      return config && object(entry) && finite(entry.at) && entry.at <= now + 5 * MINUTE && now - entry.at <= config.retain && validData(module, entry.data) && (module !== 'news' || key === `news:${JSON.stringify({ feed: entry.data.feed })}`) && (module !== 'cryptoCandles' || key === `cryptoCandles:${JSON.stringify({ symbol: entry.data.symbol, interval: entry.data.interval, ...(entry.data.endTime === undefined ? {} : { endTime: entry.data.endTime }) })}`);
+      if (!config || !object(entry) || !finite(entry.at) || entry.at > now + 5 * MINUTE || now - entry.at > config.retain || !validData(module, entry.data)) return false;
+      if (module === 'cryptoPairs' || module === 'cryptoBookRules') return false; // Separate bounded metadata stores.
+      if (module === 'cryptoQuotes' || module === 'cryptoConversion') {
+        try {
+          const args = normalizeArgs(module, JSON.parse(key.slice(module.length + 1)));
+          if (key !== `${module}:${JSON.stringify(args)}` || !matchesArgs(module, entry.data, args)) return false;
+        } catch (_) { return false; }
+      }
+      return (module !== 'news' || key === `news:${JSON.stringify({ feed: entry.data.feed })}`) && (module !== 'cryptoCandles' || key === `cryptoCandles:${JSON.stringify({ symbol: entry.data.symbol, interval: entry.data.interval, ...(entry.data.endTime === undefined ? {} : { endTime: entry.data.endTime }) })}`);
     }).sort((a, b) => b[1].at - a[1].at).slice(0, MAX_CACHE_ENTRIES);
     cache = Object.fromEntries(entries);
     while (JSON.stringify(cache).length > MAX_CACHE_BYTES && entries.length) {
       delete cache[entries.pop()[0]];
     }
     for (const [key, attempt] of attempts) if (now - attempt.at > HOUR) attempts.delete(key);
+    while (attempts.size > MAX_CACHE_ENTRIES * 2) {
+      const oldest = [...attempts.keys()].find(key => key !== PAIRS_KEY && key !== RULES_KEY);
+      attempts.delete(oldest);
+    }
   }
   function putCache(key, data, warning) {
     const entry = { at: Date.now(), data, ...(warning ? { warning } : {}) };
@@ -168,7 +207,7 @@
     cleanLimits();
     return new Error(blockedMessage(host, limits[host]));
   }
-  async function jsonFetch(url, { xml = false, signal } = {}) {
+  async function jsonFetch(url, { xml = false, signal, maxBytes = 1_000_000 } = {}) {
     const host = new URL(url).host;
     const persisted = readObject(LIMIT_KEY);
     if (finite(persisted[host])) limits[host] = Math.max(limits[host] || 0, persisted[host]);
@@ -194,8 +233,29 @@
         ? ['application/rss+xml', 'application/xml', 'text/xml'].includes(type)
         : type === 'application/json' || type.endsWith('+json'),
       xml ? '资讯源没有返回有效 RSS，请稍后重试。' : '数据服务没有返回 JSON，请检查网络后重试。');
-      const raw = await response.text();
-      requireValue(raw.length <= 1_000_000, '数据响应过大，请稍后重试。');
+      const contentLength = Number(response.headers.get('content-length'));
+      if (finite(contentLength) && contentLength > maxBytes) {
+        controller.abort(); throw new Error('数据响应过大，请稍后重试。');
+      }
+      let raw;
+      if (response.body?.getReader && typeof TextDecoder !== 'undefined') {
+        const reader = response.body.getReader(), decoder = new TextDecoder();
+        const chunks = []; let bytes = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            bytes += value.byteLength;
+            if (bytes > maxBytes) {
+              controller.abort(); await reader.cancel();
+              throw new Error('数据响应过大，请稍后重试。');
+            }
+            chunks.push(decoder.decode(value, { stream: true }));
+          }
+          chunks.push(decoder.decode()); raw = chunks.join('');
+        } finally { reader.releaseLock(); }
+      } else raw = await response.text();
+      requireValue(raw.length <= maxBytes, '数据响应过大，请稍后重试。');
       if (xml) return raw;
       try { return JSON.parse(raw); } catch (_) { throw new Error('数据服务返回了无效 JSON，请稍后重试。'); }
     } catch (error) {
@@ -212,7 +272,7 @@
     }));
     return result;
   }
-  async function loadSource(module, args) {
+  async function loadSource(module, args, signal) {
     switch (module) {
       case 'cryptoBookRules': {
         const url = new URL(`https://${binanceHost}/api/v3/exchangeInfo`);
@@ -229,16 +289,22 @@
         return { data: { rules } };
       }
       case 'cryptoConversion': {
-        const result = await jsonFetch('https://api.coinbase.com/v2/exchange-rates?currency=USDT');
-        requireValue(object(result?.data) && result.data.currency === 'USDT' && object(result.data.rates));
+        // Coinbase returns rates per one unit of the requested supported base.
+        // An unsupported asset must fail, never silently become USD or USDT.
+        // https://docs.cdp.coinbase.com/coinbase-app/track-apis/exchange-rates
+        const result = await jsonFetch(`https://api.coinbase.com/v2/exchange-rates?currency=${encodeURIComponent(args.base)}`);
+        requireValue(object(result?.data) && result.data.currency === args.base && object(result.data.rates));
         const USD = decimal(result.data.rates.USD), CNY = decimal(result.data.rates.CNY);
         requireValue(USD > 0 && CNY > 0);
-        return { data: { base: 'USDT', USD, CNY } };
+        return { data: { base: args.base, USD, CNY } };
       }
       case 'cryptoQuotes': {
+        if (args.symbol && !knownCryptoSymbol(args.symbol)) await verifyCryptoSymbol(args.symbol);
+        requireValue(!signal?.aborted, '行情请求已取消。');
         const url = new URL(`https://${binanceHost}/api/v3/ticker/24hr`);
-        url.search = new URLSearchParams({ symbols: JSON.stringify(cryptoSymbols), type: 'FULL' });
-        const rows = await jsonFetch(url.href);
+        url.search = new URLSearchParams({ ...(args.symbol ? { symbol: args.symbol } : { symbols: JSON.stringify(cryptoSymbols) }), type: 'FULL' });
+        const result = await jsonFetch(url.href, { signal });
+        const rows = args.symbol ? [result] : result;
         requireValue(Array.isArray(rows) && rows.length > 0 && rows.length <= cryptoSymbols.length);
         const quotes = rows.map(r => {
           requireValue(object(r));
@@ -247,13 +313,15 @@
             openTime: r.openTime, closeTime: r.closeTime };
         });
         quotes.sort((a, b) => cryptoSymbols.indexOf(a.symbol) - cryptoSymbols.indexOf(b.symbol));
-        return { data: { quotes }, ...(quotes.length < cryptoSymbols.length ? { warning: '部分交易对暂未返回报价。' } : {}) };
+        return { data: { quotes }, ...(!args.symbol && quotes.length < cryptoSymbols.length ? { warning: '部分交易对暂未返回报价。' } : {}) };
       }
       case 'cryptoCandles': {
+        if (!knownCryptoSymbol(args.symbol)) await verifyCryptoSymbol(args.symbol);
+        requireValue(!signal?.aborted, '行情请求已取消。');
         const url = new URL(`https://${binanceHost}/api/v3/klines`);
         url.search = new URLSearchParams({ symbol: args.symbol, interval: args.interval, limit: '500', timeZone: '0' });
         if (args.endTime !== undefined) url.searchParams.set('endTime', String(args.endTime));
-        const rows = await jsonFetch(url.href);
+        const rows = await jsonFetch(url.href, { signal });
         requireValue(Array.isArray(rows) && rows.length <= 500);
         const candles = rows.map(r => {
           requireValue(Array.isArray(r) && r.length === 12);
@@ -333,11 +401,128 @@
       }
     }
   }
+  // Only exchangeInfo establishes new base/quote combinations. Defaults remain
+  // available before metadata is fetched, but never invent a picker catalog.
+  // https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-endpoints
+  function currentPairs() {
+    if (pairsCache && Date.now() - pairsCache.at <= settings.cryptoPairs.retain) return pairsCache;
+    pairsCache = null; pairIndex.clear(); return null;
+  }
+  function knownCryptoSymbol(symbol) {
+    return currentPairs() ? pairIndex.has(symbol) : cryptoSymbols.includes(symbol);
+  }
+  function installPairs(entry) {
+    pairsCache = entry;
+    pairIndex = new Map(entry.data.pairs.map(pair => [pair.symbol, pair]));
+  }
+  function validCatalog(data) {
+    if (!validData('cryptoPairs', data) || !Array.isArray(data.rules) || data.rules.length > data.pairs.length) return false;
+    const symbols = new Set(data.pairs.map(pair => pair.symbol));
+    return data.rules.every(rule => validBookRule(rule) && symbols.has(rule.symbol))
+      && new Set(data.rules.map(rule => rule.symbol)).size === data.rules.length;
+  }
+  function readPairs() {
+    const saved = readObject(PAIRS_KEY, MAX_PAIRS_BYTES);
+    if (finite(saved.at) && saved.at > 0 && saved.at <= Date.now() + 5 * MINUTE
+      && Date.now() - saved.at <= settings.cryptoPairs.retain && validCatalog(saved.data)
+      && (!pairsCache || saved.at > pairsCache.at)) installPairs(saved);
+    return currentPairs();
+  }
+  function parseBookRule(row) {
+    if (!Array.isArray(row.filters)) return null;
+    const price = row.filters.find(filter => filter?.filterType === 'PRICE_FILTER');
+    const lot = row.filters.find(filter => filter?.filterType === 'LOT_SIZE');
+    const rule = { symbol: row.symbol, tickSize: price?.tickSize, stepSize: lot?.stepSize,
+      baseAssetPrecision: row.baseAssetPrecision, quoteAssetPrecision: row.quoteAssetPrecision };
+    return validBookRule(rule) ? rule : null;
+  }
+  function refreshPairs() {
+    if (inflight.has(PAIRS_KEY)) return inflight.get(PAIRS_KEY);
+    const previous = attempts.get(PAIRS_KEY);
+    if (previous && Date.now() - previous.at < settings.cryptoPairs.gap) {
+      return previous.error ? Promise.reject(new Error(previous.error))
+        : currentPairs() ? Promise.resolve(envelope(pairsCache, true)) : Promise.reject(new Error('交易对请求过于频繁，请稍后重试。'));
+    }
+    attempts.set(PAIRS_KEY, { at: Date.now() });
+    const pending = (async () => {
+      try {
+        const url = new URL(`https://${binanceHost}/api/v3/exchangeInfo`);
+        url.search = new URLSearchParams({ permissions: 'SPOT', symbolStatus: 'TRADING', showPermissionSets: 'true' });
+        const result = await jsonFetch(url.href, { maxBytes: MAX_METADATA_BYTES });
+        requireValue(Array.isArray(result?.symbols) && result.symbols.length > 0 && result.symbols.length <= MAX_PAIRS);
+        const pairs = [], rules = [];
+        let unsupportedNames = 0;
+        for (const row of result.symbols) {
+          requireValue(object(row));
+          const spot = (Array.isArray(row.permissions) && row.permissions.includes('SPOT'))
+            || (Array.isArray(row.permissionSets) && row.permissionSets.some(set => Array.isArray(set) && set.includes('SPOT')));
+          if (row.status !== 'TRADING' || row.isSpotTradingAllowed === false || !spot) continue;
+          const pair = { symbol: row.symbol, baseAsset: row.baseAsset, quoteAsset: row.quoteAsset };
+          // Binance supports UTF-8 letters/numbers. Unrecognized punctuation or
+          // overlong names cannot poison the catalog or be relabeled as a pair.
+          if (!validSymbol(pair.symbol) || !validAsset(pair.baseAsset) || !validAsset(pair.quoteAsset)) { unsupportedNames++; continue; }
+          requireValue(validPair(pair));
+          pairs.push(pair);
+          const rule = parseBookRule(row);
+          if (rule) rules.push(rule); // A missing filter is unavailable, never guessed.
+        }
+        pairs.sort((a, b) => a.symbol.localeCompare(b.symbol));
+        const data = { pairs, rules };
+        requireValue(validCatalog(data));
+        const entry = { at: Date.now(), data, ...(unsupportedNames ? { warning: `${unsupportedNames} 个交易对名称暂不支持，当前仅显示已验证的现货交易对。` } : {}) };
+        requireValue(JSON.stringify(entry).length <= MAX_PAIRS_BYTES, '交易对目录过大，请稍后重试。');
+        installPairs(entry); saveObject(PAIRS_KEY, entry);
+        if (rules.length) notifyRules({ at: entry.at, data: { rules } });
+        return envelope(entry, false);
+      } catch (error) {
+        const message = error?.message || '交易对目录加载失败，请稍后重试。';
+        attempts.set(PAIRS_KEY, { at: Date.now(), error: message });
+        throw new Error(message);
+      } finally { inflight.delete(PAIRS_KEY); }
+    })();
+    inflight.set(PAIRS_KEY, pending); return pending;
+  }
+  async function requestPairs(refresh) {
+    const old = currentPairs();
+    if (old && !refresh) {
+      const stale = Date.now() - old.at >= settings.cryptoPairs.ttl;
+      if (stale) refreshPairs().catch(() => {});
+      return envelope(old, true, stale, stale ? '交易对目录已过期，正在使用上次验证的目录并后台更新。' : undefined);
+    }
+    try { return await refreshPairs(); }
+    catch (error) {
+      if (old) return envelope(old, true, true, `${error.message} 正在使用上次验证的交易对目录。`);
+      throw error;
+    }
+  }
+  async function verifyCryptoSymbol(symbol) {
+    const catalog = await requestPairs(false);
+    if (!catalog.data.pairs.some(pair => pair.symbol === symbol)) {
+      const error = new Error('该交易对不在当前可用的币安现货目录中。');
+      error.unknownSpotSymbol = true;
+      // A stale miss may disappear once the shared background refresh finishes.
+      error.retryable = catalog.stale;
+      throw error;
+    }
+  }
+  async function requestSelectedRules(symbol, refresh) {
+    // Preserve the existing six-symbol offline specifications until a catalog
+    // is available; all other pairs must be verified through exchangeInfo.
+    const result = !currentPairs() && cryptoSymbols.includes(symbol)
+      ? await requestRules(refresh) : await requestPairs(refresh);
+    const rule = result.data.rules.find(row => row.symbol === symbol);
+    requireValue(rule && validBookRule(rule), '该交易对暂未提供有效的价格档位规范。');
+    return { ...result, data: { rules: [rule] } };
+  }
+  function validDefaultRules(data) {
+    return validData('cryptoBookRules', data) && data.rules.length === cryptoSymbols.length
+      && data.rules.every(rule => cryptoSymbols.includes(rule.symbol));
+  }
   const ruleListeners = new Map();
   let ruleListenerId = 0, rulesCache = null;
   function readRules() {
     const saved = readObject(RULES_KEY);
-    if (object(saved) && finite(saved.at) && saved.at > 0 && saved.at <= Date.now() + 5 * MINUTE && validData('cryptoBookRules', saved.data)) {
+    if (object(saved) && finite(saved.at) && saved.at > 0 && saved.at <= Date.now() + 5 * MINUTE && validDefaultRules(saved.data)) {
       if (!rulesCache || saved.at > rulesCache.at) rulesCache = saved;
     }
     return rulesCache;
@@ -358,7 +543,7 @@
     const pending = (async () => {
       try {
         const {data} = await loadSource('cryptoBookRules', {});
-        requireValue(validData('cryptoBookRules', data));
+        requireValue(validDefaultRules(data));
         rulesCache = {at:Date.now(),data};
         saveObject(RULES_KEY, rulesCache);
         notifyRules(rulesCache);
@@ -385,6 +570,7 @@
     }
   }
   globalThis.addEventListener?.('storage', event => {
+    if (event.key === PAIRS_KEY) { readPairs(); return; }
     if (event.key !== RULES_KEY) return;
     const before = rulesCache, updated = readRules();
     if (updated && updated !== before) notifyRules(updated);
@@ -394,32 +580,49 @@
     try { args = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs; }
     catch (_) { throw new Error('看板参数不是有效 JSON。'); }
     args = normalizeArgs(module, args);
-    if (module === 'cryptoBookRules') return requestRules(refresh);
+    if (module === 'cryptoPairs') return requestPairs(refresh);
+    if (module === 'cryptoBookRules') return args.symbol ? requestSelectedRules(args.symbol, refresh) : requestRules(refresh);
     const key = `${module}:${JSON.stringify(args)}`, now = Date.now();
     cleanCache();
-    const old = cache[key];
+    const old = args.symbol && !knownCryptoSymbol(args.symbol) ? undefined : cache[key];
     if (!refresh && old && now - old.at < ttl(module, old)) return envelope(old, true);
     if (inflight.has(key)) return inflight.get(key);
+    requireValue(inflight.size < MAX_CACHE_ENTRIES, '待处理请求过多，请稍后重试。');
     const previous = attempts.get(key);
     if (previous && now - previous.at < settings[module].gap) {
       if (old) return envelope(old, true, now - old.at >= ttl(module, old) || !!previous.error, previous.error ? `${previous.error} 正在显示上次保存的数据。` : (refresh ? '刷新过于频繁，正在使用最近获取的数据。' : undefined));
       throw new Error(previous.error || '请求过于频繁，请稍后重试。');
     }
     attempts.set(key, { at: now });
+    const controller = args.symbol && ['cryptoQuotes', 'cryptoCandles'].includes(module) ? new AbortController() : null;
+    if (controller) requestControllers.set(key, { controller, symbol: args.symbol });
     const pending = (async () => {
       try {
-        const { data, warning } = await loadSource(module, args);
-        requireValue(validData(module, data));
+        const { data, warning } = await loadSource(module, args, controller?.signal);
+        requireValue(!controller?.signal.aborted, '行情请求已取消。');
+        requireValue(validData(module, data) && matchesArgs(module, data, args));
         return envelope(putCache(key, data, warning), false);
       } catch (error) {
+        if (controller?.signal.aborted) throw new Error('行情请求已取消。');
         const message = error instanceof Error ? error.message : `${settings[module].label}加载失败，请稍后重试。`;
         attempts.set(key, { at: Date.now(), error: message });
         if (old) return envelope(old, true, true, `${message} 正在显示上次保存的数据。`);
         throw new Error(message);
-      } finally { inflight.delete(key); }
+      } finally {
+        if (inflight.get(key) === pending) inflight.delete(key);
+        if (requestControllers.get(key)?.controller === controller) requestControllers.delete(key);
+      }
     })();
     inflight.set(key, pending);
     return pending;
+  }
+  function cancelCryptoRequests(symbol) {
+    if (!validSymbol(symbol)) return;
+    for (const [key, request] of requestControllers) {
+      if (request.symbol !== symbol) continue;
+      request.controller.abort(); requestControllers.delete(key);
+      inflight.delete(key); attempts.delete(key);
+    }
   }
   // Spot protocol: buffer diff events before REST, then bridge lastUpdateId with
   // U/u. Futures uses a different pu chain; never apply that rule to Spot data.
@@ -508,7 +711,7 @@
       const token = serial, controller = new AbortController();
       pending = controller; lastAttempt = Date.now();
       try {
-        const value = await jsonFetch(`https://${binanceHost}/api/v3/depth?symbol=${symbol}&limit=${bookSnapshotLimit}`, {signal:controller.signal});
+        const value = await jsonFetch(`https://${binanceHost}/api/v3/depth?symbol=${encodeURIComponent(symbol)}&limit=${bookSnapshotLimit}`, {signal:controller.signal});
         if (!valid() || token !== serial) return;
         requireValue(object(value) && Number.isSafeInteger(value.lastUpdateId) && value.lastUpdateId >= 0);
         const bids = bookLevels(value.bids,{bid:true}), asks = bookLevels(value.asks,{bid:false});
@@ -597,7 +800,7 @@
       if (wait > 0) { retry = setTimeout(snapshot,wait); return; }
       const controller = new AbortController(); pending = controller;
       try {
-        const data = await jsonFetch(`https://${binanceHost}/api/v3/trades?symbol=${symbol}&limit=100`, {signal:controller.signal});
+        const data = await jsonFetch(`https://${binanceHost}/api/v3/trades?symbol=${encodeURIComponent(symbol)}&limit=100`, {signal:controller.signal});
         if (!valid()) return;
         requireValue(Array.isArray(data) && data.length <= 100);
         const parsed = data.map(row => trade(row,true)); // Validate atomically.
@@ -632,9 +835,9 @@
     requireValue(typeof callback === 'function');
     const id = String(++cryptoSessionId);
     let socket, retryTimer, watchdog, rotation, stopped = false, generation = 0, failures = 0;
-    let opened = false, localDepth, localTrades, bookEpoch = 0;
+    let opened = false, localDepth, localTrades, bookEpoch = 0, metadataFailures = 0;
     const selected = args.symbol.toLowerCase();
-    const streams = [...cryptoSymbols.map(s => `${s.toLowerCase()}@ticker`), ...(showBook ? [`${selected}@depth`] : []), ...(showTrades ? [`${selected}@trade`] : []), `${selected}@kline_${args.interval}`];
+    const streams = [`${selected}@ticker`, ...(showBook ? [`${selected}@depth`] : []), ...(showTrades ? [`${selected}@trade`] : []), `${selected}@kline_${args.interval}`];
     const emit = event => { if (!stopped) callback(JSON.stringify(event)); };
     function clear() {
       generation++;
@@ -650,14 +853,39 @@
       emit({ type:'status', status:'reconnecting', message:'推送中断，正在重连；当前价格可能已过时。' });
       retryTimer = setTimeout(connect, delay);
     }
+    function retryMetadata(error) {
+      if (stopped) return;
+      clear();
+      if (globalThis.document?.hidden) { emit({type:'status',status:'paused'}); return; }
+      const delay = Math.max(
+        Math.min(5 * MINUTE, MINUTE * 2 ** Math.min(metadataFailures++, 3)),
+        (attempts.get(PAIRS_KEY)?.at || 0) + settings.cryptoPairs.gap - Date.now(),
+        (limits[binanceHost] || 0) - Date.now(),
+      );
+      emit({type:'status',status:'reconnecting',message:`${error.message} 稍后自动重试交易对验证。`});
+      retryTimer = setTimeout(connect, delay);
+    }
     function connect() {
       if (stopped) return;
       if (globalThis.document?.hidden) { emit({type:'status',status:'paused'}); return; }
       clear();
+      if (!knownCryptoSymbol(args.symbol)) {
+        const checking = generation;
+        emit({type:'status',status:'connecting'});
+        verifyCryptoSymbol(args.symbol).then(() => {
+          if (!stopped && checking === generation) connect();
+        }).catch(error => {
+          if (stopped || checking !== generation) return;
+          if (error.unknownSpotSymbol && !error.retryable) emit({type:'status',status:'unavailable',message:error.message});
+          else retryMetadata(error);
+        });
+        return;
+      }
+      metadataFailures = 0;
       const epoch = generation, received = new Map(), times = new Map();
       let live = false;
       emit({type:'status',status:'connecting'});
-      try { socket = new WebSocket(`wss://data-stream.binance.vision/stream?streams=${streams.join('/')}`); }
+      try { socket = new WebSocket(`wss://data-stream.binance.vision/stream?streams=${streams.map(stream => encodeURI(stream)).join('/')}`); }
       catch (_) { retry(); return; }
       const valid = () => !stopped && epoch === generation;
       if (showBook) localDepth = maintainSpotBook(args.symbol,event => emit({...event,bookEpoch}),valid);
@@ -689,7 +917,7 @@
           requireValue(streams.includes(envelope.stream) && object(data) && timestamp(data.E) && data.E <= Date.now() + MINUTE && Date.now() - data.E < MINUTE);
           if (data.E <= (times.get(envelope.stream) || 0)) return;
           let event;
-          if (data.e === '24hrTicker' && envelope.stream === `${data.s?.toLowerCase()}@ticker`) {
+          if (data.e === '24hrTicker' && data.s === args.symbol && envelope.stream === `${selected}@ticker`) {
             const quote = { symbol:data.s, price:decimal(data.c), changePercent:decimal(data.P), high:decimal(data.h), low:decimal(data.l), volume:decimal(data.v), quoteVolume:decimal(data.q), openTime:data.O, closeTime:data.C };
             requireValue(validQuote(quote));
             event = {type:'quote',quote,eventTime:data.E};
@@ -728,10 +956,11 @@
   }
   function unsubscribeCrypto(id) { cryptoSessions.get(id)?.stop(); cryptoSessions.delete(id); }
   function resetCryptoBook(id) { return cryptoSessions.get(id)?.resetBook() ?? null; }
+  readPairs();
   cleanCache();
   cleanLimits();
   globalThis.timeNestDashboard = Object.freeze({
-    subscribeCrypto, unsubscribeCrypto, resetCryptoBook,
+    subscribeCrypto, unsubscribeCrypto, resetCryptoBook, cancelCryptoRequests,
     subscribeCryptoRules(callback) {
       requireValue(typeof callback === 'function');
       const id = String(++ruleListenerId); ruleListeners.set(id, callback); return id;

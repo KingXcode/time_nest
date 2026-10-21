@@ -23,7 +23,9 @@ class MarketClient extends fixture.FixtureDashboardClient {
     Map<String, dynamic> args, {
     bool refresh = false,
   }) async {
-    if (module == 'cryptoConversion' || module == 'cryptoBookRules') {
+    if (module == 'cryptoConversion' ||
+        module == 'cryptoBookRules' ||
+        module == 'cryptoPairs') {
       return super.load(module, args, refresh: refresh);
     }
     marketCalls.add(
@@ -150,8 +152,10 @@ void main() {
             .cryptoPaneHeights['vol'],
         height,
       );
+      await openCryptoPairPicker(tester);
       final eth = find.byKey(const ValueKey('crypto-select-ETHUSDT'));
       await tester.ensureVisible(eth);
+      await tester.pumpAndSettle();
       await tester.tap(eth);
       await tester.pumpAndSettle();
       expect(tester.getSize(pane).height, height);
@@ -201,9 +205,11 @@ void main() {
         client.marketCalls.clear();
         await fixture.openModule(tester, 'crypto');
         expect(find.byType(CryptoChart), findsOneWidget);
-        expect(find.text('100.25'), findsNWidgets(6));
+        expect(find.text('100.25'), findsOneWidget);
+        await openCryptoPairPicker(tester);
         final eth = find.byKey(const ValueKey('crypto-select-ETHUSDT'));
         await tester.ensureVisible(eth);
+        await tester.pumpAndSettle();
         await tester.tap(eth);
         await tester.pumpAndSettle();
         final day = find.widgetWithText(ChoiceChip, '日线');
@@ -275,8 +281,10 @@ void main() {
       final client = MarketClient()..pendingBtc = pending;
       await tester.pumpWidget(panel(client));
       await tester.pumpAndSettle();
+      await openCryptoPairPicker(tester);
       final eth = find.byKey(const ValueKey('crypto-select-ETHUSDT'));
       await tester.ensureVisible(eth);
+      await tester.pumpAndSettle();
       await tester.tap(eth);
       await tester.pumpAndSettle();
       pending.complete(
@@ -292,7 +300,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('可能已过时'), findsWidgets);
       expect(find.byType(CryptoChart), findsOneWidget);
-      expect(find.text('100.25'), findsNWidgets(6));
+      expect(find.text('100.25'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
@@ -306,13 +314,13 @@ void main() {
       ..candleFailure = true;
     await tester.pumpWidget(panel(client));
     await tester.pumpAndSettle();
-    expect(find.text('暂无报价'), findsNWidgets(6));
+    expect(find.text('暂无报价'), findsOneWidget);
     expect(find.byType(CryptoChart), findsNothing);
     client.quoteFailure = false;
     client.candleFailure = false;
     await tester.tap(find.text('刷新行情'));
     await tester.pumpAndSettle();
-    expect(find.text('100.25'), findsNWidgets(6));
+    expect(find.text('100.25'), findsOneWidget);
     expect(find.byType(CryptoChart), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });

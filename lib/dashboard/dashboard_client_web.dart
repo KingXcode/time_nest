@@ -14,6 +14,8 @@ external JSPromise<JSString> _request(
 external JSString _subscribeRules(JSFunction callback);
 @JS('timeNestDashboard.unsubscribeCryptoRules')
 external void _unsubscribeRules(JSString id);
+@JS('timeNestDashboard.cancelCryptoRequests')
+external void _cancelCryptoRequests(JSString symbol);
 @JS('timeNestDashboard.readPreferences')
 external JSString? _readPreferences();
 @JS('timeNestDashboard.writePreferences')
@@ -39,7 +41,17 @@ DashboardData _decodeData(String raw) {
   );
 }
 
-class WebDashboardClient implements DashboardClient, CryptoRulesUpdates {
+class WebDashboardClient
+    implements DashboardClient, CryptoRulesUpdates, CryptoRequestCancellation {
+  @override
+  void cancelCryptoRequests(String symbol) {
+    try {
+      _cancelCryptoRequests(symbol.toJS);
+    } catch (_) {
+      // Generation checks also reject stale results from an older bridge.
+    }
+  }
+
   @override
   Stream<DashboardData> watchCryptoRules() {
     JSString? id;

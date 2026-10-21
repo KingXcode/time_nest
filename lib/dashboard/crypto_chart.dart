@@ -39,6 +39,7 @@ class CryptoChart extends StatefulWidget {
     super.key,
     required this.candles,
     required this.asset,
+    this.quoteAsset = 'USDT',
     required this.fetchedAt,
     this.overlays = defaultCryptoOverlays,
     this.panes = defaultCryptoPanes,
@@ -60,7 +61,7 @@ class CryptoChart extends StatefulWidget {
     this.onIntervalChanged,
   });
   final List<CryptoCandle> candles;
-  final String asset;
+  final String asset, quoteAsset;
   final DateTime fetchedAt;
   final List<String> overlays, panes;
   final bool infoRight, canAdvise;
@@ -185,11 +186,31 @@ class _CryptoChartState extends State<CryptoChart> {
     }
   }
 
+  String _studyName(String id) {
+    final name = cryptoIndicators[id]!.name;
+    if (id == 'vol') return '$name (${widget.asset})';
+    if (id == 'amount') return '$name (${widget.quoteAsset})';
+    return name;
+  }
+
+  String _studyFormula(String id) {
+    final formula = cryptoIndicators[id]!.formula;
+    if (id == 'vol') return '$formula，单位 ${widget.asset}';
+    if (id == 'amount') return '$formula（${widget.quoteAsset}）';
+    return formula;
+  }
+
   String _value(double? v) => v == null
       ? '—'
       : v.abs() >= 10000
       ? cryptoVolume(v)
-      : v.toStringAsFixed(v.abs() < 1 ? 4 : 2);
+      : v.toStringAsFixed(
+          v != 0 && v.abs() < .0001
+              ? 8
+              : v.abs() < 1
+              ? 4
+              : 2,
+        );
 
   Future<void> _showSettings() async {
     var overlays = List<String>.of(widget.overlays);
@@ -218,10 +239,10 @@ class _CryptoChartState extends State<CryptoChart> {
                           (e) => e.value.overlay == overlay,
                         ))
                           Tooltip(
-                            message: e.value.formula,
+                            message: _studyFormula(e.key),
                             child: FilterChip(
                               key: ValueKey('indicator-${e.key}'),
-                              label: Text(e.value.name),
+                              label: Text(_studyName(e.key)),
                               selected: (overlay ? overlays : panes).contains(
                                 e.key,
                               ),
@@ -345,7 +366,7 @@ class _CryptoChartState extends State<CryptoChart> {
               style: TextStyle(fontSize: 10, color: Color(0xFFA9C5E2)),
             ),
             Text(
-              cryptoIndicators[study.id]!.name,
+              _studyName(study.id),
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
             ),
           ],
@@ -378,7 +399,7 @@ class _CryptoChartState extends State<CryptoChart> {
         final infoOnRight = (index + .5) / rows.length < .5;
         // Keep either floating corner within half of the drawable plot, so a
         // narrow phone does not put the window over a central candle.
-        final infoWidth = math.min(164.0, math.max(80.0, width / 2 - 12));
+        final infoWidth = math.min(164.0, math.max(1.0, width / 2 - 12));
         final height = study == null
             ? cryptoPriceHeight
             : (_paneHeights[study.id] ?? cryptoPaneHeight);
@@ -567,8 +588,8 @@ class _CryptoChartState extends State<CryptoChart> {
             },
             child: Semantics(
               label: study == null
-                  ? 'K 线主图，绿色上涨、红色下跌，左键拖动平移，双击或长按查看，Shift 拖动框选，双指缩放'
-                  : '${cryptoIndicators[study.id]!.name} 副图，与主图时间联动',
+                  ? 'K 线主图，价格单位 ${widget.quoteAsset}，绿色上涨、红色下跌，左键拖动平移，双击或长按查看，Shift 拖动框选，双指缩放'
+                  : '${_studyName(study.id)} 副图，与主图时间联动',
               child: SizedBox(
                 key: study == null
                     ? const Key('crypto-price-plot')
@@ -622,7 +643,7 @@ class _CryptoChartState extends State<CryptoChart> {
                           left: infoOnRight ? null : 8,
                           right: infoOnRight ? axisWidth + 6 : null,
                           child: Semantics(
-                            label: 'K 线信息窗口',
+                            label: 'K 线信息窗口，价格单位 ${widget.quoteAsset}',
                             container: true,
                             explicitChildNodes: true,
                             child: Stack(
@@ -679,7 +700,7 @@ class _CryptoChartState extends State<CryptoChart> {
                                             '成交量':
                                                 '${cryptoVolume(selected.volume)} ${widget.asset}',
                                             '成交额':
-                                                '${cryptoVolume(selected.quoteVolume)} USDT',
+                                                '${cryptoVolume(selected.quoteVolume)} ${widget.quoteAsset}',
                                             '涨幅':
                                                 '${((selected.close / selected.open - 1) * 100).toStringAsFixed(2)}%',
                                             '振幅':
@@ -692,14 +713,24 @@ class _CryptoChartState extends State<CryptoChart> {
                                                   ),
                                               child: Row(
                                                 children: [
-                                                  Text(
-                                                    entry.key,
-                                                    style: const TextStyle(
-                                                      color: dashboardMuted,
+                                                  Flexible(
+                                                    flex: 2,
+                                                    child: FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      alignment:
+                                                          Alignment.centerLeft,
+                                                      child: Text(
+                                                        entry.key,
+                                                        maxLines: 1,
+                                                        style: const TextStyle(
+                                                          color: dashboardMuted,
+                                                        ),
+                                                      ),
                                                     ),
                                                   ),
-                                                  const SizedBox(width: 6),
+                                                  const SizedBox(width: 4),
                                                   Expanded(
+                                                    flex: 3,
                                                     child: FittedBox(
                                                       fit: BoxFit.scaleDown,
                                                       alignment:
@@ -867,6 +898,7 @@ class _CryptoChartState extends State<CryptoChart> {
             children: [
               CryptoChartHeader(
                 asset: widget.asset,
+                quoteAsset: widget.quoteAsset,
                 interval: widget.interval,
                 quote: widget.quote,
                 loaded: all.length,
@@ -1111,7 +1143,7 @@ class _CryptoChartState extends State<CryptoChart> {
     }
 
     return Semantics(
-      label: '调整 ${cryptoIndicators[id]!.name} 副图高度',
+      label: '调整 ${_studyName(id)} 副图高度',
       excludeSemantics: true,
       value: '${height.round()} 像素',
       increasedValue:
@@ -1318,7 +1350,10 @@ class _ChartScale {
     ];
     final min = values.isEmpty ? 0.0 : values.reduce(math.min);
     final max = values.isEmpty ? 1.0 : values.reduce(math.max);
-    final pad = math.max((max - min) * .08, math.max(max.abs(), 1) * .001);
+    final pad = math.max(
+      (max - min) * .08,
+      math.max(math.max(min.abs(), max.abs()), 1e-12) * .001,
+    );
     low =
         !price &&
             studies.every(
@@ -1332,10 +1367,28 @@ class _ChartScale {
   final bool price;
   late final double low, high;
   String format(double value) => price
-      ? cryptoPrice(value)
+      ? cryptoPrice(
+          double.parse(
+            value.toStringAsFixed(
+              (high - low).abs() < .001
+                  ? 8
+                  : value.abs() >= 10
+                  ? 2
+                  : value.abs() >= 1
+                  ? 4
+                  : 6,
+            ),
+          ),
+        )
       : value.abs() >= 10000
       ? cryptoVolume(value)
-      : value.toStringAsFixed(value.abs() < 1 ? 3 : 2);
+      : value.toStringAsFixed(
+          value != 0 && value.abs() < .001
+              ? 8
+              : value.abs() < 1
+              ? 3
+              : 2,
+        );
   double get axisWidth {
     var width = 0.0;
     for (var i = 0; i <= 4; i++) {

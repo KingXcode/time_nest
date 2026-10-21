@@ -44,3 +44,8 @@ class DashboardException implements Exception {
 abstract interface class CryptoRulesUpdates {
   Stream<DashboardData> watchCryptoRules();
 }
+
+/// Optional cancellation for the selected market's transient REST requests.
+abstract interface class CryptoRequestCancellation {
+  void cancelCryptoRequests(String symbol);
+}

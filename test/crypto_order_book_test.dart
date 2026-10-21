@@ -11,6 +11,7 @@ import 'package:time_nest/dashboard/crypto_market.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 import 'package:time_nest/dashboard/dashboard_client.dart';
 
+import 'crypto_fixture.dart' show openCryptoPairPicker;
 import 'crypto_live_widget_test.dart' show Client, Feed;
 import 'dashboard_widget_test.dart' as fixture;
 
@@ -555,6 +556,12 @@ void main() {
       var saved = DashboardPreferences.decode(client.preferences);
       expect(saved.cryptoBookSteps, {'BTCUSDT': 10});
       expect(saved.cryptoBookLevels, 5);
+      await openCryptoPairPicker(tester);
+      await tester.enterText(
+        find.byKey(const Key('crypto-pair-search')),
+        'XRPUSDT',
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('crypto-select-XRPUSDT')));
       await tester.pumpAndSettle();
       feed.send(depth(symbol: 'XRPUSDT'));
@@ -569,6 +576,12 @@ void main() {
       expect(grouping().value, .0001);
       expect(levels().initialValue, 5);
       grouping().onChanged!(.001);
+      await tester.pumpAndSettle();
+      await openCryptoPairPicker(tester);
+      await tester.enterText(
+        find.byKey(const Key('crypto-pair-search')),
+        'BTCUSDT',
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('crypto-select-BTCUSDT')));
       await tester.pumpAndSettle();
@@ -1053,6 +1066,7 @@ void main() {
         tester.widget<Text>(find.byKey(const Key('crypto-book-status'))).data,
         '已暂停',
       );
+      await openCryptoPairPicker(tester);
       final eth = find.byKey(const Key('crypto-select-ETHUSDT'));
       await tester.ensureVisible(eth);
       await tester.tap(eth);

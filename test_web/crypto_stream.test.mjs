@@ -15,7 +15,7 @@ function harness(options = {}) {
     frame(data){this.onmessage?.({data:JSON.stringify(data)});}
   }
   const document={hidden:false,addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:(name)=>listeners.delete(name)};
-  const context={URL,URLSearchParams,AbortController,Date:Clock,WebSocket:Socket,document,
+  const context={URL,URLSearchParams,AbortController,TextDecoder,Date:Clock,WebSocket:Socket,document,
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},
     fetch:async(url,init)=>{requests.push({url,init});return options.fetch ? options.fetch(requests.length,url,init) : response(snapshot());},
     setTimeout:(fn,delay)=>{const id=++next;timers.set(id,{fn,at:now+delay});return id;},clearTimeout:id=>timers.delete(id)};
@@ -28,10 +28,10 @@ function harness(options = {}) {
 function ticker(time=START,symbol='BTCUSDT',price='100') {return {stream:`${symbol.toLowerCase()}@ticker`,data:{e:'24hrTicker',E:time,s:symbol,c:price,P:'1.2',h:'110',l:'90',v:'20',q:'2000',O:time-86400000,C:time}};}
 function candle(time=START,symbol='BTCUSDT',interval='1h') {return {stream:`${symbol.toLowerCase()}@kline_${interval}`,data:{e:'kline',E:time,s:symbol,k:{s:symbol,i:interval,t:START,T:START+3599999,o:'100',h:'110',l:'90',c:'101',v:'10',q:'1010',x:false}}};}
 
-test('market-only combined socket carries six tickers and selected UTC kline and depth; price live requires ticker and kline',()=>{
+test('market-only combined socket carries only the selected ticker, UTC kline and depth; price live requires ticker and kline',()=>{
   const h=harness(),id=h.start(),ws=h.sockets[0];
   assert.equal(new URL(ws.url).hostname,'data-stream.binance.vision');
-  assert.equal(new URL(ws.url).searchParams.get('streams').split('/').length,8);
+  assert.deepEqual(new URL(ws.url).searchParams.get('streams').split('/'), ['btcusdt@ticker', 'btcusdt@depth', 'btcusdt@kline_1h']);
   ws.open();ws.frame(ticker());
   assert.equal(h.events.some(e=>e.status==='live'),false);
   ws.frame(candle());
@@ -392,4 +392,167 @@ test('failed or malformed trade snapshots retry independently, without losing li
   assert.equal(h.sockets.length,1);assert.notEqual(ws.closed,true);
   h.api.unsubscribeCrypto(id);assert.equal(h.timers.size,0);
   assert.throws(()=>h.start('BTCUSDT','1h',{trades:'yes'}));
+});
+
+const streamCatalog = () => ({ symbols: [
+  ['ETH', 'BTC'], ['BTC', 'USDC'], ['BTC', 'USDT'], ['币安人生', 'USDT'],
+].map(([baseAsset, quoteAsset]) => ({ symbol: baseAsset + quoteAsset, baseAsset, quoteAsset,
+  status: 'TRADING', isSpotTradingAllowed: true, permissions: [], permissionSets: [['SPOT']],
+  baseAssetPrecision: 8, quoteAssetPrecision: 8,
+  filters: [{ filterType: 'PRICE_FILTER', tickSize: '0.00001000' }, { filterType: 'LOT_SIZE', stepSize: '0.00100000' }],
+})) });
+
+test('verified non-USDT pairs subscribe only their own ticker, kline, depth and trades with matching REST bootstrap', async () => {
+  const h = harness({ fetch: (_n, url) => response(url.includes('exchangeInfo') ? streamCatalog() : url.includes('/trades') ? [tradeRow(10)] : snapshot()) });
+  await h.api.request('cryptoPairs', '{}');
+  const id = h.start('ETHBTC', '1h', { trades: true }), ws = h.sockets[0];
+  assert.deepEqual(new URL(ws.url).searchParams.get('streams').split('/'), ['ethbtc@ticker', 'ethbtc@depth', 'ethbtc@trade', 'ethbtc@kline_1h']);
+  ws.open(); ws.frame(ticker(START, 'ETHBTC')); ws.frame(candle(START, 'ETHBTC'));
+  ws.frame(depth(11, { symbol: 'ETHBTC' })); ws.frame(fill(11, { symbol: 'ETHBTC' }));
+  await settle(); h.advance(250);
+  assert.equal(h.events.find(event => event.type === 'quote').quote.symbol, 'ETHBTC');
+  assert.equal(h.events.find(event => event.type === 'candle').symbol, 'ETHBTC');
+  assert.equal(copies(h).at(-1).symbol, 'ETHBTC');
+  assert.equal(tradeCopies(h).at(-1).symbol, 'ETHBTC');
+  assert.deepEqual(h.requests.slice(1).map(request => new URL(request.url).searchParams.get('symbol')), ['ETHBTC', 'ETHBTC']);
+  const events = h.events.length;
+  ws.frame(ticker(START + 1, 'BTCUSDT')); ws.frame(candle(START + 1, 'BTCUSDT'));
+  ws.frame(depth(12, { symbol: 'BTCUSDT' })); ws.frame(fill(12, { symbol: 'BTCUSDT' }));
+  assert.equal(h.events.length, events, 'foreign default-pair frames cannot leak into the selected market');
+  h.api.unsubscribeCrypto(id); assert.equal(h.timers.size, 0);
+});
+
+test('unknown selected pairs wait for one shared catalog request before opening a socket', async () => {
+  const pending = deferred(), h = harness({ fetch: () => pending.promise });
+  const id = h.start('ETHBTC', '1h', { orderBook: false });
+  const catalog = h.api.request('cryptoPairs', '{}');
+  assert.equal(h.requests.length, 1); assert.equal(h.sockets.length, 0);
+  pending.resolve(response(streamCatalog())); await catalog; await settle();
+  assert.equal(h.sockets.length, 1);
+  assert.deepEqual(new URL(h.sockets[0].url).searchParams.get('streams').split('/'), ['ethbtc@ticker', 'ethbtc@kline_1h']);
+  h.api.unsubscribeCrypto(id); assert.equal(h.timers.size, 0);
+});
+
+test('unsubscribing or hiding while metadata is pending fences late socket creation', async () => {
+  for (const action of ['unsubscribe', 'hide']) {
+    const pending = deferred(), h = harness({ fetch: () => pending.promise });
+    const id = h.start('ETHBTC', '1h', { orderBook: false });
+    if (action === 'unsubscribe') h.api.unsubscribeCrypto(id); else h.visibility(true);
+    pending.resolve(response(streamCatalog())); await settle();
+    assert.equal(h.sockets.length, 0); assert.equal(h.timers.size, 0);
+    if (action === 'hide') {
+      h.visibility(false); assert.equal(h.sockets.length, 1);
+      assert.ok(h.sockets[0].url.includes('ethbtc@ticker')); h.api.unsubscribeCrypto(id);
+    }
+  }
+});
+
+test('unknown or removed Spot pairs report unavailable rather than dialing invented streams', async () => {
+  const h = harness({ fetch: () => response(streamCatalog()) });
+  const id = h.start('ETHUSDC'); await settle();
+  assert.equal(h.sockets.length, 0);
+  assert.equal(h.events.at(-1).status, 'unavailable');
+  assert.match(h.events.at(-1).message, /不在当前/);
+  assert.equal(h.requests.length, 1); h.api.unsubscribeCrypto(id);
+});
+
+test('switching catalog pairs fences old ticker, candle, book and trade callbacks', async () => {
+  const pending = deferred(), h = harness({ fetch: (_n, url) => url.includes('exchangeInfo') ? response(streamCatalog()) : pending.promise });
+  await h.api.request('cryptoPairs', '{}');
+  const oldId = h.start('ETHBTC', '1h', { trades: true }), oldSocket = h.sockets[0];
+  oldSocket.open(); oldSocket.frame(depth(11, { symbol: 'ETHBTC' }));
+  const obsolete = oldSocket.onmessage;
+  h.api.unsubscribeCrypto(oldId);
+  assert.ok(h.requests.slice(1).every(request => request.init.signal.aborted));
+  const next = h.start('BTCUSDC', '1d', { orderBook: false }), nextSocket = h.sockets[1]; nextSocket.open();
+  const count = h.events.length;
+  for (const frame of [ticker(START, 'ETHBTC'), candle(START, 'ETHBTC'), depth(12, { symbol: 'ETHBTC' }), fill(12, { symbol: 'ETHBTC' })]) obsolete({ data: JSON.stringify(frame) });
+  pending.resolve(response(snapshot())); await settle();
+  assert.equal(h.events.length, count);
+  nextSocket.frame(ticker(START, 'BTCUSDC')); nextSocket.frame(candle(START, 'BTCUSDC', '1d'));
+  assert.equal(h.events.find(event => event.type === 'quote').quote.symbol, 'BTCUSDC');
+  h.api.unsubscribeCrypto(next); assert.equal(h.timers.size, 0);
+});
+
+test('UTF-8 verified symbols are URL-encoded without altering frame identity or selected market routing', async () => {
+  const symbol = '币安人生USDT';
+  const h = harness({ fetch: (_n, url) => {
+    if (url.includes('exchangeInfo')) return response(streamCatalog());
+    assert.ok(!url.includes('币安人生'));
+    assert.equal(new URL(url).searchParams.get('symbol'), symbol);
+    return response(url.includes('/trades') ? [tradeRow(10)] : snapshot());
+  } });
+  await h.api.request('cryptoPairs', '{}');
+  const id = h.start(symbol, '1h', { trades: true }), ws = h.sockets[0];
+  assert.ok(!ws.url.includes('币安人生'));
+  assert.deepEqual(new URL(ws.url).searchParams.get('streams').split('/'), [`${symbol.toLowerCase()}@ticker`, `${symbol.toLowerCase()}@depth`, `${symbol.toLowerCase()}@trade`, `${symbol.toLowerCase()}@kline_1h`]);
+  ws.open(); ws.frame(ticker(START, symbol)); ws.frame(candle(START, symbol));
+  ws.frame(depth(11, { symbol })); ws.frame(fill(11, { symbol })); await settle(); h.advance(250);
+  assert.equal(h.events.find(event => event.type === 'quote').quote.symbol, symbol);
+  assert.equal(h.events.find(event => event.type === 'candle').symbol, symbol);
+  assert.equal(copies(h).at(-1).symbol, symbol); assert.equal(tradeCopies(h).at(-1).symbol, symbol);
+  h.api.unsubscribeCrypto(id); assert.equal(h.timers.size, 0);
+});
+
+test('transient catalog failure retries after cooldown and restores the non-default socket, book and trades', async () => {
+  let metadataRequests = 0;
+  const h = harness({ fetch: (_n, url) => {
+    if (url.includes('exchangeInfo')) return response(++metadataRequests === 1 ? {} : streamCatalog(), metadataRequests === 1 ? 503 : 200);
+    return response(url.includes('/trades') ? [tradeRow(10)] : snapshot());
+  } });
+  const id = h.start('ETHBTC', '1h', { trades: true }); await settle();
+  assert.equal(h.events.at(-1).status, 'reconnecting'); assert.equal(h.sockets.length, 0);
+  h.advance(59999); await settle(); assert.equal(metadataRequests, 1);
+  h.advance(1); await settle(); assert.equal(metadataRequests, 2); assert.equal(h.sockets.length, 1);
+  const ws = h.sockets[0]; ws.open(); ws.frame(ticker(h.now(), 'ETHBTC')); ws.frame(candle(h.now(), 'ETHBTC'));
+  const diff = depth(11, { symbol: 'ETHBTC' }); diff.data.E = h.now(); ws.frame(diff);
+  ws.frame(fill(11, { symbol: 'ETHBTC', time: h.now() })); await settle(); h.advance(250);
+  assert.equal(copies(h).at(-1).symbol, 'ETHBTC'); assert.equal(tradeCopies(h).at(-1).symbol, 'ETHBTC');
+  assert.equal(h.events.find(event => event.type === 'quote').quote.symbol, 'ETHBTC');
+  h.api.unsubscribeCrypto(id); assert.equal(h.timers.size, 0);
+});
+
+test('metadata retry backoff is bounded and honors Binance Retry-After without polling during the ban', async () => {
+  const backoff = harness({ fetch: () => response({}, 503) });
+  const id = backoff.start('ETHBTC'); await settle();
+  for (const [delay, count] of [[60000, 2], [120000, 3], [240000, 4], [300000, 5], [300000, 6]]) {
+    backoff.advance(delay - 1); await settle(); assert.equal(backoff.requests.length, count - 1);
+    backoff.advance(1); await settle(); assert.equal(backoff.requests.length, count);
+    assert.equal(backoff.sockets.length, 0);
+  }
+  backoff.api.unsubscribeCrypto(id); assert.equal(backoff.timers.size, 0);
+  const limited = harness({ fetch: n => n === 1 ? response({}, 429, { 'retry-after': '180' }) : response(streamCatalog()) });
+  const next = limited.start('ETHBTC', '1h', { orderBook: false }); await settle();
+  limited.advance(179999); await settle(); assert.equal(limited.requests.length, 1);
+  limited.advance(1); await settle(); assert.equal(limited.requests.length, 2); assert.equal(limited.sockets.length, 1);
+  limited.api.unsubscribeCrypto(next); assert.equal(limited.timers.size, 0);
+});
+
+test('pause and disposal cancel metadata retry timers and a permanent catalog miss does not loop', async () => {
+  for (const action of ['unsubscribe', 'hide']) {
+    const h = harness({ fetch: () => response({}, 503) });
+    const id = h.start('ETHBTC'); await settle(); assert.equal(h.timers.size, 1);
+    if (action === 'unsubscribe') h.api.unsubscribeCrypto(id); else h.visibility(true);
+    assert.equal(h.timers.size, 0);
+    h.advance(30 * 60000); await settle(); assert.equal(h.requests.length, 1); assert.equal(h.sockets.length, 0);
+    if (action === 'hide') h.api.unsubscribeCrypto(id);
+  }
+  const missing = harness({ fetch: () => response(streamCatalog()) }), id = missing.start('ETHUSDC');
+  await settle(); assert.equal(missing.events.at(-1).status, 'unavailable'); assert.equal(missing.timers.size, 0);
+  missing.advance(30 * 60000); await settle(); assert.equal(missing.requests.length, 1); assert.equal(missing.sockets.length, 0);
+  missing.api.unsubscribeCrypto(id);
+});
+
+test('a stale catalog miss retries after the shared background refresh admits the real symbol', async () => {
+  const h = harness({ fetch: n => {
+    const catalog = streamCatalog();
+    if (n === 1) catalog.symbols = catalog.symbols.filter(row => row.symbol !== 'ETHBTC');
+    return response(catalog);
+  } });
+  await h.api.request('cryptoPairs', '{}'); h.advance(8 * 60 * 60000);
+  const id = h.start('ETHBTC', '1h', { orderBook: false }); await settle();
+  assert.equal(h.requests.length, 2); assert.equal(h.sockets.length, 0);
+  assert.equal(h.events.at(-1).status, 'reconnecting');
+  h.advance(60000); await settle(); assert.equal(h.requests.length, 2); assert.equal(h.sockets.length, 1);
+  h.api.unsubscribeCrypto(id); assert.equal(h.timers.size, 0);
 });

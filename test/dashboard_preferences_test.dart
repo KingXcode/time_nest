@@ -21,7 +21,7 @@ void main() {
             'BTCUSDT': 10,
             'XRPUSDT': .001,
             'DOGEUSDT': -1,
-            'unknown': 1,
+            'invalid/symbol': 1,
             'ETHUSDT': '0.1',
           },
           'cryptoCurrency': 'CNY',

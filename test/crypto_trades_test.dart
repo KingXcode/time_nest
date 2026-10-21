@@ -8,6 +8,7 @@ import 'package:time_nest/dashboard/crypto_view_settings.dart';
 import 'package:time_nest/dashboard/dashboard_client.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 
+import 'crypto_fixture.dart' show openCryptoPairPicker;
 import 'crypto_live_widget_test.dart' show Client, Feed;
 import 'crypto_order_book_test.dart' show RulesClient, precisionRules;
 import 'dashboard_widget_test.dart' as fixture;
@@ -303,6 +304,7 @@ void main() {
         expect(find.textContaining('● 币安实时推送'), findsOneWidget);
       }
       final old = feed.controllers.last;
+      await openCryptoPairPicker(tester);
       await press(tester, 'crypto-select-ETHUSDT');
       old.add(fills(999));
       await tester.pumpAndSettle();

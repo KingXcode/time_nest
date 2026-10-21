@@ -51,9 +51,14 @@ class HistoryClient extends fixture.FixtureDashboardClient {
     Map<String, dynamic> args, {
     bool refresh = false,
   }) async {
+    if (module == 'cryptoPairs' ||
+        module == 'cryptoBookRules' ||
+        module == 'cryptoConversion') {
+      return super.load(module, args, refresh: refresh);
+    }
     if (module == 'cryptoQuotes') {
       return DashboardData(
-        data: cryptoQuotesFixture(),
+        data: cryptoQuotesFixture(args['symbol'] as String?),
         fetchedAt: DateTime.utc(2026, 10, 19),
       );
     }
@@ -811,10 +816,12 @@ void main() {
         client.olderPending = Completer<DashboardData>();
         final pending = client.olderPending!;
         await press(tester, 'crypto-load-older');
+        if (switchSymbol) await openCryptoPairPicker(tester);
         final selection = switchSymbol
             ? find.byKey(const ValueKey('crypto-select-ETHUSDT'))
             : find.widgetWithText(ChoiceChip, '日线');
         await tester.ensureVisible(selection);
+        await tester.pumpAndSettle();
         await tester.tap(selection);
         await tester.pumpAndSettle();
         pending.complete(

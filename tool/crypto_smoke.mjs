@@ -674,12 +674,17 @@ try {
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});await delay(400);
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(500);
   passed('chart settings cancel/apply preserve the viewport; window switches stop hidden subscriptions, persist on-device, and tape freeze/resume works on the shared feed');
-  // Flutter semantics represents the entire card as one tappable node.
-  const ethPoint = await page.evaluate(`(() => {
-    const node = (${deepQuery})('flt-semantics, [aria-label]').find(e => (e.getAttribute('aria-label') || e.textContent || '').startsWith('ETH · 以太坊'));
-    if (!node) throw new Error('ETH card missing'); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2};
+  // The header exposes only the current price; select ETH through the catalog.
+  await activate('BTC');
+  await waitFor(async () => (await labels()).some(item => item.label?.includes('搜索币种')), 'pair catalog search');
+  const searchPoint = await page.evaluate(`(() => {
+    const node = (${deepQuery})('input, [role="textbox"]').find(e => (e.getAttribute('aria-label') || e.getAttribute('placeholder') || '').includes('搜索币种'));
+    if (!node) throw new Error('Pair search missing'); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2};
   })()`);
-  await click(ethPoint.x, ethPoint.y);
+  await click(searchPoint.x, searchPoint.y);
+  await page.send('Input.insertText', {text:'ETH'});
+  await delay(350);
+  await activate('ETH');
   await waitFor(() => page.evaluate(`JSON.parse(timeNestDashboard.readPreferences()).cryptoSymbol === 'ETHUSDT'`), 'ETH choice saved');
   await waitFor(async () => (await labels()).some(item => item.label === 'ETH / USDT'), 'ETH selection rendered');
   await waitFor(() => [...requests].some(url => url.includes('symbol=ETHUSDT') && url.includes('interval=1h')), 'ETH hourly request');
@@ -696,7 +701,7 @@ try {
   await waitFor(async () => (await labels()).some(item=>item.label?.includes('● 币安实时推送')), 'ETH stream live');
   await waitFor(() => streamConnections.slice(0,2).every(s=>streamClosed.includes(s.requestId)), 'superseded sockets fully close');
   await delay(500); await page.screenshot('02-crypto-eth.png');
-  passed('ETH card and daily interval select the matching real series and persist');
+  passed('current-pair chooser and daily interval select the matching real series and persist');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   await delay(500); await page.screenshot('03-crypto-mobile.png');
   // Scroll the live Flutter viewport to inspect chart controls on a narrow screen.
@@ -706,7 +711,7 @@ try {
   await page.evaluate(`(() => { const p=JSON.parse(timeNestDashboard.readPreferences());p.cryptoOverlays=['ma','ema','wma','boll','donchian','keltner','vwma','hma'];p.cryptoPanes=['vol','amount','macd','rsi','kdj','stoch','cci','adx'];p.cryptoInfoRight=true;p.cryptoBookSteps.ETHUSDT=0.01;timeNestDashboard.writePreferences(JSON.stringify(p)); })()`);
   await page.send('Emulation.setDeviceMetricsOverride', {width:1280,height:1280,deviceScaleFactor:1,mobile:false});
   await page.evaluate(`(() => {
-    const key='shike.crypto.rules.v2', entry=JSON.parse(localStorage.getItem(key));
+    const key=localStorage.getItem('shike.crypto.pairs.v1') ? 'shike.crypto.pairs.v1' : 'shike.crypto.rules.v2', entry=JSON.parse(localStorage.getItem(key));
     entry.at=Date.now()-9*3600000;
     const rule=entry.data.rules.find(r=>r.symbol==='ETHUSDT');rule.stepSize='0.00100000';rule.quoteAssetPrecision=6;
     localStorage.setItem(key,JSON.stringify(entry));
@@ -740,7 +745,7 @@ try {
   await page.screenshot('26-orderbook-cached-rules.png');
   await page.evaluate('window.__releaseRules()');
   await waitFor(async()=>(await labels()).some(e=>/^数量\(ETH\) [\d,]+\.\d{4}$/.test(e.label||'')),'fresh exchange rules automatically reformat to four decimals');
-  assert.equal(await page.evaluate("JSON.parse(localStorage.getItem('shike.crypto.rules.v2')).data.rules.find(r=>r.symbol==='ETHUSDT').quoteAssetPrecision"),8);
+  assert.equal(await page.evaluate("JSON.parse(localStorage.getItem('shike.crypto.pairs.v1') || localStorage.getItem('shike.crypto.rules.v2')).data.rules.find(r=>r.symbol==='ETHUSDT').quoteAssetPrecision"),8);
   await page.screenshot('27-orderbook-fresh-rules.png');
   await changeBookStep(1);
   passed('expired persistent rules render immediately; a held background refresh updates quantity and amount precision without a page reload');

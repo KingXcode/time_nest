@@ -9,6 +9,7 @@ class CryptoChartHeader extends StatelessWidget {
   const CryptoChartHeader({
     super.key,
     required this.asset,
+    this.quoteAsset = 'USDT',
     this.interval,
     this.quote,
     this.loaded,
@@ -16,7 +17,7 @@ class CryptoChartHeader extends StatelessWidget {
     this.onIntervalChanged,
     this.onSettings,
   });
-  final String asset;
+  final String asset, quoteAsset;
   final String? interval;
   final CryptoQuote? quote;
   final int? loaded;
@@ -124,7 +125,7 @@ class CryptoChartHeader extends StatelessWidget {
               spacing: 12,
               children: [
                 Text(
-                  '$asset / USDT',
+                  '$asset / $quoteAsset',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -135,7 +136,7 @@ class CryptoChartHeader extends StatelessWidget {
                   metric('24h 高', cryptoPrice(q.high)),
                   metric('24h 低', cryptoPrice(q.low)),
                   metric('成交量 ($asset)', cryptoVolume(q.volume)),
-                  metric('成交额 (USDT)', cryptoVolume(q.quoteVolume)),
+                  metric('成交额 ($quoteAsset)', cryptoVolume(q.quoteVolume)),
                 ],
                 if (loaded != null)
                   Text(

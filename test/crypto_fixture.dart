@@ -1,9 +1,12 @@
 // Synthetic market values for automated tests only; never shipped as live data.
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
 import 'package:time_nest/dashboard/crypto_market.dart';
 
-Map<String, dynamic> cryptoQuotesFixture() => {
+Map<String, dynamic> cryptoQuotesFixture([String? selected]) => {
   'quotes': [
-    for (final symbol in cryptoAssets.keys)
+    for (final symbol in selected == null ? cryptoAssets.keys : [selected])
       {
         'symbol': symbol,
         'price': 100.25,
@@ -36,3 +39,26 @@ Map<String, dynamic> cryptoCandlesFixture(String symbol, String interval) => {
       },
   ],
 };
+
+Map<String, dynamic> cryptoPairsFixture() => {
+  'pairs': [
+    for (final entry in cryptoAssets.entries)
+      {'symbol': entry.key, 'baseAsset': entry.value.$1, 'quoteAsset': 'USDT'},
+    for (final base in ['ETH', 'SOL', 'BNB'])
+      {'symbol': '${base}BTC', 'baseAsset': base, 'quoteAsset': 'BTC'},
+    for (final base in ['BTC', 'ETH'])
+      {'symbol': '${base}USDC', 'baseAsset': base, 'quoteAsset': 'USDC'},
+  ],
+};
+
+Future<void> openCryptoPairPicker(
+  WidgetTester tester, {
+  bool quote = false,
+}) async {
+  final button = find.byKey(
+    Key(quote ? 'crypto-quote-selector' : 'crypto-base-selector'),
+  );
+  await tester.ensureVisible(button);
+  await tester.tap(button);
+  await tester.pumpAndSettle();
+}

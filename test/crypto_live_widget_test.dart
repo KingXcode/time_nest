@@ -77,14 +77,16 @@ class Client extends fixture.FixtureDashboardClient {
     Map<String, dynamic> args, {
     bool refresh = false,
   }) async {
-    if (module == 'cryptoConversion' || module == 'cryptoBookRules') {
+    if (module == 'cryptoConversion' ||
+        module == 'cryptoBookRules' ||
+        module == 'cryptoPairs') {
       return super.load(module, args, refresh: refresh);
     }
     if (module == 'cryptoQuotes') {
       quoteRequests++;
       return quotePending?.future ??
           DashboardData(
-            data: cryptoQuotesFixture(),
+            data: cryptoQuotesFixture(args['symbol'] as String?),
             fetchedAt: DateTime.utc(2026, 10, 18),
           );
     }
@@ -268,7 +270,7 @@ void main() {
       });
       client.quotePending!.complete(
         DashboardData(
-          data: cryptoQuotesFixture(),
+          data: cryptoQuotesFixture('BTCUSDT'),
           fetchedAt: DateTime.utc(2026, 10, 18),
         ),
       );
@@ -282,7 +284,7 @@ void main() {
       expect(chart().candles.last.close, 150);
       expect(
         find.descendant(
-          of: find.byKey(const Key('crypto-quote-strip')),
+          of: find.byKey(const Key('crypto-current-quote')),
           matching: find.text('150.00'),
         ),
         findsOneWidget,
@@ -295,8 +297,10 @@ void main() {
       await tester.pump(const Duration(seconds: 31));
       await tester.pumpAndSettle();
       expect(client.candleRequests, calls);
+      await openCryptoPairPicker(tester);
       final eth = find.byKey(const ValueKey('crypto-select-ETHUSDT'));
       await tester.ensureVisible(eth);
+      await tester.pumpAndSettle();
       await tester.tap(eth);
       await tester.pumpAndSettle();
       expect(feed.cancelled, 1);

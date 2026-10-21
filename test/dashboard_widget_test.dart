@@ -44,6 +44,7 @@ class FixtureDashboardClient implements DashboardClient {
     if (pending != null) await pending!.future;
     if (fail) throw Exception('网络暂时不可用，请稍后重试。');
     final data = switch (module) {
+      'cryptoPairs' => cryptoPairsFixture(),
       'cryptoBookRules' => {
         'rules': [
           for (final symbol in [
@@ -76,7 +77,7 @@ class FixtureDashboardClient implements DashboardClient {
         ],
       },
       'cryptoConversion' => {'base': 'USDT', 'USD': .99, 'CNY': 7.1},
-      'cryptoQuotes' => cryptoQuotesFixture(),
+      'cryptoQuotes' => cryptoQuotesFixture(args['symbol'] as String?),
       'cryptoCandles' => cryptoCandlesFixture(
         args['symbol'] as String,
         args['interval'] as String,
