@@ -281,7 +281,7 @@ try {
   const initialFills=await tapeRows(), fillIds=initialFills.map(e=>Number(e.label.match(/成交 (\d+)，/)[1]));
   assert.equal(new Set(fillIds).size,fillIds.length,'displayed fills never duplicate trade IDs');
   assert.ok(fillIds.every((id,i)=>i===0 || id<fillIds[i-1]),'newest executions appear first');
-  assert.ok(initialFills.every(e=>/数量 [\d,]+\.\d{5}，金额 [\d.]+ USDT，时间 \d{2}:\d{2}:\d{2}/.test(e.label)),'BTC quantities use exchange precision and UTC+8 times');
+  assert.ok(initialFills.every(e=>/数量 [\d,]+\.\d{5} BTC，金额 [\d.]+ USDT，时间 \d{2}:\d{2}:\d{2}/.test(e.label)),'BTC quantities use exchange precision, base asset units and UTC+8 times');
   const matched=initialFills.map(row=>({row,frame:streamFrames.find(f=>f.data?.e==='trade' && f.data.t===Number(row.label.match(/成交 (\d+)，/)[1]))})).filter(item=>item.frame);
   assert.ok(matched.length>0,'displayed IDs match the actual raw stream');
   for(const {row,frame} of matched) assert.ok(row.label.includes(frame.data.m?'主动卖出':'主动买入'));
@@ -350,7 +350,7 @@ try {
   async function bookGeometry() {
     return page.evaluate(`(() => {
       const nodes=(${deepQuery})('flt-semantics, [aria-label]');
-      const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix));if(!e)throw new Error('Missing geometry '+prefix);const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
+      const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').replace(/ \\([A-Z0-9]+\\)(?= 副图)/g,'').startsWith(prefix));if(!e)throw new Error('Missing geometry '+prefix);const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height};};
       return {plot:rect('K 线主图，'),frame:rect('K 线图表区域'),book:rect('订单簿面板'),lastPane:rect('RSI 相对强弱 副图，'),assessment:rect('技术指标 · 买入参考'),trades:rect('最新成交面板')};
     })()`);
   }
@@ -451,7 +451,7 @@ try {
   await delay(500);
   const chartGeometry=await page.evaluate(`(() => {
     const nodes=(${deepQuery})('flt-semantics, [aria-label]');
-    const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix));if(!e)throw new Error('Missing plot '+prefix);const r=e.getBoundingClientRect();return {y:r.y,height:r.height,bottom:r.bottom};};
+    const rect=prefix=>{const e=nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').replace(/ \\([A-Z0-9]+\\)(?= 副图)/g,'').startsWith(prefix));if(!e)throw new Error('Missing plot '+prefix);const r=e.getBoundingClientRect();return {y:r.y,height:r.height,bottom:r.bottom};};
     return {main:rect('K 线主图，'),volume:rect('VOL 成交量 副图，'),timeline:rect('历史时间轴')};
   })()`);
   assert.equal(chartGeometry.main.height,320,'main price plot retains 320px');
@@ -569,7 +569,7 @@ try {
         : {type:'mouseMoved',...position});
       await delay(200);
       const window=await page.evaluate(`(() => {
-        const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>e.getAttribute('aria-label')==='K 线信息窗口');
+        const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>e.getAttribute('aria-label')?.startsWith('K 线信息窗口'));
         if(!e)throw new Error('Information window missing');const r=e.getBoundingClientRect();return {left:r.left,right:r.right};
       })()`);
       assert.ok(window.left>=plot.x && window.right<=plot.x+plot.width,'information stays inside the plot');
@@ -618,7 +618,7 @@ try {
   assert.ok(!(await labels()).some(e=>e.label?.includes('十字线已锁定')),'explicit close returns to navigation');
   await page.send('Emulation.setTouchEmulationEnabled',{enabled:false});
   const resizePoint=await page.evaluate(`(() => {
-    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').endsWith('调整 VOL 成交量 副图高度'));
+    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').replace(/ \\([A-Z0-9]+\\)(?= 副图)/g,'').endsWith('调整 VOL 成交量 副图高度'));
     if(!e)throw new Error('Resize handle missing');const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
   })()`);
   await page.send('Input.dispatchMouseEvent',{type:'mousePressed',...resizePoint,button:'left',clickCount:1});
@@ -628,7 +628,7 @@ try {
   await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:resizePoint.x,y:resizePoint.y+80,button:'left',clickCount:1}); await delay(350);
   const resized=await page.evaluate(`(() => {
     const nodes=(${deepQuery})('flt-semantics, [aria-label]');
-    const height=prefix=>nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith(prefix)).getBoundingClientRect().height;
+    const height=prefix=>nodes.find(e=>(e.getAttribute('aria-label')||e.textContent||'').replace(/ \\([A-Z0-9]+\\)(?= 副图)/g,'').startsWith(prefix)).getBoundingClientRect().height;
     return {main:height('K 线主图，'),volume:height('VOL 成交量 副图，'),macd:height('MACD 副图，')};
   })()`);
   assert.equal(resized.main,320);assert.ok(resized.volume>150);assert.equal(resized.macd,150);
@@ -754,7 +754,7 @@ try {
   await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'five-level book restores on fresh page');
   passed('per-symbol price steps and displayed level count persist across currency, series, orientation and full page reload');
   const restoredHeight=await page.evaluate(`(() => {
-    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').startsWith('VOL 成交量 副图，'));
+    const e=(${deepQuery})('flt-semantics, [aria-label]').find(e=>(e.getAttribute('aria-label')||e.textContent||'').replace(/ \\([A-Z0-9]+\\)(?= 副图)/g,'').startsWith('VOL 成交量 副图，'));
     return e.getBoundingClientRect().height;
   })()`);
   assert.equal(restoredHeight,storedHeight,'fresh page restores custom height after symbol, interval and indicator changes');

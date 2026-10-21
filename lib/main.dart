@@ -2,14 +2,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'platform/browser_client.dart';
+import 'platform/native_runtime_stub.dart'
+    if (dart.library.io) 'platform/native_runtime.dart'
+    as native;
 import 'ui/clock_face.dart';
 import 'ui/orientation_frame.dart';
 import 'clock/clock_settings.dart';
 import 'ui/clock_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ShikeApp());
+  try {
+    await native.initializeNativeRuntime();
+    runApp(const ShikeApp());
+  } catch (_) {
+    runApp(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Mac 数据服务启动失败，请重新打开应用。'),
+                TextButton(onPressed: main, child: const Text('重试')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class ShikeApp extends StatefulWidget {

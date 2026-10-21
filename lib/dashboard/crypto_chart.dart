@@ -451,7 +451,10 @@ class _CryptoChartState extends State<CryptoChart> {
                   gesture.onInput = (kind) {
                     _chartFocus.requestFocus();
                     setState(
-                      () => _touchInput = kind != PointerDeviceKind.mouse,
+                      () => _touchInput =
+                          kind == PointerDeviceKind.touch ||
+                          kind == PointerDeviceKind.stylus ||
+                          kind == PointerDeviceKind.invertedStylus,
                     );
                   };
                   gesture.onDoubleClick = (pos) {

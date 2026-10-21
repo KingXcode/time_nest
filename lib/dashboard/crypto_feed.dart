@@ -1,4 +1,5 @@
 import 'crypto_feed_stub.dart'
+    if (dart.library.io) 'crypto_feed_native.dart'
     if (dart.library.js_interop) 'crypto_feed_web.dart'
     as implementation;
 

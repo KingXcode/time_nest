@@ -2,7 +2,7 @@
 
 **横放手机，让时间安静一点。**
 
-「此刻」是一款基于 Flutter Web 的极简桌面时钟，面向闲置手机的长时间横屏展示，首要目标设备为 iPhone 8 Plus。应用显示名为「此刻」，工程及仓库名称保持 `time_nest`。
+「此刻」是一款基于 Flutter 的极简桌面时钟，支持 Web 和独立 macOS 应用。Web 面向闲置手机的长时间横屏展示，首要目标设备为 iPhone 8 Plus；Mac 版提供原生窗口、全屏和本地存储。应用显示名为「此刻」，工程及仓库名称保持 `time_nest`。
 
 在线使用：[打开此刻](https://kingxcode.github.io/time_nest/) · 源码：[KingXcode/time_nest](https://github.com/KingXcode/time_nest)
 
@@ -26,7 +26,7 @@
 - 每日看板首页显示数据总览：普通天气、中文科技资讯、数字货币行情各有独立页面；支持收藏、排序和本地保存。
 - 首页独立工具箱：小流量 HTTP 测速参考、本站 HTTPS 延迟检测、公共 DNS 查询与浏览器网络信息。只有确认说明并主动开始后才请求，可随时取消。
 
-不包含后端、账号、网络校时、私人日程、原生安装包或后台常驻服务。
+不包含后端、账号、网络校时、私人日程或后台常驻服务。macOS 构建和安装说明见下方。
 
 **秒后小数只显示一位，截取毫秒的百位，不四舍五入；显示格式不代表计时精度。系统时间错误时，页面也会错误。**
 
@@ -36,9 +36,9 @@
 | --- | --- |
 | Flutter / Dart | 官方 stable **3.47.5 / 3.13.4** |
 | SDK 管理 | FVM，[.fvmrc](<.fvmrc>) 固定版本 |
-| 展示 | Flutter Web，JavaScript + 本地 CanvasKit；不依赖 WasmGC |
+| 展示 | Web：本地 CanvasKit；Mac：Flutter 原生窗口 |
 | 时间更新 | Flutter Ticker + 系统时间快照；无毫秒时用边界定时器 |
-| 存储及浏览器能力 | localStorage、Wake Lock、Fullscreen，封装于独立桥接层 |
+| 存储与平台能力 | Web：localStorage、Wake Lock、Fullscreen；Mac：本地 JSON 文件、AppKit 全屏、IOKit 常亮 |
 | 离线 | 构建时扫描资源并生成带 SHA-256 校验的 Service Worker |
 | 验证 | Flutter 单元/组件测试、Node 浏览器能力模拟、真实 Chrome/CDP 冒烟 |
 
@@ -63,7 +63,27 @@ fvm flutter run -d chrome
 {"dart.flutterSdkPath": ".fvm/flutter_sdk"}
 ```
 
-不需要为本项目安装 Android、iOS 或桌面原生工具链。Web 调试不启用发布版离线缓存，避免旧缓存干扰热重载。
+仅开发 Web 时不需要原生工具链。Web 调试不启用发布版离线缓存，避免旧缓存干扰热重载。
+
+### 独立 macOS 应用
+
+要求 macOS 14 或更新版本、Xcode 及其命令行工具。使用项目固定的 Flutter SDK：
+
+```bash
+fvm flutter pub get
+fvm flutter run -d macos
+bash tool/build_macos.sh
+```
+
+如需自行构建，发布构建生成 `build/macos/Build/Products/Release/Shike.app`，可复制到“应用程序”。本地构建采用 ad-hoc 签名；公开分发前仍需配置 Developer ID 签名及 Apple 公证，脚本不生成安装包或发布到外部服务。
+
+- 可见界面由 Flutter 渲染，时钟、计时和已保存设置不依赖网站可用性；看板与网络工具需要对应数据源联网。
+- 私有 WKWebView 只运行随应用打包的数据脚本，复用 Web 的 REST、实时行情、本地订单簿和交易规范缓存逻辑，不加载远程网页界面。
+- 偏好、计时、图表高度、订单簿选项与行情缓存保存在应用沙盒的 `Library/Application Support/TimeNest/state.json`；与浏览器存储独立。窗口大小和位置由 macOS 记忆。
+- 常亮只在窗口显示时生效；最小化、隐藏、休眠时释放并暂停实时连接，恢复窗口后重连。原生全屏可使用绿色窗口按钮或界面的全屏入口。
+- Mac 版目前通过替换应用包手动更新，保留本地数据；不显示 Web 的 Service Worker 更新按钮。详见 [平台更新约定](docs/platform-updates.md)。
+
+本机联网验收：`fvm flutter test integration_test/macos_smoke_test.dart -d macos`，覆盖持久化、真实行情快照和推送、订单簿重置、DNS、全屏和常亮。该测试主动请求公开数据，不在 Web CI 中运行。
 
 ### 手机布局预览
 

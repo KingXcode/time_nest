@@ -1,7 +1,7 @@
 name: time_nest
 description: "此刻：极简桌面时钟，让时间安静一点。"
 publish_to: 'none'
-version: 2.3.2+8
+version: 2.4.0+9
 
 environment:
   sdk: ^3.13.4
@@ -13,6 +13,8 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
 dev_dependencies:
+  integration_test:
+    sdk: flutter
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
@@ -20,6 +22,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - web/dashboard.js
+    - web/network_tools.js
+    - assets/macos_runtime.js
     - assets/fonts/OFL-NotoSansSC.txt
     - assets/fonts/OFL-RobotoMono.txt
   fonts:

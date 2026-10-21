@@ -1,12 +1,13 @@
 # 各平台应用更新约定
 
-记录日期：2026-10-17。当前仅支持 Web；iOS、Android 原生更新均为待实现需求。本文件是后续增加客户端时的接入与验收依据，不代表已提供原生安装包或更新服务。
+更新日期：2026-10-21。当前支持 Web 和独立 macOS 应用；Mac 自动更新、iOS 和 Android 原生更新仍待实现。
 
 ## 平台边界
 
 | 运行形态 | 更新方式 | 当前状态 |
 | --- | --- | --- |
 | Web：桌面、iOS / Android 浏览器、添加到主屏幕的 PWA | 检查站点新版资源，完整下载后自动启用并重新加载，保留手动入口 | 已有实现 |
+| macOS 原生应用（macOS 14+） | 手动替换应用包，保留沙盒内设置与缓存 | 可本地构建运行；自动更新和正式签名／公证分发待接入 |
 | iOS 原生客户端 | 检查已发布版本，提示用户前往 App Store 下载／更新 | 待实现；尚无 Apple 开发者账号，App ID、商店链接和查询配置暂留空 |
 | Android 原生客户端 | 检查已发布版本，用户确认后下载 APK，再提示用户通过系统安装器安装更新 | 待实现；版本信息地址、APK 地址和下载／安装逻辑暂留空 |
 
@@ -16,9 +17,16 @@
 
 - [BrowserClient](../lib/platform/browser_client.dart) 通过条件导入选择实现；[WebBrowserClient](../lib/platform/browser_client_web.dart) 调用 [web/platform.js](../web/platform.js) 中的 Service Worker 更新流程。
 - Web 在打开页面、保持前台及恢复网络等时机检查更新；资源准备好后前台页面自动加载新版，后台页面返回时更新；保留手动更新流程和设置、计时。具体间隔、缓存和失败行为见 [README 缓存和更新策略](../README.md#缓存和更新策略)。
-- 非 Web 当前落到 [MemoryBrowserClient](../lib/platform/browser_client_stub.dart)：`checkForUpdate()`、`applyUpdate()`、`refreshPage()` 均为空操作，默认不报告可用更新。它是非 Web／测试占位实现，不能作为原生客户端已支持更新的依据。
+- macOS 初始化 [NativeRuntime](../lib/platform/native_runtime.dart) 后使用 [MacBrowserClient](../lib/platform/browser_client_native.dart)，接入实际全屏、常亮和本地持久化。原生设置页说明手动替换应用包，不显示浏览器更新按钮，且不报告虚假的“已是最新版”。
+- 其他非 Web 平台和未初始化原生服务的测试使用 [MemoryBrowserClient](../lib/platform/browser_client_stub.dart)；它是占位实现，不能作为原生客户端已支持更新的依据。
 - 新增原生客户端时，需要接入独立的平台更新实现及真实版本信息来源；页面更新入口按平台和能力展示。原生客户端不能复用浏览器的刷新、离线缓存或 Service Worker 安装方法来更新应用包。
 - 当前保留原生更新逻辑为空，不增加安装权限、下载依赖或虚构商店／APK 地址。未配置或未实现时隐藏可执行的原生更新入口，不显示“已是最新版”来掩盖未接入状态。
+
+## macOS 更新与分发边界
+
+如需自行构建，使用 `bash tool/build_macos.sh` 生成 `.app`；应用版本、Info.plist 和首页版本文字统一读取 pubspec 的版本与构建号，独立于 Pages 部署序号。本地构建只做 ad-hoc 签名验证，不能替代 Developer ID、公证或 Gatekeeper 的正式分发验收。
+
+更新时退出旧应用并替换应用包；相同 Bundle ID `com.kingxcode.timeNest` 保留原沙盒数据。Mac 当前没有下载、安装或检查新版的服务，不应复用 Web 刷新方法替换应用。后续接入自动更新时再确定正式签名、更新源、版本比较和失败恢复流程。
 
 ## iOS 原生客户端待实现
 

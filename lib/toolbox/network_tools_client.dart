@@ -1,4 +1,5 @@
 import 'network_tools_client_stub.dart'
+    if (dart.library.io) 'network_tools_client_native.dart'
     if (dart.library.js_interop) 'network_tools_client_web.dart'
     as implementation;
 

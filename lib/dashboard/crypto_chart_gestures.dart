@@ -28,6 +28,23 @@ class CryptoChartGestureRecognizer extends OneSequenceGestureRecognizer {
   bool get _mouse => _kind == PointerDeviceKind.mouse;
 
   @override
+  bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) =>
+      _points.isEmpty && super.isPointerPanZoomAllowed(event);
+
+  @override
+  void addAllowedPointerPanZoom(PointerPanZoomStartEvent event) {
+    startTrackingPointer(event.pointer, event.transform);
+    _points[event.pointer] = event.localPosition;
+    _kind = event.kind;
+    _origin = _last = event.localPosition;
+    _action = _Action.pending;
+    _hold?.cancel();
+    _click?.cancel();
+    _lastClick = null;
+    onInput?.call(event.kind);
+  }
+
+  @override
   bool isPointerAllowed(PointerDownEvent event) =>
       (event.kind != PointerDeviceKind.mouse || _points.isEmpty) &&
       (event.kind != PointerDeviceKind.mouse ||
@@ -74,7 +91,38 @@ class CryptoChartGestureRecognizer extends OneSequenceGestureRecognizer {
   @override
   void handleEvent(PointerEvent event) {
     if (!_points.containsKey(event.pointer)) return;
-    if (event is PointerMoveEvent) {
+    if (event is PointerPanZoomUpdateEvent) {
+      final pinching = (event.scale - 1).abs() > .005;
+      if (_action == _Action.pending) {
+        if (!pinching && event.localPan.distance <= kTouchSlop) return;
+        if (!pinching && event.localPan.dy.abs() > event.localPan.dx.abs()) {
+          // Preserve the page's vertical trackpad scrolling.
+          resolve(GestureDisposition.rejected);
+          return;
+        }
+        resolve(GestureDisposition.accepted);
+        _action = pinching ? _Action.pinch : _Action.pan;
+        if (pinching) {
+          onPinchStart?.call(_origin);
+        } else {
+          onPanStart?.call(_origin);
+          onPanUpdate?.call(event.localPan);
+          return;
+        }
+      } else if (_action == _Action.pan && pinching) {
+        _action = _Action.pinch;
+        onPinchStart?.call(_origin + event.localPan);
+      }
+      if (_action == _Action.pinch) {
+        onPinchUpdate?.call(event.scale);
+      } else if (_action == _Action.pan) {
+        onPanUpdate?.call(event.localPanDelta);
+      }
+    } else if (event is PointerPanZoomEndEvent) {
+      resolve(GestureDisposition.accepted);
+      _points.remove(event.pointer);
+      stopTrackingPointer(event.pointer);
+    } else if (event is PointerMoveEvent) {
       _points[event.pointer] = event.localPosition;
       if (_action == _Action.pinch && _points.length >= 2) {
         final pair = _points.values.take(2).toList();

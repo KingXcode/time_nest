@@ -1,4 +1,5 @@
 import 'dashboard_client_stub.dart'
+    if (dart.library.io) 'dashboard_client_native.dart'
     if (dart.library.js_interop) 'dashboard_client_web.dart'
     as implementation;
 

@@ -180,8 +180,10 @@ class SettingsPanel extends StatelessWidget {
                           label: const Text('重试常亮'),
                         ),
                       ),
-                    const _Note(
-                      '若常亮不可用，可在系统“显示与亮度 → 自动锁定”中选择“永不”（设备策略允许时）。这是系统设置，离开展示后建议恢复。',
+                    _Note(
+                      state.nativeApp
+                          ? '常亮仅在应用窗口显示时生效；最小化、隐藏或退出时释放。系统休眠和合盖仍由 macOS 控制。'
+                          : '若常亮不可用，可在系统“显示与亮度 → 自动锁定”中选择“永不”（设备策略允许时）。这是系统设置，离开展示后建议恢复。',
                     ),
                     if (state.fullscreenSupported)
                       Align(
@@ -197,56 +199,68 @@ class SettingsPanel extends StatelessWidget {
                         ),
                       ),
                     if (state.fullscreenError) const _Note('全屏申请未成功，仍可正常使用时钟。'),
-                    const _Section('主屏幕与离线'),
-                    Text(state.standalone ? '已从主屏幕独立运行' : 'Safari：分享 → 添加到主屏幕'),
-                    const SizedBox(height: 6),
-                    const _Note('主界面的方向按钮支持自动、手动横屏与手动竖屏。手动切换只旋转页面，不改变系统方向锁定。'),
-                    const SizedBox(height: 12),
-                    Text(
-                      state.offlineLabel,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    if (!state.secureContext)
-                      const _Note('当前不是安全上下文；请使用 HTTPS 验证常亮与离线能力。'),
-                    const _Note('首次联网并完成缓存后才能离线使用。清理浏览器数据或系统回收存储后，需要重新联网缓存。'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: state.refreshing
-                              ? null
-                              : browser.refreshPage,
-                          icon: state.refreshing
-                              ? const SizedBox.square(
-                                  dimension: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.refresh_rounded, size: 18),
-                          label: Text(state.refreshing ? '正在刷新…' : '刷新页面'),
-                        ),
-                        OutlinedButton(
-                          onPressed: state.refreshing
-                              ? null
-                              : browser.checkForUpdate,
-                          child: const Text('检查更新'),
-                        ),
-                        if (state.updateAvailable)
-                          FilledButton(
+                    if (state.nativeApp) ...[
+                      const _Section('Mac 应用'),
+                      const Text('时钟、倒计时与番茄钟可离线使用。'),
+                      const _Note('设置、计时和看板缓存保存在本机应用目录。行情、天气、资讯和网络工具需要联网。'),
+                      const _Note('窗口支持系统全屏、调整大小和最小化。常亮仅在窗口显示时生效，关闭或最小化后释放。'),
+                      const _Note('当前 Mac 版本通过安装新应用包更新；尚未接入自动安装更新。'),
+                    ] else ...[
+                      const _Section('主屏幕与离线'),
+                      Text(
+                        state.standalone ? '已从主屏幕独立运行' : 'Safari：分享 → 添加到主屏幕',
+                      ),
+                      const SizedBox(height: 6),
+                      const _Note(
+                        '主界面的方向按钮支持自动、手动横屏与手动竖屏。手动切换只旋转页面，不改变系统方向锁定。',
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        state.offlineLabel,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      if (!state.secureContext)
+                        const _Note('当前不是安全上下文；请使用 HTTPS 验证常亮与离线能力。'),
+                      const _Note('首次联网并完成缓存后才能离线使用。清理浏览器数据或系统回收存储后，需要重新联网缓存。'),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
                             onPressed: state.refreshing
                                 ? null
-                                : browser.applyUpdate,
-                            child: const Text('更新并重新加载'),
+                                : browser.refreshPage,
+                            icon: state.refreshing
+                                ? const SizedBox.square(
+                                    dimension: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.refresh_rounded, size: 18),
+                            label: Text(state.refreshing ? '正在刷新…' : '刷新页面'),
                           ),
-                      ],
-                    ),
-                    const _Note('刷新页面会先检查服务器更新，加载新版后重新打开；保留已保存的设置和计时。'),
-                    const _Note('网页会自动检查并加载完整新版；也可以使用上方按钮手动更新。'),
-                    if (state.updateError)
-                      const _Note('更新检查或加载失败，当前版本仍可使用。请联网后重试。'),
+                          OutlinedButton(
+                            onPressed: state.refreshing
+                                ? null
+                                : browser.checkForUpdate,
+                            child: const Text('检查更新'),
+                          ),
+                          if (state.updateAvailable)
+                            FilledButton(
+                              onPressed: state.refreshing
+                                  ? null
+                                  : browser.applyUpdate,
+                              child: const Text('更新并重新加载'),
+                            ),
+                        ],
+                      ),
+                      const _Note('刷新页面会先检查服务器更新，加载新版后重新打开；保留已保存的设置和计时。'),
+                      const _Note('网页会自动检查并加载完整新版；也可以使用上方按钮手动更新。'),
+                      if (state.updateError)
+                        const _Note('更新检查或加载失败，当前版本仍可使用。请联网后重试。'),
+                    ],
                     const _Section('关于此刻'),
                     const Text(
                       '此刻 $appVersion',

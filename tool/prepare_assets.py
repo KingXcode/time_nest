@@ -96,4 +96,8 @@ for size in [192, 512]:
     icon(size, True).save(icons / f'Icon-maskable-{size}.png')
 icon(180).save(icons / 'apple-touch-icon.png')
 icon(32).save(ROOT / 'web/favicon.png')
+mac_icons = ROOT / 'macos/Runner/Assets.xcassets/AppIcon.appiconset'
+if mac_icons.exists():
+    for size in [16, 32, 64, 128, 256, 512, 1024]:
+        icon(size).save(mac_icons / f'app_icon_{size}.png')
 print('Generated 此刻 app icons.')

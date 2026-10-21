@@ -1,11 +1,13 @@
 import 'package:flutter/foundation.dart';
 
 import 'browser_client_stub.dart'
+    if (dart.library.io) 'browser_client_native.dart'
     if (dart.library.js_interop) 'browser_client_web.dart'
     as implementation;
 
 class BrowserState {
   const BrowserState({
+    this.nativeApp = false,
     this.visible = true,
     this.resumeSerial = 0,
     this.storageAvailable = true,
@@ -25,6 +27,7 @@ class BrowserState {
   });
 
   factory BrowserState.fromJson(Map<String, dynamic> json) => BrowserState(
+    nativeApp: json['nativeApp'] == true,
     visible: json['visible'] != false,
     resumeSerial: (json['resumeSerial'] as num?)?.toInt() ?? 0,
     storageAvailable: json['storageAvailable'] != false,
@@ -43,6 +46,7 @@ class BrowserState {
     secureContext: json['secureContext'] == true,
   );
 
+  final bool nativeApp;
   final bool visible;
   final int resumeSerial;
   final bool storageAvailable;

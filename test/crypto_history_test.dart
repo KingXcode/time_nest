@@ -131,6 +131,46 @@ Widget chartPage() => fixture.app(
 );
 
 void main() {
+  testWidgets(
+    'native trackpad pans and pinches without touch tracking and leaves vertical page scroll available',
+    (tester) async {
+      fixture.setSize(tester, const Size(1200, 800));
+      await tester.pumpWidget(chartPage());
+      await tester.pumpAndSettle();
+      final plot = find.byKey(const Key('crypto-price-plot'));
+      await tester.ensureVisible(plot);
+      CryptoTimeline timeline() => tester.widget(find.byType(CryptoTimeline));
+      var center = tester.getCenter(plot);
+      final beforeStart = timeline().start;
+      final trackpad = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad,
+      );
+      await trackpad.panZoomStart(center);
+      await trackpad.panZoomUpdate(center, pan: const Offset(80, 0));
+      await trackpad.panZoomUpdate(center, pan: const Offset(160, 0));
+      await trackpad.panZoomEnd();
+      await tester.pumpAndSettle();
+      expect(timeline().start, lessThan(beforeStart));
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      final beforeCount = timeline().count;
+      await trackpad.panZoomStart(center);
+      await trackpad.panZoomUpdate(center, pan: const Offset(30, 0));
+      await trackpad.panZoomUpdate(center, pan: const Offset(40, 0), scale: 2);
+      await trackpad.panZoomEnd();
+      await tester.pumpAndSettle();
+      expect(timeline().count, closeTo(beforeCount / 2, 1));
+      expect(find.byKey(const Key('crypto-info-window')), findsNothing);
+      final beforeTop = tester.getTopLeft(plot).dy;
+      center = tester.getCenter(plot);
+      await trackpad.panZoomStart(center);
+      await trackpad.panZoomUpdate(center, pan: const Offset(0, -60));
+      await trackpad.panZoomUpdate(center, pan: const Offset(0, -180));
+      await trackpad.panZoomEnd();
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(plot).dy, lessThan(beforeTop));
+      expect(tester.takeException(), isNull);
+    },
+  );
   for (final scenario in [
     (PointerDeviceKind.mouse, 1200.0, true),
     (PointerDeviceKind.mouse, 320.0, false),
