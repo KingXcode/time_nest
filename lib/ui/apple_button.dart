@@ -122,7 +122,8 @@ class AppleButton extends StatelessWidget {
       _Kind.bordered => OutlinedButtonTheme.of(context).style,
       _Kind.filled => FilledButtonTheme.of(context).style,
     };
-    final effective = (themeStyle ?? const ButtonStyle()).merge(style);
+    // ButtonStyle.merge fills null properties; caller overrides must come first.
+    final effective = (style ?? const ButtonStyle()).merge(themeStyle);
     final foreground =
         effective.foregroundColor?.resolve(states) ??
         (_kind == _Kind.filled ? Colors.white : appleBlue);
@@ -135,7 +136,7 @@ class AppleButton extends StatelessWidget {
                 icon,
                 const SizedBox(width: 6),
               ],
-              child,
+              Flexible(child: child),
               if (_alignment == IconAlignment.end) ...[
                 const SizedBox(width: 6),
                 icon,
@@ -145,6 +146,7 @@ class AppleButton extends StatelessWidget {
     final button = CupertinoButton(
       onPressed: onPressed,
       sizeStyle: CupertinoButtonSize.small,
+      alignment: effective.alignment ?? Alignment.center,
       minimumSize: effective.minimumSize?.resolve(states) ?? const Size(30, 30),
       padding:
           effective.padding?.resolve(states) ??
