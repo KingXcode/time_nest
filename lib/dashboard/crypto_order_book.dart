@@ -788,7 +788,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
       tooltip: label,
       style: IconButton.styleFrom(
         backgroundColor: _view == view
-            ? const Color(0xFF2C4058)
+            ? const Color(0xFF48484A)
             : Colors.transparent,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
@@ -800,7 +800,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
     final panel = DecoratedBox(
       key: const Key('crypto-order-book'),
       decoration: BoxDecoration(
-        color: const Color(0xFF101C2B),
+        color: const Color(0xFF1C1C1E),
         border: Border.all(color: dashboardBorder),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -810,7 +810,7 @@ class _CryptoOrderBookState extends State<CryptoOrderBook>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: const BoxDecoration(
-              color: Color(0xFF21364D),
+              color: Color(0xFF2C2C2E),
               borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
             ),
             child: Wrap(

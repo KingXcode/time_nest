@@ -9,6 +9,8 @@ import 'ui/clock_face.dart';
 import 'ui/orientation_frame.dart';
 import 'clock/clock_settings.dart';
 import 'ui/clock_screen.dart';
+import 'ui/apple_theme.dart';
+import 'ui/apple_button.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +26,7 @@ Future<void> main() async {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text('Mac 数据服务启动失败，请重新打开应用。'),
-                TextButton(onPressed: main, child: const Text('重试')),
+                AppleButton.text(onPressed: main, child: const Text('重试')),
               ],
             ),
           ),
@@ -62,26 +64,30 @@ class _ShikeAppState extends State<ShikeApp> {
     locale: const Locale('zh', 'CN'),
     supportedLocales: const [Locale('zh', 'CN')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
-    theme: ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      fontFamily: 'ShikeSans',
-      scaffoldBackgroundColor: clockBackground,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFFBBC4D4),
-        brightness: Brightness.dark,
-        surface: const Color(0xFF14161B),
-        primary: const Color(0xFFD1D8E3),
-      ),
-      dialogTheme: DialogThemeData(
-        backgroundColor: const Color(0xFF14161B),
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
-      ),
-    ),
+    theme: browser.state.nativeApp
+        ? appleTheme()
+        : ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.dark,
+            fontFamily: 'ShikeSans',
+            scaffoldBackgroundColor: clockBackground,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFFBBC4D4),
+              brightness: Brightness.dark,
+              surface: const Color(0xFF14161B),
+              primary: const Color(0xFFD1D8E3),
+            ),
+            dialogTheme: DialogThemeData(
+              backgroundColor: const Color(0xFF14161B),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+            ),
+          ),
     builder: (context, child) =>
         OrientationFrame(orientation: orientation, child: child!),
     home: ClockScreen(

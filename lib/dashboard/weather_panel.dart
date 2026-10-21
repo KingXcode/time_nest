@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'dashboard_client.dart';
 import 'dashboard_widgets.dart';
+import '../ui/apple_button.dart';
 
 const _accent = Color(0xFF67D8C2);
 const _secondary = Color(0xFF9BA8AF);
@@ -152,7 +153,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
             spacing: 8,
             runSpacing: 4,
             children: [
-              FilledButton.icon(
+              AppleButton.filledIcon(
                 onPressed: _searching ? null : _search,
                 icon: _searching
                     ? const SizedBox(
@@ -164,7 +165,10 @@ class _WeatherPanelState extends State<WeatherPanel> {
                 label: Text(_searching ? '搜索中' : '搜索'),
               ),
               if (hasCity)
-                TextButton(onPressed: _closeSearch, child: const Text('取消')),
+                AppleButton.text(
+                  onPressed: _closeSearch,
+                  child: const Text('取消'),
+                ),
             ],
           ),
           if (_searchError != null)
@@ -186,7 +190,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
           for (final candidate in _cities.take(6))
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: OutlinedButton(
+              child: AppleButton.bordered(
                 style: OutlinedButton.styleFrom(
                   alignment: Alignment.centerLeft,
                   padding: const EdgeInsets.all(12),
@@ -240,7 +244,7 @@ class _WeatherPanelState extends State<WeatherPanel> {
                   ),
                 ),
               ),
-              TextButton(
+              AppleButton.text(
                 onPressed: () => _changing
                     ? _closeSearch()
                     : setState(() => _changing = true),

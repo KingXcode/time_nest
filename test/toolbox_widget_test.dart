@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:time_nest/ui/apple_button.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/toolbox/network_tools_client.dart';
 import 'package:time_nest/toolbox/toolbox_screen.dart';
@@ -168,7 +169,7 @@ void main() {
       );
       expect(
         tester
-            .widget<FilledButton>(find.byKey(const ValueKey('toolbox-start')))
+            .widget<AppleButton>(find.byKey(const ValueKey('toolbox-start')))
             .onPressed,
         isNull,
       );

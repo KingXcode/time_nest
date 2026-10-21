@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+
+import '../ui/apple_theme.dart';
 
 import 'crypto_indicators.dart';
 import 'crypto_market.dart';
 import 'dashboard_widgets.dart';
+import '../ui/apple_button.dart';
 
 /// The chart owns its controls, so its side panels always share the same top.
 class CryptoChartHeader extends StatelessWidget {
@@ -48,7 +52,7 @@ class CryptoChartHeader extends StatelessWidget {
       children: [
         Container(
           key: const Key('crypto-chart-toolbar'),
-          color: const Color(0xFF21364D),
+          color: const Color(0xFF2C2C2E),
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           child: Row(
             children: [
@@ -59,30 +63,57 @@ class CryptoChartHeader extends StatelessWidget {
                   child: Row(
                     children: [
                       if (onIntervalChanged != null) ...[
-                        for (final period in cryptoIntervals.entries)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 2),
-                            child: ChoiceChip(
-                              key: ValueKey('crypto-period-${period.key}'),
-                              label: Text(period.value),
-                              selected: interval == period.key,
-                              onSelected: (_) => onIntervalChanged!(period.key),
-                              showCheckmark: false,
-                              side: BorderSide.none,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(3),
+                        if (usesAppleTheme(Theme.of(context)))
+                          CupertinoSlidingSegmentedControl<String>(
+                            groupValue: interval,
+                            backgroundColor: appleBackground,
+                            thumbColor: const Color(0xFF636366),
+                            children: {
+                              for (final period in cryptoIntervals.entries)
+                                period.key: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  child: Text(
+                                    period.value,
+                                    key: ValueKey(
+                                      'crypto-period-${period.key}',
+                                    ),
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                            },
+                            onValueChanged: (next) {
+                              if (next != null) onIntervalChanged!(next);
+                            },
+                          )
+                        else
+                          for (final period in cryptoIntervals.entries)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 2),
+                              child: ChoiceChip(
+                                key: ValueKey('crypto-period-${period.key}'),
+                                label: Text(period.value),
+                                selected: interval == period.key,
+                                onSelected: (_) =>
+                                    onIntervalChanged!(period.key),
+                                showCheckmark: false,
+                                side: BorderSide.none,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                padding: EdgeInsets.zero,
+                                labelPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                labelStyle: const TextStyle(fontSize: 11),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                backgroundColor: Colors.transparent,
                               ),
-                              padding: EdgeInsets.zero,
-                              labelPadding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              labelStyle: const TextStyle(fontSize: 11),
-                              visualDensity: VisualDensity.compact,
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              backgroundColor: Colors.transparent,
                             ),
-                          ),
                         const SizedBox(
                           height: 16,
                           child: VerticalDivider(width: 12),
@@ -114,7 +145,7 @@ class CryptoChartHeader extends StatelessWidget {
         Container(
           key: const Key('crypto-chart-market-info'),
           decoration: const BoxDecoration(
-            color: Color(0xFF152639),
+            color: Color(0xFF2C2C2E),
             border: Border(bottom: BorderSide(color: dashboardBorder)),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -170,8 +201,8 @@ class CryptoIndicatorBar extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     key: const Key('crypto-chart-indicators'),
     decoration: const BoxDecoration(
-      color: Color(0xFF152639),
-      border: Border(top: BorderSide(color: Color(0xFF49617B))),
+      color: Color(0xFF2C2C2E),
+      border: Border(top: BorderSide(color: Color(0xFF48484A))),
     ),
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     child: Row(
@@ -205,7 +236,7 @@ class CryptoIndicatorBar extends StatelessWidget {
         ),
         Tooltip(
           message: '全部指标 · 主图 ${overlays.length}/8 · 副图 ${panes.length}/8',
-          child: TextButton.icon(
+          child: AppleButton.textIcon(
             key: const PageStorageKey('crypto-indicator-settings'),
             onPressed: onChanged == null ? null : onSettings,
             icon: const Icon(Icons.tune, size: 13),

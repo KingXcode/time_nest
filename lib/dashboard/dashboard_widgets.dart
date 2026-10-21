@@ -3,14 +3,17 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'dashboard_client.dart';
+import '../ui/apple_theme.dart';
+import '../ui/apple_button.dart';
 
-const dashboardAccent = Color(0xFF85B6FF);
-const dashboardMuted = Color(0xFF9BACBF);
-const dashboardBackground = Color(0xFF101824);
-const dashboardSurface = Color(0xFF182332);
-const dashboardBorder = Color(0xFF2C3B4E);
+const dashboardAccent = Color(0xFF64A8FF);
+const dashboardMuted = appleSecondary;
+const dashboardBackground = appleBackground;
+const dashboardSurface = Color(0xFF242426);
+const dashboardBorder = appleSeparator;
 
 ThemeData dashboardTheme(ThemeData base) {
+  if (usesAppleTheme(base)) return base;
   final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(7));
   final button = TextButton.styleFrom(
     minimumSize: const Size(0, 32),
@@ -328,7 +331,7 @@ class _ApiSectionState extends State<ApiSection> {
                     ),
                   ),
                 ),
-              TextButton.icon(
+              AppleButton.textIcon(
                 onPressed: _loading ? null : () => _load(refresh: true),
                 icon: Icon(
                   _loading

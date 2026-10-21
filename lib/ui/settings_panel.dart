@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 
 import '../app_version.dart';
 import '../clock/clock_settings.dart';
 import '../platform/browser_client.dart';
+import 'apple_theme.dart';
+import 'apple_button.dart';
 
 class SettingsPanel extends StatelessWidget {
   const SettingsPanel({
@@ -21,7 +24,7 @@ class SettingsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
     color: Theme.of(context).colorScheme.surface,
-    borderRadius: BorderRadius.circular(24),
+    borderRadius: BorderRadius.circular(browser.state.nativeApp ? 12 : 24),
     clipBehavior: Clip.antiAlias,
     child: AnimatedBuilder(
       animation: Listenable.merge([settings, browser]),
@@ -80,15 +83,49 @@ class SettingsPanel extends StatelessWidget {
                     const SizedBox(height: 8),
                     const _Note('办公显示秒，床头使用暖色与夜间调暗，极简只显示时分。仍可继续调整下面的选项。'),
                     const _Section('时间格式'),
-                    SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: 'h23', label: Text('24 小时')),
-                        ButtonSegment(value: 'h12', label: Text('12 小时')),
-                      ],
-                      selected: {value.hourCycle},
-                      onSelectionChanged: (values) =>
-                          onChanged(value.copyWith(hourCycle: values.first)),
-                    ),
+                    if (state.nativeApp)
+                      CupertinoSlidingSegmentedControl<String>(
+                        groupValue: value.hourCycle,
+                        backgroundColor: appleBackground,
+                        thumbColor: const Color(0xFF636366),
+                        children: const {
+                          'h23': Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 5,
+                            ),
+                            child: Text(
+                              '24 小时',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ),
+                          'h12': Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 5,
+                            ),
+                            child: Text(
+                              '12 小时',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        },
+                        onValueChanged: (next) {
+                          if (next != null) {
+                            onChanged(value.copyWith(hourCycle: next));
+                          }
+                        },
+                      )
+                    else
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'h23', label: Text('24 小时')),
+                          ButtonSegment(value: 'h12', label: Text('12 小时')),
+                        ],
+                        selected: {value.hourCycle},
+                        onSelectionChanged: (values) =>
+                            onChanged(value.copyWith(hourCycle: values.first)),
+                      ),
                     SwitchListTile.adaptive(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('显示秒'),
@@ -172,7 +209,7 @@ class SettingsPanel extends StatelessWidget {
                     if (value.keepAwake && state.wakeStatus != 'active')
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
+                        child: AppleButton.textIcon(
                           onPressed: state.wakeSupported
                               ? () => browser.setKeepAwake(true)
                               : null,
@@ -188,7 +225,7 @@ class SettingsPanel extends StatelessWidget {
                     if (state.fullscreenSupported)
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
+                        child: AppleButton.textIcon(
                           onPressed: browser.toggleFullscreen,
                           icon: Icon(
                             state.fullscreen
@@ -227,7 +264,7 @@ class SettingsPanel extends StatelessWidget {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          OutlinedButton.icon(
+                          AppleButton.borderedIcon(
                             onPressed: state.refreshing
                                 ? null
                                 : browser.refreshPage,
@@ -241,14 +278,14 @@ class SettingsPanel extends StatelessWidget {
                                 : const Icon(Icons.refresh_rounded, size: 18),
                             label: Text(state.refreshing ? '正在刷新…' : '刷新页面'),
                           ),
-                          OutlinedButton(
+                          AppleButton.bordered(
                             onPressed: state.refreshing
                                 ? null
                                 : browser.checkForUpdate,
                             child: const Text('检查更新'),
                           ),
                           if (state.updateAvailable)
-                            FilledButton(
+                            AppleButton.filled(
                               onPressed: state.refreshing
                                   ? null
                                   : browser.applyUpdate,
@@ -282,7 +319,7 @@ class SettingsPanel extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextButton(
+                    AppleButton.text(
                       onPressed: () => onChanged(const ClockSettings()),
                       child: const Text('恢复默认设置'),
                     ),

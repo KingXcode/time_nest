@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../clock/clock_controller.dart';
 import '../clock/clock_settings.dart';
+import 'apple_theme.dart';
 
 const clockBackground = Color(0xFF08090B);
 const clockForeground = Color(0xFFE8E9EB);
@@ -57,7 +58,9 @@ class ClockFace extends StatelessWidget {
                               style: TextStyle(
                                 color: dateColor,
                                 fontSize: 18,
-                                letterSpacing: 1.6,
+                                letterSpacing: usesAppleTheme(Theme.of(context))
+                                    ? 0
+                                    : 1.6,
                               ),
                             ),
                           ),
@@ -159,7 +162,7 @@ class _Digits extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
     // Roboto Mono has a 0.6 em advance. The constraint stays fixed across ticks.
-    width: characters * size * .6,
+    width: characters * size * (usesAppleTheme(Theme.of(context)) ? .65 : .6),
     child: RepaintBoundary(
       child: ValueListenableBuilder<String>(
         valueListenable: value,
@@ -170,9 +173,13 @@ class _Digits extends StatelessWidget {
           softWrap: false,
           textScaler: TextScaler.noScaling,
           style: TextStyle(
-            fontFamily: 'ClockDigits',
+            fontFamily: usesAppleTheme(Theme.of(context))
+                ? appleFont
+                : 'ClockDigits',
             fontSize: size,
-            fontWeight: FontWeight.w400,
+            fontWeight: usesAppleTheme(Theme.of(context))
+                ? FontWeight.w300
+                : FontWeight.w400,
             height: 1,
             color: color,
             fontFeatures: const [FontFeature.tabularFigures()],

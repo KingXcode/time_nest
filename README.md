@@ -78,6 +78,7 @@ bash tool/build_macos.sh
 如需自行构建，发布构建生成 `build/macos/Build/Products/Release/Shike.app`，可复制到“应用程序”。本地构建采用 ad-hoc 签名；公开分发前仍需配置 Developer ID 签名及 Apple 公证，脚本不生成安装包或发布到外部服务。
 
 - 可见界面由 Flutter 渲染，时钟、计时和已保存设置不依赖网站可用性；看板与网络工具需要对应数据源联网。
+- Mac 组件采用系统字体、Cupertino 按钮、开关和分段选择，以及灰阶输入框与弹窗；保留现有页面布局、导航和行情图表操作。
 - 私有 WKWebView 只运行随应用打包的数据脚本，复用 Web 的 REST、实时行情、本地订单簿和交易规范缓存逻辑，不加载远程网页界面。
 - 偏好、计时、图表高度、订单簿选项与行情缓存保存在应用沙盒的 `Library/Application Support/TimeNest/state.json`；与浏览器存储独立。窗口大小和位置由 macOS 记忆。
 - 常亮只在窗口显示时生效；最小化、隐藏、休眠时释放并暂停实时连接，恢复窗口后重连。原生全屏可使用绿色窗口按钮或界面的全屏入口。

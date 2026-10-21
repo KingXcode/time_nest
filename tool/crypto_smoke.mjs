@@ -445,7 +445,7 @@ try {
   passed('order-book side filters and level menu work in the live landscape browser');
   await page.send('Emulation.setDeviceMetricsOverride',{width:1280,height:1280,deviceScaleFactor:1,mobile:false});await delay(500);
   await page.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:2,y:400,deltaX:0,deltaY:-10000});await delay(500);
-  assert.ok((await labels()).some(e=>e.label?.includes('实时 · 5档')),'explicit five-level choice survives desktop orientation');
+  await waitFor(async()=>(await labels()).some(e=>e.label?.includes('实时 · 5档')),'explicit five-level choice survives desktop orientation and depth resynchronization');
   passed('order book sits right on desktop and landscape phones and below charts in portrait');
   await page.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
   await delay(500);

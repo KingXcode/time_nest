@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/app_version.dart';
@@ -132,6 +133,13 @@ void main() {
     expect(find.text('检查更新'), findsNothing);
     expect(find.text('刷新页面'), findsNothing);
     expect(find.textContaining('Safari'), findsNothing);
+    expect(
+      find.byType(CupertinoSlidingSegmentedControl<String>),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('12 小时'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(ClockSettings.decode(browser.settings).hourCycle, 'h12');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

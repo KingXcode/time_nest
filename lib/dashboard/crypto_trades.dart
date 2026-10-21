@@ -253,7 +253,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
       child: Container(
         key: const Key('crypto-trades-panel'),
         decoration: BoxDecoration(
-          color: const Color(0xFF101D2C),
+          color: const Color(0xFF1C1C1E),
           border: Border.all(color: dashboardBorder),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -262,7 +262,7 @@ class _CryptoTradesState extends State<CryptoTrades> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              color: const Color(0xFF21364D),
+              color: const Color(0xFF2C2C2E),
               padding: const EdgeInsets.only(left: 10, right: 4),
               height: 36,
               child: Row(

@@ -8,6 +8,7 @@ import 'crypto_panel.dart';
 import 'news_panel.dart';
 import 'weather_panel.dart';
 import '../toolbox/toolbox_screen.dart';
+import '../ui/apple_button.dart';
 
 const _titles = {'weather': '天气', 'news': '科技资讯', 'crypto': '数字货币行情'};
 const _subtitles = {
@@ -100,7 +101,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const Expanded(
                         child: Text('安排功能入口', style: TextStyle(fontSize: 20)),
                       ),
-                      TextButton(
+                      AppleButton.text(
                         onPressed: () => Navigator.pop(context, order),
                         child: const Text('保存'),
                       ),
@@ -291,7 +292,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       runSpacing: 6,
                       children: [
                         for (final id in modules) _entry(id),
-                        OutlinedButton.icon(
+                        AppleButton.borderedIcon(
                           key: const ValueKey('dashboard-entry-toolbox'),
                           onPressed: () => Navigator.of(context).push<void>(
                             MaterialPageRoute(

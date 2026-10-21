@@ -11,6 +11,9 @@ class MainFlutterWindow: NSWindow {
     contentViewController = controller
     title = "此刻"
     appearance = NSAppearance(named: .darkAqua)
+    titlebarAppearsTransparent = true
+    toolbarStyle = .unified
+    backgroundColor = .windowBackgroundColor
     contentMinSize = NSSize(width: 640, height: 480)
     if !setFrameUsingName("ShikeMainWindow") {
       let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)

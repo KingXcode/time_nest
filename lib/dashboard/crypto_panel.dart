@@ -17,6 +17,7 @@ import 'crypto_settings_dialog.dart';
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
+import '../ui/apple_button.dart';
 
 class CryptoPanel extends StatefulWidget {
   const CryptoPanel({
@@ -818,7 +819,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                 }
               },
             ),
-            TextButton.icon(
+            AppleButton.textIcon(
               onPressed: _quotesBusy || _candlesBusy
                   ? null
                   : () =>
@@ -946,13 +947,13 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
         Wrap(
           spacing: 12,
           children: [
-            TextButton.icon(
+            AppleButton.textIcon(
               onPressed: () =>
                   widget.client.openUrl(cryptoSourceUrl(widget.symbol)),
               icon: const Icon(Icons.open_in_new_rounded, size: 16),
               label: const Text('币安官方来源'),
             ),
-            TextButton(
+            AppleButton.text(
               onPressed: () => widget.client.openUrl(
                 'https://developers.binance.com/docs/binance-spot-api-docs/faqs/market_data_only',
               ),
@@ -976,7 +977,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
       key: const Key('crypto-current-quote'),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF17283C),
+        color: dashboardSurface,
         border: Border.all(color: dashboardBorder),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -986,7 +987,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
             message: quote ? '切换计价币' : '切换币种 · $unit 市场',
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: constraints.maxWidth),
-              child: TextButton.icon(
+              child: AppleButton.textIcon(
                 key: Key(
                   quote ? 'crypto-quote-selector' : 'crypto-base-selector',
                 ),
@@ -999,7 +1000,7 @@ class _CryptoPanelState extends State<CryptoPanel> with WidgetsBindingObserver {
                   ),
                   backgroundColor: quote
                       ? dashboardBackground
-                      : const Color(0xFF263D5B),
+                      : const Color(0xFF3A3A3C),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../dashboard/dashboard_widgets.dart';
 import 'network_tools_client.dart';
+import '../ui/apple_button.dart';
 
 const _toolKinds = ['speed', 'latency', 'dns'];
 const _toolNames = {'speed': '网速测试', 'latency': '延迟检测', 'dns': 'DNS 查询'};
@@ -76,11 +77,11 @@ class _ToolboxScreenState extends State<ToolboxScreen>
         title: const Text('清空本机测试记录？'),
         content: const Text('将移除本浏览器保存的测速和延迟摘要。清空后无法恢复，不影响当前页面的检测结果。'),
         actions: [
-          TextButton(
+          AppleButton.text(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('取消'),
           ),
-          TextButton(
+          AppleButton.text(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('清空'),
           ),
@@ -413,7 +414,7 @@ class _ToolboxScreenState extends State<ToolboxScreen>
         ],
         _disclosure(),
         const SizedBox(height: 8),
-        CheckboxListTile(
+        CheckboxListTile.adaptive(
           key: const ValueKey('toolbox-consent'),
           value: _consent,
           onChanged: _busy
@@ -450,7 +451,7 @@ class _ToolboxScreenState extends State<ToolboxScreen>
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            FilledButton.icon(
+            AppleButton.filledIcon(
               key: const ValueKey('toolbox-start'),
               onPressed: _consent && !_busy ? _start : null,
               style: FilledButton.styleFrom(
@@ -468,7 +469,7 @@ class _ToolboxScreenState extends State<ToolboxScreen>
               }),
             ),
             if (_activeKind != null)
-              OutlinedButton.icon(
+              AppleButton.borderedIcon(
                 key: const ValueKey('toolbox-cancel'),
                 onPressed: _stop,
                 style: OutlinedButton.styleFrom(
@@ -983,13 +984,13 @@ class _ToolboxScreenState extends State<ToolboxScreen>
                 spacing: 8,
                 runSpacing: 4,
                 children: [
-                  TextButton.icon(
+                  AppleButton.textIcon(
                     key: const ValueKey('toolbox-refresh-history'),
                     onPressed: _refreshHistory,
                     icon: const Icon(Icons.refresh_rounded, size: 16),
                     label: const Text('刷新记录'),
                   ),
-                  TextButton.icon(
+                  AppleButton.textIcon(
                     key: const ValueKey('toolbox-clear-history'),
                     onPressed: items.isEmpty || _busy ? null : _clearHistory,
                     icon: const Icon(Icons.delete_outline_rounded, size: 16),
@@ -1032,7 +1033,7 @@ class _ToolboxScreenState extends State<ToolboxScreen>
             const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerLeft,
-              child: TextButton(
+              child: AppleButton.text(
                 onPressed: () =>
                     setState(() => _historyExpanded = !_historyExpanded),
                 child: Text(
@@ -1110,7 +1111,7 @@ class _ToolboxScreenState extends State<ToolboxScreen>
     );
   }
 
-  Widget _link(String label, String url) => TextButton(
+  Widget _link(String label, String url) => AppleButton.text(
     onPressed: () => _client.openUrl(url),
     child: Text('$label ↗', style: const TextStyle(fontSize: 11)),
   );

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'crypto_market.dart';
 import 'dashboard_client.dart';
 import 'dashboard_widgets.dart';
+import '../ui/apple_button.dart';
 
 /// Selection is local to this route until a complete, available pair is chosen.
 /// The root navigator keeps the mobile sheet above the dashboard's own header.
@@ -412,7 +413,7 @@ class _CryptoPairPickerState extends State<_CryptoPairPicker> {
         ),
         if (retry) ...[
           const SizedBox(height: 18),
-          OutlinedButton.icon(
+          AppleButton.borderedIcon(
             key: const Key('crypto-pair-retry'),
             onPressed: _loading ? null : () => _load(refresh: true),
             icon: const Icon(Icons.refresh_rounded),
@@ -453,7 +454,7 @@ class _CryptoPairPickerState extends State<_CryptoPairPicker> {
       selected: selected,
       button: true,
       child: Material(
-        color: selected ? const Color(0xFF253B56) : Colors.transparent,
+        color: selected ? const Color(0xFF3A3A3C) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           key: key,

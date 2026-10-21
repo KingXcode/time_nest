@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../clock/clock_settings.dart';
 import '../clock/timer_controller.dart';
 import 'clock_face.dart';
+import 'apple_theme.dart';
+import 'apple_button.dart';
 
 class TimerFace extends StatelessWidget {
   const TimerFace({
@@ -61,7 +63,13 @@ class TimerFace extends StatelessWidget {
                       session.label,
                       key: const Key('timer-digits'),
                       style: TextStyle(
-                        fontFamily: 'ClockDigits',
+                        fontFamily: usesAppleTheme(Theme.of(context))
+                            ? appleFont
+                            : 'ClockDigits',
+                        fontWeight: usesAppleTheme(Theme.of(context))
+                            ? FontWeight.w300
+                            : FontWeight.w400,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                         fontSize: 180,
                         height: 1.1,
                         color: color,
@@ -89,7 +97,7 @@ class TimerFace extends StatelessWidget {
                   spacing: 12,
                   runSpacing: 6,
                   children: [
-                    FilledButton.icon(
+                    AppleButton.filledIcon(
                       key: const Key('timer-primary'),
                       onPressed: () {
                         if (session.running) {
@@ -115,7 +123,7 @@ class TimerFace extends StatelessWidget {
                       ),
                     ),
                     if (session.status != 'idle')
-                      TextButton(
+                      AppleButton.text(
                         onPressed: () async {
                           final accepted =
                               !session.active ||
@@ -127,12 +135,12 @@ class TimerFace extends StatelessWidget {
                                         '当前进度将清除，已完成的专注次数会保留。',
                                       ),
                                       actions: [
-                                        TextButton(
+                                        AppleButton.text(
                                           onPressed: () =>
                                               Navigator.pop(context, false),
                                           child: const Text('取消'),
                                         ),
-                                        TextButton(
+                                        AppleButton.text(
                                           onPressed: () =>
                                               Navigator.pop(context, true),
                                           child: const Text('重置'),
@@ -145,7 +153,7 @@ class TimerFace extends StatelessWidget {
                         },
                         child: const Text('重置计时'),
                       ),
-                    TextButton.icon(
+                    AppleButton.textIcon(
                       onPressed: () => showDialog<void>(
                         context: context,
                         builder: (_) => _TimerOptions(
@@ -285,11 +293,11 @@ class _TimerOptionsState extends State<_TimerOptions> {
         ),
       ),
       actions: [
-        TextButton(
+        AppleButton.text(
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
-        FilledButton(
+        AppleButton.filled(
           onPressed: () {
             if (!_form.currentState!.validate()) return;
             widget.timer.configure(

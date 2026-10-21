@@ -4,6 +4,7 @@ import 'crypto_market.dart';
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
+import '../ui/apple_button.dart';
 
 /// Bounded, on-demand snapshots. The full charts and streams belong to detail
 /// routes; the overview never starts background polling or a trading widget.
@@ -50,7 +51,10 @@ class DashboardOverview extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
-            TextButton(onPressed: () => onOpen(id), child: const Text('展开')),
+            AppleButton.text(
+              onPressed: () => onOpen(id),
+              child: const Text('展开'),
+            ),
           ],
         ),
         Text(
@@ -161,7 +165,7 @@ class DashboardOverview extends StatelessWidget {
                 children: [
                   const Text('选择城市后显示气温、降雨和风速。'),
                   const SizedBox(height: 8),
-                  OutlinedButton.icon(
+                  AppleButton.borderedIcon(
                     onPressed: () => onOpen('weather'),
                     icon: const Icon(Icons.add_location_alt_outlined, size: 15),
                     label: const Text('选择城市'),

@@ -13,6 +13,7 @@ import 'clock_face.dart';
 import 'settings_panel.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../toolbox/toolbox_screen.dart';
+import 'apple_button.dart';
 
 class ClockScreen extends StatefulWidget {
   const ClockScreen({
@@ -216,7 +217,10 @@ class _ClockScreenState extends State<ClockScreen>
           icon: const Icon(Icons.play_arrow_rounded),
         )
       else
-        TextButton(onPressed: _startPresentation, child: const Text('开始展示')),
+        AppleButton.text(
+          onPressed: _startPresentation,
+          child: const Text('开始展示'),
+        ),
     PopupMenuButton<String>(
       tooltip: '横竖屏切换',
       icon: const Icon(Icons.screen_rotation_rounded, size: 22),
@@ -583,7 +587,7 @@ class _UpdateNotice extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            TextButton(
+            AppleButton.text(
               onPressed: state.refreshing ? null : onUpdate,
               child: Text(
                 state.refreshing
@@ -638,8 +642,8 @@ class _Intro extends StatelessWidget {
           alignment: WrapAlignment.center,
           spacing: 12,
           children: [
-            TextButton(onPressed: onDismiss, child: const Text('知道了')),
-            TextButton.icon(
+            AppleButton.text(onPressed: onDismiss, child: const Text('知道了')),
+            AppleButton.textIcon(
               onPressed: onStart,
               icon: const Icon(Icons.play_arrow_rounded, size: 18),
               label: const Text('开始展示'),

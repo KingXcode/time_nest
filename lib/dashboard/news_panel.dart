@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
+import '../ui/apple_button.dart';
 
 const _newsAccent = Color(0xFF67D8C2);
 
@@ -109,7 +110,7 @@ class _NewsPanelState extends State<NewsPanel> {
                   ],
                 ),
                 if (stories.length > 6)
-                  TextButton.icon(
+                  AppleButton.textIcon(
                     onPressed: () => setState(() => _expanded = !_expanded),
                     icon: Icon(
                       _expanded
@@ -182,7 +183,7 @@ class _NewsStory extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TextButton(
+              AppleButton.text(
                 onPressed: () => client.openUrl(url),
                 style: TextButton.styleFrom(
                   foregroundColor: const Color(0xFFE5EDEE),
@@ -232,7 +233,7 @@ class _NewsStory extends StatelessWidget {
                   spacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    TextButton.icon(
+                    AppleButton.textIcon(
                       onPressed: () => client.openUrl(discussion),
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 0),

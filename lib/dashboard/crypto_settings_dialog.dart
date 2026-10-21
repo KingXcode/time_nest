@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'crypto_view_settings.dart';
 import 'dashboard_widgets.dart';
+import '../ui/apple_button.dart';
 
 Future<CryptoViewSettings?> showCryptoViewSettings(
   BuildContext context,
@@ -91,11 +92,11 @@ Future<CryptoViewSettings?> showCryptoViewSettings(
           ),
         ),
         actions: [
-          TextButton(
+          AppleButton.text(
             onPressed: () => Navigator.pop(context),
             child: const Text('取消'),
           ),
-          TextButton(
+          AppleButton.text(
             onPressed: () => Navigator.pop(context, draft),
             child: const Text('应用'),
           ),

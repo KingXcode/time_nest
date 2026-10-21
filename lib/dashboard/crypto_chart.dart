@@ -13,6 +13,7 @@ import 'crypto_indicators.dart';
 import 'crypto_market.dart';
 import 'dashboard_widgets.dart';
 import 'dashboard_preferences.dart';
+import '../ui/apple_button.dart';
 
 const cryptoUp = Color(0xFF67D8AB);
 const cryptoDown = Color(0xFFFF8A92);
@@ -28,11 +29,11 @@ const _colors = [
 ];
 const cryptoPriceHeight = 320.0;
 const cryptoPaneHeight = 150.0;
-const _cryptoMainSurface = Color(0xFF1A2D42);
-const _cryptoPaneSurface = Color(0xFF0D1827);
-const _cryptoPaneHeader = Color(0xFF21364D);
-const _cryptoTimelineSurface = Color(0xFF111E30);
-const _cryptoResizeSurface = Color(0xFF203850);
+const _cryptoMainSurface = Color(0xFF242426);
+const _cryptoPaneSurface = Color(0xFF141416);
+const _cryptoPaneHeader = Color(0xFF2C2C2E);
+const _cryptoTimelineSurface = Color(0xFF1C1C1E);
+const _cryptoResizeSurface = Color(0xFF2C2C2E);
 
 class CryptoChart extends StatefulWidget {
   const CryptoChart({
@@ -289,7 +290,7 @@ class _CryptoChartState extends State<CryptoChart> {
             ),
           ),
           actions: [
-            TextButton(
+            AppleButton.text(
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('完成'),
             ),
@@ -363,7 +364,7 @@ class _CryptoChartState extends State<CryptoChart> {
           children: [
             const Text(
               '副图',
-              style: TextStyle(fontSize: 10, color: Color(0xFFA9C5E2)),
+              style: TextStyle(fontSize: 10, color: Color(0xFFAEAEB2)),
             ),
             Text(
               _studyName(study.id),
@@ -925,7 +926,7 @@ class _CryptoChartState extends State<CryptoChart> {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2C4B69),
+                        color: const Color(0xFF3A3A3C),
                         borderRadius: BorderRadius.circular(3),
                       ),
                       child: const Text(
@@ -1040,8 +1041,8 @@ class _CryptoChartState extends State<CryptoChart> {
                     decoration: const BoxDecoration(
                       color: _cryptoPaneHeader,
                       border: Border(
-                        top: BorderSide(color: Color(0xFF49617B)),
-                        bottom: BorderSide(color: Color(0xFF2E4862)),
+                        top: BorderSide(color: Color(0xFF48484A)),
+                        bottom: BorderSide(color: Color(0xFF38383A)),
                       ),
                     ),
                     child: paneHeader(study),
@@ -1174,9 +1175,9 @@ class _CryptoChartState extends State<CryptoChart> {
             child: Container(
               height: math.max(22, textScale * 14 + 4),
               decoration: BoxDecoration(
-                color: active ? const Color(0xFF2C4C6A) : _cryptoResizeSurface,
+                color: active ? const Color(0xFF3A3A3C) : _cryptoResizeSurface,
                 border: const Border(
-                  bottom: BorderSide(color: Color(0xFF45637F)),
+                  bottom: BorderSide(color: Color(0xFF48484A)),
                 ),
               ),
               alignment: Alignment.center,
@@ -1187,12 +1188,12 @@ class _CryptoChartState extends State<CryptoChart> {
                 ),
                 height: math.max(18, textScale * 14),
                 decoration: BoxDecoration(
-                  color: active ? dashboardAccent : const Color(0xFF355777),
+                  color: active ? dashboardAccent : const Color(0xFF48484A),
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
                     color: active
                         ? const Color(0xFFB9D8FF)
-                        : const Color(0xFF7798B9),
+                        : const Color(0xFF98989D),
                   ),
                 ),
                 child: DefaultTextStyle(
