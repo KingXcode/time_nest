@@ -12,6 +12,7 @@ import '../platform/browser_client.dart';
 import 'clock_face.dart';
 import 'settings_panel.dart';
 import '../dashboard/dashboard_screen.dart';
+import '../toolbox/toolbox_screen.dart';
 
 class ClockScreen extends StatefulWidget {
   const ClockScreen({
@@ -193,6 +194,61 @@ class _ClockScreenState extends State<ClockScreen>
     if (mounted) _reveal();
   }
 
+  Future<void> _openToolbox() async {
+    _hideTimer?.cancel();
+    FocusScope.of(context).unfocus();
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const ToolboxScreen()));
+    if (mounted) _reveal();
+  }
+
+  bool get _compactToolbar =>
+      MediaQuery.sizeOf(context).width /
+          MediaQuery.textScalerOf(context).scale(1) <
+      500;
+
+  List<Widget> _toolbarControls() => [
+    if (!_introVisible || _panelOpen)
+      if (_compactToolbar)
+        IconButton(
+          tooltip: '开始展示',
+          onPressed: _startPresentation,
+          icon: const Icon(Icons.play_arrow_rounded),
+        )
+      else
+        TextButton(onPressed: _startPresentation, child: const Text('开始展示')),
+    PopupMenuButton<String>(
+      tooltip: '横竖屏切换',
+      icon: const Icon(Icons.screen_rotation_rounded, size: 22),
+      initialValue: _settings.value.orientation,
+      onSelected: (value) =>
+          _changeSettings(_settings.value.copyWith(orientation: value)),
+      itemBuilder: (_) => [
+        for (final entry in const {
+          'auto': '自动方向',
+          'landscape': '手动横屏',
+          'portrait': '手动竖屏',
+        }.entries)
+          CheckedPopupMenuItem(
+            value: entry.key,
+            checked: _settings.value.orientation == entry.key,
+            child: Text(entry.value),
+          ),
+      ],
+    ),
+    IconButton(
+      tooltip: '展示设置',
+      onPressed: _toggleSettings,
+      isSelected: _panelOpen,
+      selectedIcon: const Icon(
+        Icons.tune_rounded,
+        color: Colors.white,
+        size: 22,
+      ),
+      icon: const Icon(Icons.tune_rounded, size: 22),
+    ),
+  ];
+
   Widget _workspace(BoxConstraints box) {
     // OrientationFrame supplies the effective page orientation, including
     // manual rotation. Keep one Flex so rotating preserves the panel's scroll.
@@ -293,7 +349,7 @@ class _ClockScreenState extends State<ClockScreen>
             child: Stack(
               children: [
                 Positioned.fill(
-                  top: 52,
+                  top: _compactToolbar ? 112 : 52,
                   child: Column(
                     children: [
                       Expanded(
@@ -312,7 +368,7 @@ class _ClockScreenState extends State<ClockScreen>
                 Align(
                   alignment: Alignment.topCenter,
                   child: Padding(
-                    padding: const EdgeInsets.only(right: 48),
+                    padding: const EdgeInsets.only(right: 96),
                     child: ExcludeFocus(
                       excluding: !_toolbarVisible,
                       child: ExcludeSemantics(
@@ -327,145 +383,120 @@ class _ClockScreenState extends State<ClockScreen>
                             child: Focus(
                               focusNode: _toolbarFocus,
                               onFocusChange: (_) => _reveal(),
-                              child: Row(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  PopupMenuButton<String>(
-                                    tooltip: '切换模式',
-                                    initialValue: _timer.mode,
-                                    onSelected: (value) {
-                                      if (value == 'dashboard') {
-                                        _openDashboard();
-                                        return;
-                                      }
-                                      _timer.selectMode(value);
-                                      _clock.updateSettings(
-                                        value == 'clock'
-                                            ? _settings.value
-                                            : _settings.value.copyWith(
-                                                showSeconds: false,
-                                                showMilliseconds: false,
-                                              ),
-                                      );
-                                      _reveal();
-                                    },
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                        value: 'clock',
-                                        child: Text('时钟'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'countdown',
-                                        child: Text('倒计时'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'focus',
-                                        child: Text('番茄钟'),
-                                      ),
-                                      PopupMenuDivider(),
-                                      PopupMenuItem(
-                                        value: 'dashboard',
-                                        child: Text('每日看板'),
-                                      ),
-                                    ],
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 12,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                switch (_timer.mode) {
-                                                  'countdown' => '倒计时',
-                                                  'focus' => '番茄钟',
-                                                  _ => '此刻',
-                                                },
-                                                style: const TextStyle(
-                                                  fontSize: 16,
-                                                ),
-                                              ),
-                                              if (_timer.mode == 'clock')
-                                                const Text(
-                                                  '版本 $appVersion',
-                                                  key: Key('home-version'),
-                                                  style: TextStyle(
-                                                    fontSize: 9,
-                                                    height: 1.4,
-                                                    color: Color(0xFF8995A5),
-                                                    letterSpacing: 0.2,
+                                  Row(
+                                    children: [
+                                      PopupMenuButton<String>(
+                                        tooltip: '切换模式',
+                                        initialValue: _timer.mode,
+                                        onSelected: (value) {
+                                          if (value == 'dashboard') {
+                                            _openDashboard();
+                                            return;
+                                          }
+                                          if (value == 'toolbox') {
+                                            _openToolbox();
+                                            return;
+                                          }
+                                          if (value == 'presentation') {
+                                            _startPresentation();
+                                            return;
+                                          }
+                                          _timer.selectMode(value);
+                                          _clock.updateSettings(
+                                            value == 'clock'
+                                                ? _settings.value
+                                                : _settings.value.copyWith(
+                                                    showSeconds: false,
+                                                    showMilliseconds: false,
                                                   ),
-                                                ),
-                                            ],
+                                          );
+                                          _reveal();
+                                        },
+                                        itemBuilder: (_) => const [
+                                          PopupMenuItem(
+                                            value: 'clock',
+                                            child: Text('时钟'),
                                           ),
-                                          const Icon(
-                                            Icons.expand_more_rounded,
-                                            size: 20,
+                                          PopupMenuItem(
+                                            value: 'countdown',
+                                            child: Text('倒计时'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'focus',
+                                            child: Text('番茄钟'),
+                                          ),
+                                          PopupMenuDivider(),
+                                          PopupMenuItem(
+                                            value: 'toolbox',
+                                            child: Text('工具箱'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'presentation',
+                                            child: Text('开始展示'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'dashboard',
+                                            child: Text('每日看板'),
                                           ),
                                         ],
-                                      ),
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  if (!_introVisible || _panelOpen)
-                                    if (MediaQuery.sizeOf(context).width < 380)
-                                      IconButton(
-                                        tooltip: '开始展示',
-                                        onPressed: _startPresentation,
-                                        icon: const Icon(
-                                          Icons.play_arrow_rounded,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 12,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    switch (_timer.mode) {
+                                                      'countdown' => '倒计时',
+                                                      'focus' => '番茄钟',
+                                                      _ => '此刻',
+                                                    },
+                                                    style: const TextStyle(
+                                                      fontSize: 16,
+                                                    ),
+                                                  ),
+                                                  if (_timer.mode == 'clock')
+                                                    const Text(
+                                                      '版本 $appVersion',
+                                                      key: Key('home-version'),
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        height: 1.4,
+                                                        color: Color(
+                                                          0xFF8995A5,
+                                                        ),
+                                                        letterSpacing: 0.2,
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                              const Icon(
+                                                Icons.expand_more_rounded,
+                                                size: 20,
+                                              ),
+                                            ],
+                                          ),
                                         ),
-                                      )
-                                    else
-                                      TextButton(
-                                        onPressed: _startPresentation,
-                                        child: const Text('开始展示'),
                                       ),
-                                  PopupMenuButton<String>(
-                                    tooltip: '横竖屏切换',
-                                    icon: const Icon(
-                                      Icons.screen_rotation_rounded,
-                                      size: 22,
-                                    ),
-                                    initialValue: _settings.value.orientation,
-                                    onSelected: (value) => _changeSettings(
-                                      _settings.value.copyWith(
-                                        orientation: value,
-                                      ),
-                                    ),
-                                    itemBuilder: (_) => [
-                                      for (final entry in const {
-                                        'auto': '自动方向',
-                                        'landscape': '手动横屏',
-                                        'portrait': '手动竖屏',
-                                      }.entries)
-                                        CheckedPopupMenuItem(
-                                          value: entry.key,
-                                          checked:
-                                              _settings.value.orientation ==
-                                              entry.key,
-                                          child: Text(entry.value),
-                                        ),
+                                      const Spacer(),
+                                      if (!_compactToolbar)
+                                        ..._toolbarControls(),
                                     ],
                                   ),
-                                  IconButton(
-                                    tooltip: '展示设置',
-                                    onPressed: _toggleSettings,
-                                    isSelected: _panelOpen,
-                                    selectedIcon: const Icon(
-                                      Icons.tune_rounded,
-                                      color: Colors.white,
-                                      size: 22,
+                                  if (_compactToolbar)
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: _toolbarControls(),
                                     ),
-                                    icon: const Icon(
-                                      Icons.tune_rounded,
-                                      size: 22,
-                                    ),
-                                  ),
                                 ],
                               ),
                             ),
@@ -477,10 +508,21 @@ class _ClockScreenState extends State<ClockScreen>
                 ),
                 Align(
                   alignment: Alignment.topRight,
-                  child: IconButton(
-                    tooltip: '每日看板',
-                    onPressed: _openDashboard,
-                    icon: const Icon(Icons.dashboard_outlined, size: 22),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        key: const Key('home-toolbox'),
+                        tooltip: '工具箱',
+                        onPressed: _openToolbox,
+                        icon: const Icon(Icons.handyman_outlined, size: 22),
+                      ),
+                      IconButton(
+                        tooltip: '每日看板',
+                        onPressed: _openDashboard,
+                        icon: const Icon(Icons.dashboard_outlined, size: 22),
+                      ),
+                    ],
                   ),
                 ),
                 if (!_introVisible &&

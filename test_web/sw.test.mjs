@@ -119,7 +119,7 @@ test('generation is deterministic; content, resource names, and template change 
 });
 
 test('generated workers, Flutter default worker, sources/maps and hidden files are excluded', () => {
-  const extras = ['shike-sw.js', 'sw.template.js', 'flutter_service_worker.js', 'main.dart.js.map', '.DS_Store', 'assets/.hidden/key'];
+  const extras = ['shike-sw.js', 'sw.template.js', 'flutter_service_worker.js', 'network-probe.txt', 'main.dart.js.map', '.DS_Store', 'assets/.hidden/key'];
   for (const path of extras) assert.equal(includedPath(path), false);
   const first = renderServiceWorker(files(), template);
   const second = renderServiceWorker([...files(), ...extras.map((path) => ({ path, bytes: 'excluded' }))], template);
@@ -189,7 +189,7 @@ test('root deployment works without hardcoded subpath', async () => {
 test('cross-origin/out-of-scope/non-GET and worker probes are untouched; unknown URLs are not cached', async () => {
   const w = worker();
   await w.lifecycle('install');
-  for (const path of ['https://other.test/main.dart.js', '/main.dart.js', 'shike-sw.js', 'sw.template.js']) {
+  for (const path of ['https://other.test/main.dart.js', '/main.dart.js', 'shike-sw.js', 'sw.template.js', 'network-probe.txt?tn=fresh']) {
     assert.equal(await w.request(path), undefined);
   }
   assert.equal(await w.request('main.dart.js', { method: 'POST' }), undefined);

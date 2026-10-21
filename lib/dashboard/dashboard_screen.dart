@@ -7,6 +7,7 @@ import 'dashboard_widgets.dart';
 import 'crypto_panel.dart';
 import 'news_panel.dart';
 import 'weather_panel.dart';
+import '../toolbox/toolbox_screen.dart';
 
 const _titles = {'weather': '天气', 'news': '科技资讯', 'crypto': '数字货币行情'};
 const _subtitles = {
@@ -288,7 +289,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 6,
-                      children: [for (final id in modules) _entry(id)],
+                      children: [
+                        for (final id in modules) _entry(id),
+                        OutlinedButton.icon(
+                          key: const ValueKey('dashboard-entry-toolbox'),
+                          onPressed: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (_) => const ToolboxScreen(),
+                            ),
+                          ),
+                          icon: const Icon(Icons.handyman_outlined, size: 16),
+                          label: const Text('工具箱'),
+                        ),
+                      ],
                     ),
                     if (!_saved)
                       const Padding(
