@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'home_layout.dart';
+
 /// Immutable clock preferences, independent of Flutter and browser storage.
 ///
 /// The const constructor accepts trusted, typed values. Persisted values and
@@ -19,6 +21,7 @@ final class ClockSettings {
     this.showDate = true,
     this.tone = 'neutral',
     this.orientation = 'auto',
+    this.homeLayout,
   });
 
   final String hourCycle;
@@ -33,6 +36,7 @@ final class ClockSettings {
   final bool showDate;
   final String tone;
   final String orientation;
+  final HomeLayout? homeLayout;
 
   String get preset {
     if (showDate &&
@@ -133,8 +137,10 @@ final class ClockSettings {
     bool? showDate,
     String? tone,
     String? orientation,
+    HomeLayout? homeLayout,
   }) {
     return ClockSettings(
+      homeLayout: homeLayout ?? this.homeLayout,
       hourCycle: _readHourCycle(hourCycle ?? this.hourCycle),
       showSeconds: showSeconds ?? this.showSeconds,
       showMilliseconds: showMilliseconds ?? this.showMilliseconds,
@@ -176,6 +182,7 @@ final class ClockSettings {
       'showDate': showDate,
       'tone': tone,
       'orientation': orientation,
+      if (homeLayout != null) 'homeLayout': homeLayout!.toJson(),
     };
   }
 
@@ -193,6 +200,9 @@ final class ClockSettings {
         ? nightValue
         : const <String, Object?>{};
     return ClockSettings(
+      homeLayout: value['homeLayout'] == null
+          ? null
+          : HomeLayout.fromJson(value['homeLayout']),
       hourCycle: _readHourCycle(value['hourCycle']),
       showSeconds: _readBool(value['showSeconds'], true),
       showMilliseconds: _readBool(value['showMilliseconds'], true),
@@ -239,7 +249,8 @@ final class ClockSettings {
             keepAwake == other.keepAwake &&
             showDate == other.showDate &&
             tone == other.tone &&
-            orientation == other.orientation;
+            orientation == other.orientation &&
+            homeLayout == other.homeLayout;
   }
 
   @override
@@ -256,6 +267,7 @@ final class ClockSettings {
     showDate,
     tone,
     orientation,
+    homeLayout,
   );
 
   static String _choice(Object? value, List<String> values, String fallback) =>

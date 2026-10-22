@@ -14,16 +14,23 @@ import 'settings_panel.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../toolbox/toolbox_screen.dart';
 import 'apple_button.dart';
+import '../clock/home_layout.dart';
+import '../dashboard/dashboard_client.dart';
+import '../dashboard/dashboard_preferences.dart';
+import 'home_layout_canvas.dart';
+import 'home_layout_editor.dart';
 
 class ClockScreen extends StatefulWidget {
   const ClockScreen({
     super.key,
     this.browser,
     this.now,
+    this.dashboardClient,
     this.onOrientationChanged,
   });
   final ValueChanged<String>? onOrientationChanged;
   final BrowserClient? browser;
+  final DashboardClient? dashboardClient;
   final DateTime Function()? now;
 
   @override
@@ -33,6 +40,9 @@ class ClockScreen extends StatefulWidget {
 class _ClockScreenState extends State<ClockScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final BrowserClient _browser;
+  late final DashboardClient _dashboardClient;
+  late DashboardPreferences _homePreferences;
+  bool _routeOpen = false;
   late final ValueNotifier<ClockSettings> _settings;
   late final ClockController _clock;
   late final TimerController _timer;
@@ -61,6 +71,10 @@ class _ClockScreenState extends State<ClockScreen>
   void initState() {
     super.initState();
     _browser = widget.browser ?? createBrowserClient();
+    _dashboardClient = widget.dashboardClient ?? createDashboardClient();
+    _homePreferences = DashboardPreferences.decode(
+      _dashboardClient.readPreferences(),
+    );
     _settings = ValueNotifier(ClockSettings.decode(_browser.readSettings()));
     _introVisible = !_browser.readIntroSeen();
     _clock = ClockController(
@@ -105,6 +119,7 @@ class _ClockScreenState extends State<ClockScreen>
       resample: _lifecycleVisible,
     );
     _timer.setVisible(_lifecycleVisible && _browser.state.visible);
+    if (mounted) setState(() {});
   }
 
   void _browserChanged() {
@@ -122,21 +137,22 @@ class _ClockScreenState extends State<ClockScreen>
     setState(() {});
   }
 
-  void _changeSettings(ClockSettings value) {
+  bool _changeSettings(ClockSettings value) {
     final wasAwake = _settings.value.keepAwake;
-    if (_settings.value == value) return;
+    if (_settings.value == value) return _browser.writeSettings(value.encode());
     _settings.value = value;
     _clock.updateSettings(
       _timer.mode == 'clock'
           ? value
           : value.copyWith(showSeconds: false, showMilliseconds: false),
     );
-    _browser.writeSettings(value.encode());
+    final saved = _browser.writeSettings(value.encode());
     widget.onOrientationChanged?.call(value.orientation);
     if (wasAwake != value.keepAwake) {
       _browser.setKeepAwake(value.keepAwake);
     }
     setState(() {});
+    return saved;
   }
 
   void _reveal() {
@@ -186,21 +202,83 @@ class _ClockScreenState extends State<ClockScreen>
     _reveal();
   }
 
+  Future<void> _openLayout() async {
+    _hideTimer?.cancel();
+    FocusScope.of(context).unfocus();
+    setState(() => _routeOpen = true);
+    final result = await Navigator.of(context).push<HomeLayoutEditResult>(
+      MaterialPageRoute(
+        builder: (_) => HomeLayoutEditor(
+          layout: _settings.value.homeLayout ?? HomeLayout(),
+          clock: _clock,
+          settings: _settings.value,
+          client: _dashboardClient,
+          preferences: _homePreferences,
+          desktop: usesDesktopHomeLayout(context),
+          landscape: MediaQuery.orientationOf(context) == Orientation.landscape,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (result != null) {
+      _homePreferences = result.preferences;
+      final latest = DashboardPreferences.decode(
+        _dashboardClient.readPreferences(),
+      );
+      latest.city = result.preferences.city;
+      latest.cryptoSymbol = result.preferences.cryptoSymbol;
+      latest.cryptoInterval = result.preferences.cryptoInterval;
+      final saved = _dashboardClient.writePreferences(latest.encode());
+      final layoutSaved = _changeSettings(
+        _settings.value.copyWith(homeLayout: result.layout),
+      );
+      if (!saved || !layoutSaved) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              !layoutSaved
+                  ? '布局无法保存，当前会话仍可使用，刷新后可能丢失。'
+                  : '行情与天气设置无法保存，当前会话仍可使用。',
+            ),
+          ),
+        );
+      }
+    }
+    setState(() => _routeOpen = false);
+    _reveal();
+  }
+
   Future<void> _openDashboard() async {
     _hideTimer?.cancel();
     FocusScope.of(context).unfocus();
+    setState(() => _routeOpen = true);
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => DashboardScreen(now: widget.now)),
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            DashboardScreen(client: _dashboardClient, now: widget.now),
+      ),
     );
-    if (mounted) _reveal();
+    if (mounted) {
+      setState(() {
+        _routeOpen = false;
+        _homePreferences = DashboardPreferences.decode(
+          _dashboardClient.readPreferences(),
+        );
+      });
+      _reveal();
+    }
   }
 
   Future<void> _openToolbox() async {
     _hideTimer?.cancel();
     FocusScope.of(context).unfocus();
+    setState(() => _routeOpen = true);
     await Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const ToolboxScreen()));
-    if (mounted) _reveal();
+    if (mounted) {
+      setState(() => _routeOpen = false);
+      _reveal();
+    }
   }
 
   bool get _compactToolbar =>
@@ -270,7 +348,28 @@ class _ClockScreenState extends State<ClockScreen>
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: _timer.mode == 'clock'
-                      ? ClockFace(clock: _clock, settings: _settings.value)
+                      ? (_settings.value.homeLayout?.enabled == true
+                            ? LayoutBuilder(
+                                builder: (context, canvas) => HomeLayoutCanvas(
+                                  layout: _settings.value.homeLayout!,
+                                  landscape:
+                                      usesDesktopHomeLayout(context) ||
+                                      MediaQuery.orientationOf(context) ==
+                                          Orientation.landscape,
+                                  clock: _clock,
+                                  settings: _settings.value,
+                                  client: _dashboardClient,
+                                  preferences: _homePreferences,
+                                  active:
+                                      !_routeOpen &&
+                                      _lifecycleVisible &&
+                                      _browser.state.visible,
+                                ),
+                              )
+                            : ClockFace(
+                                clock: _clock,
+                                settings: _settings.value,
+                              ))
                       : TimerFace(
                           timer: _timer,
                           settings: _settings.value,
@@ -304,6 +403,7 @@ class _ClockScreenState extends State<ClockScreen>
                 onChanged: _changeSettings,
                 browser: _browser,
                 onClose: _closeSettings,
+                onEditLayout: _openLayout,
               ),
             ),
           ),
@@ -400,6 +500,10 @@ class _ClockScreenState extends State<ClockScreen>
                                         tooltip: '切换模式',
                                         initialValue: _timer.mode,
                                         onSelected: (value) {
+                                          if (value == 'layout') {
+                                            _openLayout();
+                                            return;
+                                          }
                                           if (value == 'dashboard') {
                                             _openDashboard();
                                             return;
@@ -437,6 +541,10 @@ class _ClockScreenState extends State<ClockScreen>
                                             child: Text('番茄钟'),
                                           ),
                                           PopupMenuDivider(),
+                                          PopupMenuItem(
+                                            value: 'layout',
+                                            child: Text('首页布局'),
+                                          ),
                                           PopupMenuItem(
                                             value: 'toolbox',
                                             child: Text('工具箱'),

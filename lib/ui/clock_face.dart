@@ -10,10 +10,16 @@ const clockBackground = Color(0xFF08090B);
 const clockForeground = Color(0xFFE8E9EB);
 
 class ClockFace extends StatelessWidget {
-  const ClockFace({super.key, required this.clock, required this.settings});
+  const ClockFace({
+    super.key,
+    required this.clock,
+    required this.settings,
+    this.maxTimeHeight = 240,
+  });
 
   final ClockController clock;
   final ClockSettings settings;
+  final double maxTimeHeight;
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<String>(
@@ -72,7 +78,7 @@ class ClockFace extends StatelessWidget {
                       height: math.max(
                         1,
                         math.min(
-                          240,
+                          maxTimeHeight,
                           constraints.maxHeight -
                               (settings.showDate ? (compact ? 32 : 56) : 0),
                         ),

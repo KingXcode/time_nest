@@ -60,6 +60,7 @@ class CryptoChart extends StatefulWidget {
     this.interval,
     this.quote,
     this.onIntervalChanged,
+    this.compact = false,
   });
   final List<CryptoCandle> candles;
   final String asset, quoteAsset;
@@ -80,6 +81,11 @@ class CryptoChart extends StatefulWidget {
   final String? interval;
   final CryptoQuote? quote;
   final ValueChanged<String>? onIntervalChanged;
+
+  /// Read-only home snapshot using the same price scale and candle painter.
+  /// Omits controls, gestures, indicators, and advice without changing the
+  /// interactive dashboard layout.
+  final bool compact;
 
   @override
   State<CryptoChart> createState() => _CryptoChartState();
@@ -304,10 +310,12 @@ class _CryptoChartState extends State<CryptoChart> {
   Widget build(BuildContext context) {
     final all = widget.candles;
     if (all.isEmpty) return const Text('币安暂未返回该周期的 K 线。');
-    final offset = _startIndex;
+    final offset = widget.compact ? math.max(0, all.length - 64) : _startIndex;
     final rows = all.sublist(
       offset,
-      math.min(all.length, offset + _visibleCount),
+      widget.compact
+          ? all.length
+          : math.min(all.length, offset + _visibleCount),
     );
     var index = _selectedTime == null
         ? rows.length - 1
@@ -316,10 +324,13 @@ class _CryptoChartState extends State<CryptoChart> {
     final selected = rows[index], absolute = index + offset;
     final forming =
         selected.closeTime >= widget.fetchedAt.millisecondsSinceEpoch;
-    final overlays = [for (final id in widget.overlays) ?_studies[id]];
+    final overlays = [
+      if (!widget.compact)
+        for (final id in widget.overlays) ?_studies[id],
+    ];
     final scales = <String, _ChartScale>{
       'price': _ChartScale(rows, offset, overlays, price: true),
-      for (final id in widget.panes)
+      for (final id in widget.compact ? <String>[] : widget.panes)
         if (_studies[id] case final study?)
           id: _ChartScale(rows, offset, [study], price: false),
     };
@@ -328,6 +339,53 @@ class _CryptoChartState extends State<CryptoChart> {
         .map((scale) => scale.axisWidth)
         .reduce(math.max);
     final priceScale = scales['price']!;
+    if (widget.compact) {
+      final latest = rows.last;
+      return Semantics(
+        label:
+            '${widget.asset} K 线只读快照，最近 ${rows.length} 根，'
+            '最新收盘价 ${cryptoPrice(latest.close)} ${widget.quoteAsset}，'
+            '绿色上涨、红色下跌',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '${cryptoPrice(latest.close)} ${widget.quoteAsset}'
+              '${latest.closeTime >= widget.fetchedAt.millisecondsSinceEpoch ? ' · 形成中' : ''}',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w600,
+                color: latest.close >= latest.open ? cryptoUp : cryptoDown,
+              ),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              key: const Key('crypto-compact-price-plot'),
+              height: 180,
+              child: CustomPaint(
+                painter: _MarketPainter(
+                  rows,
+                  rows.length - 1,
+                  offset,
+                  const [],
+                  price: true,
+                  crosshair: false,
+                  pointerY: 0,
+                  axisWidth: axisWidth,
+                  scale: priceScale,
+                  horizontalCrosshair: false,
+                ),
+              ),
+            ),
+            SizedBox(
+              height: 22,
+              child: CustomPaint(painter: _TimeAxisPainter(rows, axisWidth)),
+            ),
+          ],
+        ),
+      );
+    }
     final cursorValue =
         priceScale.high -
         ((_pointerY * cryptoPriceHeight - 10) / (cryptoPriceHeight - 20)).clamp(

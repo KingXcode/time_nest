@@ -14,12 +14,14 @@ class SettingsPanel extends StatelessWidget {
     required this.onChanged,
     required this.browser,
     required this.onClose,
+    this.onEditLayout,
   });
 
   final ValueNotifier<ClockSettings> settings;
   final ValueChanged<ClockSettings> onChanged;
   final BrowserClient browser;
   final VoidCallback onClose;
+  final VoidCallback? onEditLayout;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -62,6 +64,13 @@ class SettingsPanel extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    if (onEditLayout != null) ...[
+                      AppleButton.bordered(
+                        onPressed: onEditLayout,
+                        child: const Text('首页布局 · 拖拽与缩放'),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     const _Section('展示预设'),
                     Wrap(
                       spacing: 8,
