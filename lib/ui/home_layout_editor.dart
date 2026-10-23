@@ -287,6 +287,7 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
                             },
                             onScaleEnd: (_) => _gestureStart = null,
                             child: DecoratedBox(
+                              position: DecorationPosition.foreground,
                               decoration: BoxDecoration(
                                 border: Border.all(
                                   color: _selected == entry.key

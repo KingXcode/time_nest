@@ -335,18 +335,24 @@ class _HomeDataCardState extends State<_HomeDataCard>
         ? (_error ?? (_running ? '正在加载…' : '已暂停更新'))
         : '${stale ? '旧数据 · ' : ''}${!_running ? '已暂停 · ' : ''}${widget.module == 'cryptoCandles' ? '币安快照 · ' : ''}'
               '${fetched!.month}/${fetched.day} ${two(fetched.hour)}:${two(fetched.minute)} 更新';
-    return ClipRect(
-      child: FittedBox(
-        fit: BoxFit.contain,
-        alignment: Alignment.center,
-        child: SizedBox(
-          width: widget.width,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xCC242426),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white12),
-            ),
+    // The painted card is the layout/hit-test rectangle. Only its content is
+    // fitted: fitting the decoration too creates invisible letterboxed margins
+    // that prevent the visible card from reaching the canvas edges.
+    return DecoratedBox(
+      key: ValueKey('home-card-${widget.module}'),
+      decoration: BoxDecoration(
+        color: const Color(0xCC242426),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: ClipRect(
+        child: FittedBox(
+          fit: BoxFit.contain,
+          alignment: widget.module == 'weather'
+              ? Alignment.centerLeft
+              : Alignment.center,
+          child: SizedBox(
+            width: widget.width,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: DefaultTextStyle.merge(

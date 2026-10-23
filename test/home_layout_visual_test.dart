@@ -150,6 +150,10 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      if (item.$2) {
+        await tester.tap(find.byKey(const ValueKey('select-weather')));
+        await tester.pump();
+      }
       expect(tester.takeException(), isNull);
       if (Platform.environment['HOME_LAYOUT_SCREENSHOTS'] == '1') {
         await tester.runAsync(() async {
