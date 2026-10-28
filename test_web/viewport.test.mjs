@@ -151,8 +151,8 @@ test('standalone uses the full CSS viewport and removes safe areas only once', (
   b.viewport.offsetTop = 0;
   b.viewport.emit('resize'); b.frame();
   assert.equal(b.get('top'), '47px');
-  assert.equal(b.get('height'), '763px');
-  assert.equal(Number.parseFloat(b.get('top')) + Number.parseFloat(b.get('height')), 810);
+  assert.equal(b.get('height'), '797px');
+  assert.equal(Number.parseFloat(b.get('top')) + Number.parseFloat(b.get('height')), 844);
   assert.equal(b.get('width'), '390px');
 });
 
@@ -162,7 +162,7 @@ test('late safe-area changes resize the host without a window resize', () => {
   Object.assign(b.insets, { top: 47, bottom: 34 });
   b.resizeProbe(); b.frame();
   assert.equal(b.get('top'), '47px');
-  assert.equal(b.get('height'), '763px');
+  assert.equal(b.get('height'), '797px');
   const writes = b.writes();
   b.resizeProbe(); b.frame();
   assert.equal(b.writes(), writes, 'independent probe observation must not create a resize loop');
@@ -182,7 +182,7 @@ test('standalone keyboard intersects safe bounds, then restores with the same fo
   b.viewport.offsetTop = 0; b.viewport.height = 763;
   b.viewport.emit('resize'); b.frame();
   assert.equal(b.get('top'), '47px');
-  assert.equal(b.get('height'), '763px', 'keyboard dismissal need not blur the field');
+  assert.equal(b.get('height'), '797px', 'keyboard dismissal need not blur the field');
 });
 
 test('hardware keyboards, readonly inputs and non-editable focus do not shorten standalone', () => {
@@ -190,7 +190,7 @@ test('hardware keyboards, readonly inputs and non-editable focus do not shorten 
   b.viewport.height = 763; b.viewport.offsetTop = 0;
   b.document.activeElement = { tagName: 'TEXTAREA' };
   b.document.emit('focusin'); b.frame();
-  assert.equal(b.get('height'), '763px');
+  assert.equal(b.get('height'), '797px');
   b.viewport.height = 510;
   for (const element of [
     { tagName: 'INPUT', type: 'checkbox' },
@@ -199,7 +199,7 @@ test('hardware keyboards, readonly inputs and non-editable focus do not shorten 
     { tagName: 'BUTTON' },
   ]) {
     b.document.activeElement = element; b.document.emit('focusin'); b.frame();
-    assert.equal(b.get('height'), '763px');
+    assert.equal(b.get('height'), '797px');
   }
 });
 
@@ -210,12 +210,12 @@ test('rapid blur and refocus cannot cache a shrunken standalone viewport', () =>
   b.document.emit('focusin'); b.frame();
   assert.equal(b.get('height'), '463px');
   b.document.activeElement = null; b.document.emit('focusout'); b.frame();
-  assert.equal(b.get('height'), '763px');
+  assert.equal(b.get('height'), '797px');
   b.document.activeElement = { isContentEditable: true };
   b.document.emit('focusin'); b.frame();
   assert.equal(b.get('height'), '463px');
   b.viewport.height = 763; b.viewport.emit('resize'); b.frame();
-  assert.equal(b.get('height'), '763px');
+  assert.equal(b.get('height'), '797px');
 });
 
 test('standalone rotates into landscape side safe areas and survives repeated resume', () => {
@@ -227,14 +227,14 @@ test('standalone rotates into landscape side safe areas and survives repeated re
   assert.equal(b.get('left'), '47px');
   assert.equal(b.get('top'), '0px');
   assert.equal(b.get('width'), '750px');
-  assert.equal(b.get('height'), '369px');
+  assert.equal(b.get('height'), '390px');
   b.document.activeElement = { tagName: 'INPUT', type: 'text' };
   b.viewport.height = 210; b.viewport.emit('resize'); b.frame();
   assert.equal(b.get('left'), '47px');
   assert.equal(b.get('width'), '750px', 'a vertical keyboard must not double-subtract side insets');
   assert.equal(b.get('height'), '210px');
   b.viewport.height = 369; b.viewport.emit('resize'); b.frame();
-  assert.equal(b.get('height'), '369px');
+  assert.equal(b.get('height'), '390px');
   b.document.activeElement = null;
   for (let n = 0; n < 3; n++) {
     b.document.visibilityState = 'hidden'; b.document.emit('visibilitychange');
@@ -242,7 +242,7 @@ test('standalone rotates into landscape side safe areas and survives repeated re
     assert.equal(b.frames.size + b.timers.size, 0);
     b.document.visibilityState = 'visible'; b.events.emit('pageshow'); b.frame();
     b.timer(100); b.frame(); b.timer(500); b.frame();
-    assert.equal(b.get('height'), '369px');
+    assert.equal(b.get('height'), '390px');
     assert.equal(b.frames.size + b.timers.size, 0);
   }
 });
@@ -264,14 +264,14 @@ test('standalone keeps its layout through pinch zoom, and display-mode changes r
   const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
   b.viewport.scale = 2; b.viewport.height = 381.5; b.viewport.width = 195;
   b.viewport.emit('resize'); b.frame();
-  assert.equal(b.get('height'), '763px');
+  assert.equal(b.get('height'), '797px');
   b.viewport.scale = 1; b.viewport.height = 740; b.viewport.width = 390;
   b.viewport.offsetTop = 24;
   b.displayMode.matches = false; b.displayMode.emit('change'); b.frame();
-  assert.equal(b.get('height'), '659px', 'regular tab keeps the original visible viewport policy');
+  assert.equal(b.get('height'), '693px', 'regular tab keeps visible top/side bounds but extends through bottom inset');
   assert.equal(b.get('top'), '71px');
   b.displayMode.matches = true; b.displayMode.emit('change'); b.frame();
-  assert.equal(b.get('height'), '763px');
+  assert.equal(b.get('height'), '797px');
   assert.equal(b.get('top'), '47px');
 });
 
@@ -284,4 +284,60 @@ test('viewport synchronization is loaded before the engine and safe insets remai
   assert.match(html, /height: var\(--app-viewport-height, calc\(100vh/);
   assert.doesNotMatch(html, /calc\(var\(--app-viewport-(height|width|top|left)/,
     'final JS bounds must not receive the safe-area insets twice');
+});
+
+test('edge-to-edge host publishes bottom control inset without adding a permanent gutter', () => {
+  const b = browser({ installed: true, insets: { top: 47, bottom: 34 } });
+  assert.equal(b.get('height'), '797px');
+  assert.equal(b.context.shikeViewport.getBottomInset(), 34);
+  let changes = 0;
+  const listener = () => changes++;
+  b.context.shikeViewport.subscribe(listener);
+  b.context.shikeViewport.subscribe(listener);
+  b.viewport.height = 510; b.viewport.offsetTop = 0;
+  b.document.activeElement = { tagName: 'INPUT', type: 'search' };
+  b.document.emit('focusin'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 0);
+  assert.equal(changes, 1);
+  b.viewport.height = 763; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 34);
+  assert.equal(b.get('height'), '797px');
+  assert.equal(changes, 2);
+  b.context.shikeViewport.unsubscribe(listener);
+  b.document.activeElement = null;
+  b.insets.bottom = 21; b.resizeProbe(); b.frame();
+  assert.equal(changes, 2);
+  assert.equal(b.context.shikeViewport.getBottomInset(), 21);
+});
+
+test('host CSS does not reserve bottom space before the viewport script runs', async () => {
+  const html = await readFile(new URL('../web/index.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /height:[^;]*- env\(safe-area-inset-bottom/);
+});
+
+test('regular-tab hardware keyboard focus keeps bottom inset despite browser chrome', () => {
+  const b = browser({ insets: { top: 47, bottom: 34 } });
+  assert.equal(b.viewport.height, 740);
+  assert.equal(b.layout.height, 844);
+  assert.equal(b.context.shikeViewport.getBottomInset(), 34);
+  b.document.activeElement = { tagName: 'INPUT', type: 'text' };
+  b.document.emit('focusin'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 34);
+  b.viewport.height = 450; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 0);
+  b.viewport.height = 740; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 34);
+});
+
+test('regular-tab width rotation resets the focused baseline instead of inferring a keyboard', () => {
+  const b = browser({ insets: { top: 47, bottom: 34 } });
+  b.document.activeElement = { tagName: 'TEXTAREA' };
+  Object.assign(b.viewport, { width: 844, height: 390, offsetTop: 0 });
+  Object.assign(b.insets, { top: 0, bottom: 21 });
+  b.events.emit('orientationchange'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 21);
+  b.viewport.height = 210; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 0);
+  b.viewport.height = 390; b.viewport.emit('resize'); b.frame();
+  assert.equal(b.context.shikeViewport.getBottomInset(), 21);
 });

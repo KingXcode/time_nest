@@ -70,7 +70,7 @@ class _WebNetworkClient implements NetworkToolsClient {
                 controller.add({
                   'kind': kind,
                   'status': 'error',
-                  'message': '网络工具返回格式异常，请重新打开工具箱。',
+                  'message': '网络工具返回格式异常，请重新打开网络测速。',
                   'result': <String, dynamic>{},
                 });
                 controller.close();

@@ -250,12 +250,18 @@ class _ToolboxScreenState extends State<ToolboxScreen>
     data: dashboardTheme(Theme.of(context)),
     child: Builder(
       builder: (context) => Scaffold(
-        appBar: AppBar(title: const Text('工具箱')),
+        appBar: AppBar(title: const Text('网络测速')),
         body: SafeArea(
           top: false,
+          bottom: false,
           child: SingleChildScrollView(
             key: const ValueKey('toolbox-scroll'),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              16,
+              16,
+              32 + MediaQuery.paddingOf(context).bottom,
+            ),
             child: Align(
               alignment: Alignment.topCenter,
               child: ConstrainedBox(

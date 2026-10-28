@@ -43,13 +43,29 @@ class HomeLayoutCanvas extends StatelessWidget {
               top: box.maxHeight * entry.value.y,
               width: box.maxWidth * entry.value.width,
               height: box.maxHeight * entry.value.height,
-              child: HomeModuleContent(
-                id: entry.key,
-                clock: clock,
-                settings: settings,
-                client: client,
-                preferences: preferences,
-                active: active,
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  padding: MediaQuery.paddingOf(context).copyWith(
+                    // Only a module touching the physical bottom needs content
+                    // protection; its decorated rectangle still reaches the edge.
+                    bottom:
+                        (MediaQuery.viewPaddingOf(context).bottom -
+                                box.maxHeight *
+                                    (1 - entry.value.y - entry.value.height))
+                            .clamp(
+                              0.0,
+                              MediaQuery.viewPaddingOf(context).bottom,
+                            ),
+                  ),
+                ),
+                child: HomeModuleContent(
+                  id: entry.key,
+                  clock: clock,
+                  settings: settings,
+                  client: client,
+                  preferences: preferences,
+                  active: active,
+                ),
               ),
             ),
       ],
@@ -74,45 +90,52 @@ class HomeModuleContent extends StatelessWidget {
   final DashboardPreferences preferences;
   final bool active;
   @override
-  Widget build(BuildContext context) => switch (id) {
-    'time' => ClockFace(
-      clock: clock,
-      settings: settings.copyWith(showDate: false),
-      maxTimeHeight: double.infinity,
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(
+      bottom: const ['time', 'date'].contains(id)
+          ? MediaQuery.paddingOf(context).bottom
+          : 0,
     ),
-    'date' => ValueListenableBuilder<double>(
-      valueListenable: clock.intensity,
-      builder: (context, intensity, _) => FittedBox(
-        fit: BoxFit.contain,
-        child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: ValueListenableBuilder<String>(
-            valueListenable: clock.date,
-            builder: (_, date, _) => Text(
-              date,
-              style: TextStyle(
-                fontSize: 24,
-                color: Color.lerp(
-                  clockBackground,
-                  const Color(0xFF989DA5),
-                  intensity,
+    child: switch (id) {
+      'time' => ClockFace(
+        clock: clock,
+        settings: settings.copyWith(showDate: false),
+        maxTimeHeight: double.infinity,
+      ),
+      'date' => ValueListenableBuilder<double>(
+        valueListenable: clock.intensity,
+        builder: (context, intensity, _) => FittedBox(
+          fit: BoxFit.contain,
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: ValueListenableBuilder<String>(
+              valueListenable: clock.date,
+              builder: (_, date, _) => Text(
+                date,
+                style: TextStyle(
+                  fontSize: 24,
+                  color: Color.lerp(
+                    clockBackground,
+                    const Color(0xFF989DA5),
+                    intensity,
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ),
-    ),
-    'weather' => HomeWeatherModule(
-      client: client,
-      city: preferences.city,
-      active: active,
-    ),
-    _ => HomeCryptoModule(
-      client: client,
-      symbol: preferences.cryptoSymbol,
-      interval: preferences.cryptoInterval,
-      active: active,
-    ),
-  };
+      'weather' => HomeWeatherModule(
+        client: client,
+        city: preferences.city,
+        active: active,
+      ),
+      _ => HomeCryptoModule(
+        client: client,
+        symbol: preferences.cryptoSymbol,
+        interval: preferences.cryptoInterval,
+        active: active,
+      ),
+    },
+  );
 }

@@ -176,12 +176,13 @@ try {
     Object.defineProperty(window, 'visualViewport', { value: window.testViewport });
   ` });
   await installed.navigate(origin + '/'); await ready(installed);
-  async function viewportBounds(expected, label) {
+  async function viewportBounds(expected, label, bottomInset) {
     await waitFor(() => installed.evaluate(`(() => {
       const host = document.getElementById('app').getBoundingClientRect();
       const view = document.querySelector('flutter-view').getBoundingClientRect();
       const expected = ${JSON.stringify(expected)};
-      return ['x', 'y', 'width', 'height'].every(key =>
+      return window.shikeViewport?.getBottomInset() === ${bottomInset}
+        && ['x', 'y', 'width', 'height'].every(key =>
         Math.abs(host[key] - expected[key]) < 1 && Math.abs(view[key] - host[key]) < 1);
     })()`), label);
   }
@@ -189,7 +190,7 @@ try {
     document.getElementById('viewport-probe').style.padding = '47px 0px 34px';
     window.dispatchEvent(new Event('resize'));
   `);
-  await viewportBounds({ x: 0, y: 47, width: 390, height: 763 }, 'standalone safe host and Flutter canvas');
+  await viewportBounds({ x: 0, y: 47, width: 390, height: 797 }, 'standalone edge-to-edge host and Flutter canvas', 34);
   await installed.screenshot('viewport-standalone-portrait.png');
   await installed.evaluate(`
     window.testField = document.createElement('input');
@@ -198,12 +199,12 @@ try {
     Object.assign(testViewport, { height: 450, offsetTop: 60 });
     testViewport.dispatchEvent(new Event('resize'));
   `);
-  await viewportBounds({ x: 0, y: 60, width: 390, height: 450 }, 'simulated keyboard and panned viewport');
+  await viewportBounds({ x: 0, y: 60, width: 390, height: 450 }, 'simulated keyboard and panned viewport', 0);
   await installed.evaluate(`
     Object.assign(testViewport, { height: 763, offsetTop: 0 });
     testViewport.dispatchEvent(new Event('resize'));
   `);
-  await viewportBounds({ x: 0, y: 47, width: 390, height: 763 }, 'keyboard dismissal without blur');
+  await viewportBounds({ x: 0, y: 47, width: 390, height: 797 }, 'keyboard dismissal without blur', 34);
   assert.equal(await installed.evaluate('document.activeElement === testField'), true);
   await installed.evaluate('testField.remove()');
   await installed.send('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
@@ -212,13 +213,13 @@ try {
     Object.assign(testViewport, { width: 750, height: 369, offsetTop: 0 });
     window.dispatchEvent(new Event('orientationchange'));
   `);
-  await viewportBounds({ x: 47, y: 0, width: 750, height: 369 }, 'standalone landscape side safe areas');
+  await viewportBounds({ x: 47, y: 0, width: 750, height: 390 }, 'standalone landscape side safe areas', 21);
   for (let n = 0; n < 3; n++) {
     await installed.evaluate(`
       window.dispatchEvent(new Event('pagehide'));
       window.dispatchEvent(new Event('pageshow'));
     `);
-    await viewportBounds({ x: 47, y: 0, width: 750, height: 369 }, 'standalone repeated resume');
+    await viewportBounds({ x: 47, y: 0, width: 750, height: 390 }, 'standalone repeated resume', 21);
   }
   await installed.screenshot('viewport-standalone-landscape.png');
   passed('simulated standalone safe areas, keyboard dismissal, rotation and resume keep Flutter inside the host');

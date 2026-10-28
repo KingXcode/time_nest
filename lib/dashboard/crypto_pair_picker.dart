@@ -154,6 +154,7 @@ class _CryptoPairPickerState extends State<_CryptoPairPicker> {
         width: mobile ? double.infinity : 900,
         height: mobile ? double.infinity : 760,
         child: SafeArea(
+          bottom: false,
           child: LayoutBuilder(
             builder: (context, box) => box.maxHeight < 240
                 ? _list(headerInList: true)
@@ -343,7 +344,12 @@ class _CryptoPairPickerState extends State<_CryptoPairPicker> {
           SliverFillRemaining(
             hasScrollBody: false,
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                24 + MediaQuery.paddingOf(context).bottom,
+              ),
               child: _loading
                   ? const Center(child: Text('正在加载交易对…'))
                   : _empty(
@@ -358,7 +364,12 @@ class _CryptoPairPickerState extends State<_CryptoPairPicker> {
           SliverFillRemaining(
             hasScrollBody: false,
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                24 + MediaQuery.paddingOf(context).bottom,
+              ),
               child: _empty(
                 Icons.search_off_rounded,
                 query.isEmpty ? '暂无可用交易对' : '没有匹配的结果',
@@ -369,7 +380,12 @@ class _CryptoPairPickerState extends State<_CryptoPairPicker> {
           )
         else
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+            padding: EdgeInsets.fromLTRB(
+              12,
+              0,
+              12,
+              20 + MediaQuery.paddingOf(context).bottom,
+            ),
             sliver: SliverList.builder(
               itemCount: itemCount,
               itemBuilder: (context, index) => _showQuotes

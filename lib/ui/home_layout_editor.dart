@@ -113,10 +113,16 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
       context: context,
       isScrollControlled: true,
       builder: (context) => SafeArea(
+        bottom: false,
         child: SizedBox(
           height: MediaQuery.sizeOf(context).height * .75,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              20 + MediaQuery.paddingOf(context).bottom,
+            ),
             child: WeatherPanel(
               client: widget.client,
               city: _prefs.city,
@@ -151,7 +157,12 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
   }
 
   Widget _controls() => SingleChildScrollView(
-    padding: const EdgeInsets.all(12),
+    padding: EdgeInsets.fromLTRB(
+      12,
+      12,
+      12,
+      12 + MediaQuery.paddingOf(context).bottom,
+    ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -357,13 +368,17 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
                                 borderRadius: BorderRadius.circular(5),
                               ),
                               child: IgnorePointer(
-                                child: HomeModuleContent(
-                                  id: entry.key,
-                                  clock: widget.clock,
-                                  settings: widget.settings,
-                                  client: widget.client,
-                                  preferences: _prefs,
-                                  active: true,
+                                child: MediaQuery.removePadding(
+                                  context: context,
+                                  removeBottom: true,
+                                  child: HomeModuleContent(
+                                    id: entry.key,
+                                    clock: widget.clock,
+                                    settings: widget.settings,
+                                    client: widget.client,
+                                    preferences: _prefs,
+                                    active: true,
+                                  ),
                                 ),
                               ),
                             ),
@@ -408,6 +423,7 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
       ],
     ),
     body: SafeArea(
+      bottom: false,
       child: Focus(
         autofocus: true,
         onKeyEvent: (_, event) {

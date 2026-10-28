@@ -90,6 +90,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => SafeArea(
+          bottom: false,
           child: SizedBox(
             height: MediaQuery.sizeOf(context).height * .7,
             child: Column(
@@ -117,6 +118,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 Expanded(
                   child: ReorderableListView.builder(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.paddingOf(context).bottom,
+                    ),
                     itemCount: order.length,
                     buildDefaultDragHandles: false,
                     onReorderItem: (oldIndex, newIndex) => update(() {
@@ -244,9 +248,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         body: SafeArea(
+          bottom: false,
           child: SingleChildScrollView(
             key: const PageStorageKey('dashboard-scroll'),
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
+            padding: EdgeInsets.fromLTRB(
+              12,
+              4,
+              12,
+              20 + MediaQuery.paddingOf(context).bottom,
+            ),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1440),
@@ -300,7 +310,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ),
                           icon: const Icon(Icons.handyman_outlined, size: 16),
-                          label: const Text('工具箱'),
+                          label: const Text('网络测速'),
                         ),
                       ],
                     ),
@@ -428,9 +438,15 @@ class _DashboardModuleScreenState extends State<_DashboardModuleScreen> {
         leading: const BackButton(),
       ),
       body: SafeArea(
+        bottom: false,
         child: SingleChildScrollView(
           key: PageStorageKey('dashboard-${widget.id}-scroll'),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
+          padding: EdgeInsets.fromLTRB(
+            12,
+            8,
+            12,
+            20 + MediaQuery.paddingOf(context).bottom,
+          ),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1440),

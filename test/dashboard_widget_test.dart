@@ -174,6 +174,56 @@ Future<void> openModule(WidgetTester tester, String id) async {
 }
 
 void main() {
+  testWidgets(
+    'dashboard routes scroll to device bottom with protected last row',
+    (tester) async {
+      setSize(tester, const Size(393, 852));
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 34);
+      tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 34);
+      addTearDown(tester.view.resetPadding);
+      addTearDown(tester.view.resetViewPadding);
+      await tester.pumpWidget(
+        app(
+          DashboardScreen(client: FixtureDashboardClient(), now: () => testNow),
+        ),
+      );
+      await tester.pumpAndSettle();
+      void checkScroll(String key) {
+        final finder = find.byKey(PageStorageKey(key));
+        final rect = tester.getRect(finder);
+        final box = tester.renderObject<RenderBox>(finder);
+        expect(rect.top + box.constraints.maxHeight, 852);
+        expect(rect.bottom, lessThanOrEqualTo(852));
+        final scroll = tester.widget<SingleChildScrollView>(finder);
+        expect(scroll.padding!.resolve(TextDirection.ltr).bottom, 54);
+      }
+
+      checkScroll('dashboard-scroll');
+      await tester.tap(find.byTooltip('调整入口顺序'));
+      await tester.pumpAndSettle();
+      final reorder = find.byType(ReorderableListView);
+      expect(tester.getRect(reorder).bottom, 852);
+      expect(
+        tester
+            .widget<ReorderableListView>(reorder)
+            .padding!
+            .resolve(TextDirection.ltr)
+            .bottom,
+        34,
+      );
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      for (final id in dashboardModules) {
+        await openModule(tester, id);
+        checkScroll('dashboard-$id-scroll');
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final size in [
     const Size(320, 568),
     const Size(390, 844),

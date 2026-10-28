@@ -151,6 +151,32 @@ Map<String, dynamic> speedSnapshot({
 };
 
 void main() {
+  for (final width in [320.0, 393.0]) {
+    testWidgets('network speed page extends under bottom safe area at $width', (
+      tester,
+    ) async {
+      tester.view.padding = const FakeViewPadding(top: 59, bottom: 34);
+      tester.view.viewPadding = const FakeViewPadding(top: 59, bottom: 34);
+      addTearDown(tester.view.resetPadding);
+      addTearDown(tester.view.resetViewPadding);
+      final client = FixtureNetworkToolsClient();
+      await pumpToolbox(tester, client, size: Size(width, 852));
+      expect(find.text('网络测速'), findsOneWidget);
+      expect(find.text('工具箱'), findsNothing);
+      expect(find.text('延迟检测'), findsOneWidget);
+      expect(find.text('DNS 查询'), findsOneWidget);
+      final scroll = find.byKey(const ValueKey('toolbox-scroll'));
+      expect(tester.getRect(scroll).bottom, 852);
+      await tester.drag(scroll, const Offset(0, -10000));
+      await tester.pumpAndSettle();
+      final last = find.text('按需检测 · DNS 查询仅保留在当前页面 · 不在后台持续测速');
+      expect(tester.getRect(last).bottom, lessThanOrEqualTo(852 - 34));
+      expect(client.calls, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   testWidgets(
     'opening and changing tabs never auto-run; consent starts unchecked',
     (tester) async {

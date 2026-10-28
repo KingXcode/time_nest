@@ -345,54 +345,57 @@ class _HomeDataCardState extends State<_HomeDataCard>
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white12),
       ),
-      child: ClipRect(
-        child: FittedBox(
-          fit: BoxFit.contain,
-          alignment: widget.module == 'weather'
-              ? Alignment.centerLeft
-              : Alignment.center,
-          child: SizedBox(
-            width: widget.width,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: DefaultTextStyle.merge(
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      widget.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 10),
-                    if (!widget.enabled)
-                      Text(widget.emptySetup)
-                    else if (data != null)
-                      widget.builder(data),
-                    if (widget.enabled) ...[
-                      const SizedBox(height: 8),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+        child: ClipRect(
+          child: FittedBox(
+            fit: BoxFit.contain,
+            alignment: widget.module == 'weather'
+                ? Alignment.centerLeft
+                : Alignment.center,
+            child: SizedBox(
+              width: widget.width,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: DefaultTextStyle.merge(
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                       Text(
-                        status,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: stale || _error != null
-                              ? const Color(0xFFFFCF70)
-                              : Colors.white60,
-                        ),
+                        widget.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
-                      if (_error != null && data != null)
+                      const SizedBox(height: 10),
+                      if (!widget.enabled)
+                        Text(widget.emptySetup)
+                      else if (data != null)
+                        widget.builder(data),
+                      if (widget.enabled) ...[
+                        const SizedBox(height: 8),
                         Text(
-                          _error!,
-                          style: const TextStyle(
+                          status,
+                          style: TextStyle(
                             fontSize: 11,
-                            color: Color(0xFFFFCF70),
+                            color: stale || _error != null
+                                ? const Color(0xFFFFCF70)
+                                : Colors.white60,
                           ),
                         ),
+                        if (_error != null && data != null)
+                          Text(
+                            _error!,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFFFFCF70),
+                            ),
+                          ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),

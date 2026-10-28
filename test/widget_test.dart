@@ -282,6 +282,10 @@ void main() {
       await tester.tap(find.text('重试更新'));
       expect(browser.refreshes, 2);
       await openSettings(tester);
+      // The modal settings surface intentionally blocks the home notice.
+      expect(find.text('重试更新').hitTestable(), findsNothing);
+      await tester.tap(find.byTooltip('关闭设置'));
+      await tester.pump();
       expect(find.text('重试更新').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
       browser.update(const BrowserState());

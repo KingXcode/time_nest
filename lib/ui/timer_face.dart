@@ -44,8 +44,14 @@ class TimerFace extends StatelessWidget {
       )!;
       return LayoutBuilder(
         builder: (context, box) => SingleChildScrollView(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(context).bottom,
+          ),
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: box.maxHeight),
+            constraints: BoxConstraints(
+              minHeight: (box.maxHeight - MediaQuery.paddingOf(context).bottom)
+                  .clamp(0.0, box.maxHeight),
+            ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [

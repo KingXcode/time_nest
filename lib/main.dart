@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'platform/browser_client.dart';
+import 'platform/viewport_insets.dart';
 import 'platform/native_runtime_stub.dart'
     if (dart.library.io) 'platform/native_runtime.dart'
     as native;
@@ -88,8 +89,9 @@ class _ShikeAppState extends State<ShikeApp> {
               style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
             ),
           ),
-    builder: (context, child) =>
-        OrientationFrame(orientation: orientation, child: child!),
+    builder: (context, child) => BrowserViewportInsets(
+      child: OrientationFrame(orientation: orientation, child: child!),
+    ),
     home: ClockScreen(
       browser: browser,
       now: widget.now,

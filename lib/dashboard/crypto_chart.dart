@@ -351,8 +351,7 @@ class _CryptoChartState extends State<CryptoChart> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '${cryptoPrice(latest.close)} ${widget.quoteAsset}'
-              '${latest.closeTime >= widget.fetchedAt.millisecondsSinceEpoch ? ' · 形成中' : ''}',
+              '${cryptoPrice(latest.close)} ${widget.quoteAsset}',
               style: TextStyle(
                 fontSize: 19,
                 fontWeight: FontWeight.w600,

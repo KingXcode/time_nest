@@ -1,5 +1,6 @@
 // The embedded Flutter view observes #app. Publish its final safe bounds before
-// the engine measures its first frame; CSS must not subtract the insets again.
+// the engine measures its first frame. Top/side insets are removed here; bottom
+// content is edge-to-edge and Flutter receives its control/scroll inset below.
 (() => {
   'use strict';
   const win = globalThis;
@@ -12,6 +13,21 @@
   let paused = false;
   let frame = null;
   let settling = [];
+  let bottomInset = 0;
+  let regularBaseline = null;
+  const insetListeners = new Set();
+  win.shikeViewport = Object.freeze({
+    getBottomInset: () => bottomInset,
+    subscribe: callback => { if (typeof callback === 'function') insetListeners.add(callback); },
+    unsubscribe: callback => insetListeners.delete(callback),
+  });
+  function publishBottomInset(value) {
+    if (value === bottomInset) return;
+    bottomInset = value;
+    for (const listener of [...insetListeners]) {
+      try { listener(); } catch (_) { /* One consumer must not stop viewport sizing. */ }
+    }
+  }
 
   function editing() {
     let element = doc.activeElement;
@@ -31,7 +47,7 @@
     return {
       left: rect.left + safe.left, top: rect.top + safe.top,
       width: rect.width - safe.left - safe.right,
-      height: rect.height - safe.top - safe.bottom,
+      height: rect.height - safe.top,
     };
   }
   function aboveKeyboard(a, b) {
@@ -55,6 +71,7 @@
     };
     const safe = safeArea();
     let values = inset(visible, safe);
+    let keyboard = false;
     if ((standalone?.matches || win.navigator?.standalone === true) && probe) {
       const layout = probe.getBoundingClientRect();
       // Installed WebKit can report visualViewport/innerHeight with safe areas
@@ -64,12 +81,28 @@
       // A focused field alone does not imply a software keyboard (hardware
       // keyboards and dismissed keyboards keep focus). Only a viewport smaller
       // than the full safe area is occlusion; allow 2px for fractional rounding.
-      if (viewport && editing() && visible.height < values.height - 2) {
+      if (viewport && editing() && visible.height < values.height - safe.bottom - 2) {
         values = aboveKeyboard(values, visible);
+        keyboard = true;
       }
+    }
+    // Browser bars also make a regular tab shorter than 100vh. Establish a
+    // non-editing visible baseline; focus alone (e.g. a hardware keyboard) is
+    // never proof of occlusion. A width change starts a new orientation baseline.
+    if (!(standalone?.matches || win.navigator?.standalone === true)) {
+      if (!regularBaseline || Math.abs(regularBaseline.width - visible.width) > 2
+        || !editing()) {
+        regularBaseline = { width: visible.width, height: visible.height };
+      } else if (visible.height > regularBaseline.height) {
+        regularBaseline.height = visible.height;
+      }
+      keyboard = editing() && visible.height < regularBaseline.height - 2;
+    } else {
+      regularBaseline = null;
     }
     if (Object.values(values).some(value => !Number.isFinite(value))
       || values.width <= 0 || values.height <= 0) return;
+    publishBottomInset(keyboard ? 0 : safe.bottom);
     for (const [name, value] of Object.entries(values)) {
       const key = `--app-viewport-${name}`;
       const css = `${value}px`;

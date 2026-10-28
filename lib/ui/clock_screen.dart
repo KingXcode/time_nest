@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -49,6 +50,9 @@ class _ClockScreenState extends State<ClockScreen>
   final _sceneFocus = FocusNode(debugLabel: 'Clock scene');
   final _toolbarFocus = FocusNode(debugLabel: 'Clock toolbar');
   final _settingsFocus = FocusNode(debugLabel: 'Display settings');
+  final _settingsScope = FocusScopeNode(
+    traversalEdgeBehavior: TraversalEdgeBehavior.closedLoop,
+  );
   Timer? _hideTimer;
   bool _toolbarVisible = false;
   bool _panelOpen = false;
@@ -338,85 +342,146 @@ class _ClockScreenState extends State<ClockScreen>
   ];
 
   Widget _workspace(BoxConstraints box) {
-    // OrientationFrame supplies the effective page orientation, including
-    // manual rotation. Keep one Flex so rotating preserves the panel's scroll.
+    // Settings overlay the full-sized canvas. They must never participate in
+    // its Flex constraints: saved normalized rectangles would all shrink.
     final landscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
-    return Flex(
-      direction: landscape ? Axis.horizontal : Axis.vertical,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        Expanded(
-          child: Column(
-            key: const Key('display-area'),
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: _timer.mode == 'clock'
-                      ? (_settings.value.homeLayout?.enabled == true
-                            ? LayoutBuilder(
-                                builder: (context, canvas) => HomeLayoutCanvas(
-                                  layout: _settings.value.homeLayout!,
-                                  landscape:
-                                      usesDesktopHomeLayout(context) ||
-                                      MediaQuery.orientationOf(context) ==
-                                          Orientation.landscape,
-                                  clock: _clock,
-                                  settings: _settings.value,
-                                  client: _dashboardClient,
-                                  preferences: _homePreferences,
-                                  active:
-                                      !_routeOpen &&
-                                      _lifecycleVisible &&
-                                      _browser.state.visible,
-                                ),
-                              )
-                            : ClockFace(
-                                clock: _clock,
-                                settings: _settings.value,
-                              ))
-                      : TimerFace(
-                          timer: _timer,
-                          settings: _settings.value,
-                          intensity: _clock.intensity,
-                          armSound: _browser.armTimerSound,
-                        ),
-                ),
-              ),
-              if (!_panelOpen)
-                if (_introVisible && _timer.mode == 'clock')
-                  _Intro(
-                    nativeApp: _browser.state.nativeApp,
-                    onDismiss: _dismissIntro,
-                    onStart: _startPresentation,
-                  )
-                else
-                  const SizedBox(height: 12),
-            ],
-          ),
-        ),
-        if (_panelOpen) ...[
-          SizedBox(width: landscape ? 16 : 0, height: landscape ? 0 : 12),
-          SizedBox(
-            key: const Key('settings-dock'),
-            width: landscape ? (box.maxWidth * .44).clamp(260, 380) : null,
-            height: landscape ? null : box.maxHeight * .60,
-            child: Focus(
-              focusNode: _settingsFocus,
-              child: SettingsPanel(
-                settings: _settings,
-                onChanged: _changeSettings,
-                browser: _browser,
-                onClose: _closeSettings,
-                onEditLayout: _openLayout,
+        ExcludeFocus(
+          excluding: _panelOpen,
+          child: ExcludeSemantics(
+            excluding: _panelOpen,
+            child: IgnorePointer(
+              ignoring: _panelOpen,
+              child: Column(
+                key: const Key('display-area'),
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: _timer.mode == 'clock'
+                          ? (_settings.value.homeLayout?.enabled == true
+                                ? MediaQuery(
+                                    data: MediaQuery.of(context).copyWith(
+                                      viewPadding:
+                                          MediaQuery.viewPaddingOf(context)
+                                              .copyWith(
+                                                bottom:
+                                                    (_introVisible ||
+                                                        _showUpdateNotice)
+                                                    ? 0
+                                                    : MediaQuery.viewPaddingOf(
+                                                        context,
+                                                      ).bottom,
+                                              ),
+                                    ),
+                                    child: HomeLayoutCanvas(
+                                      layout: _settings.value.homeLayout!,
+                                      landscape:
+                                          usesDesktopHomeLayout(context) ||
+                                          landscape,
+                                      clock: _clock,
+                                      settings: _settings.value,
+                                      client: _dashboardClient,
+                                      preferences: _homePreferences,
+                                      active:
+                                          !_routeOpen &&
+                                          _lifecycleVisible &&
+                                          _browser.state.visible,
+                                    ),
+                                  )
+                                : Padding(
+                                    padding: EdgeInsets.only(
+                                      bottom:
+                                          (_introVisible || _showUpdateNotice)
+                                          ? 0
+                                          : MediaQuery.viewPaddingOf(context)
+                                                .bottom,
+                                    ),
+                                    child: ClockFace(
+                                      clock: _clock,
+                                      settings: _settings.value,
+                                    ),
+                                  ))
+                          : TimerFace(
+                              timer: _timer,
+                              settings: _settings.value,
+                              intensity: _clock.intensity,
+                              armSound: _browser.armTimerSound,
+                            ),
+                    ),
+                  ),
+                  if (_introVisible && _timer.mode == 'clock')
+                    _Intro(
+                      nativeApp: _browser.state.nativeApp,
+                      onDismiss: _dismissIntro,
+                      onStart: _startPresentation,
+                    ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ],
     );
   }
+
+  Widget _settingsOverlay() => LayoutBuilder(
+    builder: (context, box) {
+      final landscape =
+          MediaQuery.orientationOf(context) == Orientation.landscape;
+      final insets = MediaQuery.viewInsetsOf(context);
+      return Padding(
+        padding: insets,
+        child: LayoutBuilder(
+          builder: (context, available) => Stack(
+            fit: StackFit.expand,
+            children: [
+              ModalBarrier(
+                key: const Key('settings-backdrop'),
+                color: Colors.black54,
+                dismissible: true,
+                onDismiss: _closeSettings,
+                semanticsLabel: '关闭设置',
+              ),
+              Align(
+                alignment: landscape
+                    ? Alignment.centerRight
+                    : Alignment.bottomCenter,
+                child: SizedBox(
+                  key: const Key('settings-dock'),
+                  width: landscape
+                      ? (available.maxWidth * .44)
+                            .clamp(260.0, 380.0)
+                            .clamp(0.0, available.maxWidth)
+                      : available.maxWidth,
+                  height: landscape || insets != EdgeInsets.zero
+                      ? available.maxHeight
+                      : available.maxHeight * .85,
+                  child: FocusScope(
+                    autofocus: true,
+                    node: _settingsScope,
+                    child: Focus(
+                      focusNode: _settingsFocus,
+                      child: SettingsPanel(
+                        settings: _settings,
+                        onChanged: _changeSettings,
+                        browser: _browser,
+                        onClose: _closeSettings,
+                        onEditLayout: _openLayout,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 
   @override
   void dispose() {
@@ -430,6 +495,7 @@ class _ClockScreenState extends State<ClockScreen>
     _sceneFocus.dispose();
     _toolbarFocus.dispose();
     _settingsFocus.dispose();
+    _settingsScope.dispose();
     if (widget.browser == null) _browser.dispose();
     super.dispose();
   }
@@ -437,6 +503,7 @@ class _ClockScreenState extends State<ClockScreen>
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: clockBackground,
+    resizeToAvoidBottomInset: false,
     body: Focus(
       focusNode: _sceneFocus,
       autofocus: true,
@@ -455,11 +522,17 @@ class _ClockScreenState extends State<ClockScreen>
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
-            _sceneFocus.requestFocus();
+            if (!_panelOpen) _sceneFocus.requestFocus();
             _reveal();
           },
           child: SafeArea(
-            minimum: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            bottom: false,
+            minimum: EdgeInsets.fromLTRB(
+              math.max(20, MediaQuery.viewPaddingOf(context).left),
+              math.max(12, MediaQuery.viewPaddingOf(context).top),
+              math.max(20, MediaQuery.viewPaddingOf(context).right),
+              0,
+            ),
             child: Stack(
               children: [
                 Positioned.fill(
@@ -471,25 +544,6 @@ class _ClockScreenState extends State<ClockScreen>
                           builder: (_, box) => _workspace(box),
                         ),
                       ),
-                      if (!_introVisible && !_panelOpen && !_showUpdateNotice)
-                        Padding(
-                          key: const Key('home-status-footer'),
-                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
-                          child: Visibility(
-                            visible: _toolbarVisible,
-                            maintainSize: true,
-                            maintainAnimation: true,
-                            maintainState: true,
-                            child: Text(
-                              '${_browser.state.wakeLabel} · 轻点屏幕唤出操作',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Color(0xFF989DA5),
-                                fontSize: 11,
-                              ),
-                            ),
-                          ),
-                        ),
                       if (_showUpdateNotice)
                         _UpdateNotice(
                           state: _browser.state,
@@ -585,7 +639,7 @@ class _ClockScreenState extends State<ClockScreen>
                                             ),
                                             PopupMenuItem(
                                               value: 'toolbox',
-                                              child: Text('工具箱'),
+                                              child: Text('网络测速'),
                                             ),
                                             PopupMenuItem(
                                               value: 'presentation',
@@ -703,7 +757,7 @@ class _ClockScreenState extends State<ClockScreen>
                           ),
                         IconButton(
                           key: const Key('home-toolbox'),
-                          tooltip: '工具箱',
+                          tooltip: '网络测速',
                           onPressed: _openToolbox,
                           icon: const Icon(Icons.handyman_outlined, size: 22),
                         ),
@@ -716,6 +770,10 @@ class _ClockScreenState extends State<ClockScreen>
                     ),
                   ),
                 ),
+                if (_panelOpen)
+                  Positioned.fill(
+                    child: BlockSemantics(child: _settingsOverlay()),
+                  ),
               ],
             ),
           ),
@@ -734,7 +792,10 @@ class _UpdateNotice extends StatelessWidget {
   Widget build(BuildContext context) => Semantics(
     liveRegion: true,
     child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.only(
+        top: 8,
+        bottom: 8 + MediaQuery.paddingOf(context).bottom,
+      ),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 520),
         padding: const EdgeInsets.only(left: 14, right: 6, top: 4, bottom: 4),
@@ -781,7 +842,10 @@ class _Intro extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 12, bottom: 4),
+    padding: EdgeInsets.only(
+      top: 12,
+      bottom: 4 + MediaQuery.viewPaddingOf(context).bottom,
+    ),
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [

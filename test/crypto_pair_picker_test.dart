@@ -138,6 +138,48 @@ String _selected(WidgetTester tester) =>
 
 void main() {
   testWidgets(
+    'fullscreen picker reaches bottom and avoids keyboard only once',
+    (tester) async {
+      _size(tester, const Size(393, 852));
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 34);
+      tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 34);
+      await _open(tester, _CatalogClient());
+      final list = find.byKey(const Key('crypto-pair-list'));
+      expect(tester.getRect(list).bottom, 852);
+      final paddings = find.descendant(
+        of: list,
+        matching: find.byType(SliverPadding),
+      );
+      expect(
+        tester
+            .widget<SliverPadding>(paddings.last)
+            .padding
+            .resolve(TextDirection.ltr)
+            .bottom,
+        54,
+      );
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      tester.view.padding = const FakeViewPadding(top: 24);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(list).bottom, 552);
+      expect(
+        tester
+            .widget<SliverPadding>(paddings.last)
+            .padding
+            .resolve(TextDirection.ltr)
+            .bottom,
+        20,
+      );
+      expect(
+        find.byKey(const Key('crypto-pair-close')).hitTestable(),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
     'base picker only lists current quote and searches pair or name',
     (tester) async {
       _size(tester, const Size(1200, 900));

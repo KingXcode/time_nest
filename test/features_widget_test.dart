@@ -69,8 +69,7 @@ void main() {
         await tester.tap(find.byTooltip('展示设置'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
-        // Settings share the page with the live display even after manual
-        // rotation; compare positions inside the rotated scaffold.
+        // Settings overlay the full display after automatic/manual rotation.
         final scaffold = tester.renderObject<RenderBox>(find.byType(Scaffold));
         Rect bounds(String key) {
           final box = tester.renderObject<RenderBox>(find.byKey(Key(key)));
@@ -79,21 +78,17 @@ void main() {
 
         final display = bounds('display-area');
         final settings = bounds('settings-dock');
-        if (scaffoldSize.width > scaffoldSize.height) {
-          expect(settings.left, greaterThan(display.right));
-          expect(settings.top, display.top);
-        } else {
-          expect(settings.top, greaterThan(display.bottom));
-          expect(settings.left, display.left);
-        }
+        expect(settings.overlaps(display), isTrue);
+        expect(settings.right, closeTo(display.right, 0.01));
+        expect(settings.bottom, greaterThanOrEqualTo(display.bottom));
         expect(find.byType(Dialog), findsNothing);
         for (final preset in ['办公', '床头', '极简']) {
-          await tester.tap(
-            find.ancestor(
-              of: find.text(preset),
-              matching: find.byType(ChoiceChip),
-            ),
+          final chip = find.ancestor(
+            of: find.text(preset),
+            matching: find.byType(ChoiceChip),
           );
+          await tester.ensureVisible(chip);
+          await tester.tap(chip);
           await tester.pump();
         }
         await tester.tap(find.byTooltip('关闭设置'));

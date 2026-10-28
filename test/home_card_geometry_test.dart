@@ -175,6 +175,94 @@ Future<void> _mount(
 }
 
 void main() {
+  for (final module in ['weather', 'crypto']) {
+    testWidgets(
+      '$module card reaches bottom while protecting only overlapping content',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(393, 852);
+        tester.view.padding = const FakeViewPadding(top: 24, bottom: 34);
+        tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 34);
+        addTearDown(tester.view.reset);
+        for (final y in [.8, .78, .5]) {
+          await _mount(
+            tester,
+            module: module,
+            item: HomeModuleLayout(x: 0, y: y, width: 1, height: .2),
+            editor: false,
+            wide: false,
+            desktop: false,
+          );
+          final card = _card(module);
+          final decorated = tester.widget<DecoratedBox>(card);
+          final protection = (decorated.child! as Padding).padding
+              .resolve(TextDirection.ltr)
+              .bottom;
+          final rect = _paintRect(tester, card);
+          expect(rect.bottom, closeTo(852 * (y + .2), .01));
+          final expected = (34 - 852 * (1 - y - .2)).clamp(0.0, 34.0);
+          expect(protection, closeTo(expected, .01));
+          final content = find
+              .descendant(of: card, matching: find.byType(ClipRect))
+              .first;
+          expect(
+            _paintRect(tester, content).bottom,
+            closeTo(rect.bottom - expected, .01),
+          );
+          expect(_paintRect(tester, content).bottom, lessThanOrEqualTo(818.01));
+          expect(tester.takeException(), isNull);
+        }
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets(
+    'editor controls reach bottom with scrollable last-row protection',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(393, 852);
+      tester.view.padding = const FakeViewPadding(top: 24, bottom: 34);
+      tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 34);
+      addTearDown(tester.view.reset);
+      await _mount(
+        tester,
+        module: 'weather',
+        item: HomeModuleLayout(x: 0, y: .5, width: 1, height: .2),
+        editor: true,
+        wide: false,
+        desktop: false,
+      );
+      final previewCard = tester.widget<DecoratedBox>(_card('weather'));
+      expect(
+        (previewCard.child! as Padding).padding
+            .resolve(TextDirection.ltr)
+            .bottom,
+        0,
+        reason: 'Miniature preview is not at the physical device edge',
+      );
+      final scroll = find.byType(SingleChildScrollView);
+      expect(tester.getRect(scroll).bottom, 852);
+      expect(
+        tester
+            .widget<SingleChildScrollView>(scroll)
+            .padding!
+            .resolve(TextDirection.ltr)
+            .bottom,
+        46,
+      );
+      await tester.drag(scroll, const Offset(0, -1000));
+      await tester.pumpAndSettle();
+      final lastRow = find.textContaining('网格吸附 · 统一边距');
+      expect(tester.getRect(lastRow).bottom, lessThanOrEqualTo(818));
+      final arrange = find.byKey(const Key('arrange-layout'));
+      expect(arrange.hitTestable(), findsOneWidget);
+      expect(tester.getRect(arrange).bottom, lessThanOrEqualTo(818));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   const profiles = [
     (
       name: 'mobile portrait',

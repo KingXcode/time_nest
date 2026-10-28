@@ -28,30 +28,29 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets(
-    'inline settings preview changes and toggle restores full space',
-    (tester) async {
-      await launch(tester);
-      final panel = find.byType(SettingsPanel);
-      final display = find.byKey(const Key('display-area'));
-      final previewHeight = tester.getSize(display).height;
-      expect(find.byType(Dialog), findsNothing);
-      await tester.tap(find.text('极简'));
-      await tester.pump();
-      expect(panel, findsOneWidget);
-      expect(find.byKey(const Key('clock-date')), findsNothing);
-      expect(find.byKey(const Key('clock-seconds')), findsNothing);
-      expect(find.text('12:00'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 8));
-      expect(find.byTooltip('展示设置').hitTestable(), findsOneWidget);
-      await tester.tap(find.byTooltip('展示设置'));
-      await tester.pump();
-      expect(panel, findsNothing);
-      expect(tester.getSize(display).height, greaterThan(previewHeight));
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+  testWidgets('overlay settings preserve full display space on toggle', (
+    tester,
+  ) async {
+    await launch(tester);
+    final panel = find.byType(SettingsPanel);
+    final display = find.byKey(const Key('display-area'));
+    final previewHeight = tester.getSize(display).height;
+    expect(find.byType(Dialog), findsNothing);
+    await tester.tap(find.text('极简'));
+    await tester.pump();
+    expect(panel, findsOneWidget);
+    expect(find.byKey(const Key('clock-date')), findsNothing);
+    expect(find.byKey(const Key('clock-seconds')), findsNothing);
+    expect(find.text('12:00'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 8));
+    expect(find.byTooltip('关闭设置').hitTestable(), findsOneWidget);
+    await tester.tap(find.byTooltip('关闭设置'));
+    await tester.pump();
+    expect(panel, findsNothing);
+    expect(tester.getSize(display).height, previewHeight);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('resize keeps settings open and retains independent scroll', (
     tester,
@@ -71,7 +70,7 @@ void main() {
     await tester.pump();
     final settings = tester.getRect(find.byKey(const Key('settings-dock')));
     final display = tester.getRect(find.byKey(const Key('display-area')));
-    expect(settings.left, greaterThan(display.right));
+    expect(settings.overlaps(display), isTrue);
     expect(scroll.position.pixels, offset);
     await tester.ensureVisible(find.text('暖色文字'));
     await tester.tap(find.text('暖色文字'));
@@ -85,22 +84,16 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('timer controls remain usable beside the settings', (
+  testWidgets('settings backdrop closes before timer controls can be used', (
     tester,
   ) async {
     await launch(tester, size: const Size(736, 320));
-    await tester.tap(find.byTooltip('切换模式'));
+    await tester.tapAt(
+      tester.getRect(find.byKey(const Key('settings-backdrop'))).topLeft +
+          const Offset(8, 8),
+    );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('倒计时'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(SettingsPanel), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('timer-primary')));
-    await tester.tap(find.byKey(const Key('timer-primary')));
-    await tester.pump();
-    expect(find.text('倒计时进行中'), findsOneWidget);
-    expect(find.byType(SettingsPanel), findsOneWidget);
+    expect(find.byType(SettingsPanel), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -110,10 +103,12 @@ void main() {
   ) async {
     await launch(tester, introSeen: false);
     // Mobile presentation now lives in the single-row header menu.
+    await tester.tap(find.byTooltip('关闭设置'));
+    await tester.pump();
     await tester.tap(find.byTooltip('切换模式'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('开始展示'));
+    await tester.tap(find.text('开始展示').last);
     await tester.pump();
     expect(find.byType(SettingsPanel), findsNothing);
     expect(find.text('知道了'), findsNothing);
