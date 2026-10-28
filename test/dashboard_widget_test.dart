@@ -524,7 +524,7 @@ void main() {
     await tester.pumpWidget(app(DashboardScreen(client: client)));
     await tester.pumpAndSettle();
     await openModule(tester, 'news');
-    expect(client.requests.last['feed'], 'sspai');
+    expect(client.requests.last['feed'], 'zh');
     await tester.tap(find.text('HN 最新'));
     await tester.pumpAndSettle();
     expect(client.requests.last['feed'], 'new');

@@ -85,6 +85,25 @@
       return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : '';
     } catch (_) { return ''; }
   }
+  const newsSnapshotUrl = new URL('news.json', typeof document !== 'undefined' && typeof document.baseURI === 'string' ? document.baseURI : 'https://kingxcode.github.io/time_nest/').href;
+  const newsSources = { sspai: '少数派', ithome: 'IT之家', solidot: 'Solidot' };
+  function newsUrl(story) {
+    const safe = safeUrl(story.url);
+    if (!safe) return '';
+    const u = new URL(safe);
+    if (u.protocol !== 'https:' || u.port || u.username || u.password) return '';
+    if (story.sourceId === 'sspai') return sspaiUrl(safe);
+    if (story.sourceId === 'ithome' && ['www.ithome.com', 'ithome.com'].includes(u.hostname) && /^\/\d+\/\d+\/\d+\.htm$/.test(u.pathname)) return safe;
+    if (story.sourceId === 'solidot' && ['www.solidot.org', 'solidot.org'].includes(u.hostname) && u.pathname === '/story' && /^\d+$/.test(u.searchParams.get('sid') || '')) return safe;
+    return '';
+  }
+  function validChineseNews(data) {
+    return object(data) && data.schemaVersion === 1 && finite(Date.parse(data.generatedAt)) && Date.parse(data.generatedAt) <= Date.now() + DAY
+      && Array.isArray(data.sources) && data.sources.length === 3 && data.sources.every(object) && new Set(data.sources.map(s => s.id)).size === 3
+      && data.sources.every(s => object(s) && newsSources[s.id] === s.name && ['ok', 'cached', 'unavailable'].includes(s.status) && (s.fetchedAt === null || finite(Date.parse(s.fetchedAt))))
+      && Array.isArray(data.stories) && data.stories.length > 0 && data.stories.length <= 300
+      && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && newsSources[s.sourceId] === s.source && !!newsUrl(s) && (s.time === null || finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY));
+  }
   function sspaiUrl(value) {
     const safe = safeUrl(value);
     if (!safe) return '';
@@ -118,7 +137,7 @@
         requireValue(args.endTime === undefined || (timestamp(args.endTime) && args.endTime < Date.now()), '历史 K 线时间无效。');
         return { symbol: args.symbol, interval: args.interval, ...(args.endTime === undefined ? {} : { endTime: args.endTime }) };
       case 'news':
-        requireValue(['sspai', 'top', 'new', 'show'].includes(args.feed), '请选择中文或 HN 资讯分类。');
+        requireValue(['zh', 'sspai', 'top', 'new', 'show'].includes(args.feed), '请选择中文或 HN 资讯分类。');
         return { feed: args.feed };
     }
   }
@@ -134,6 +153,7 @@
       case 'cryptoQuotes': return Array.isArray(data.quotes) && data.quotes.length > 0 && data.quotes.length <= cryptoSymbols.length && new Set(data.quotes.map(q => q?.symbol)).size === data.quotes.length && data.quotes.every(validQuote);
       case 'cryptoCandles': return validSymbol(data.symbol) && Object.hasOwn(cryptoIntervals, data.interval) && (data.endTime === undefined || (timestamp(data.endTime) && data.endTime < Date.now())) && Array.isArray(data.candles) && data.candles.length <= 500 && data.candles.every((c, i, rows) => validCandle(c) && (data.endTime === undefined || c.closeTime <= data.endTime) && c.closeTime - c.time + 1 === cryptoIntervals[data.interval] && (i === 0 || c.time === rows[i - 1].closeTime + 1));
       case 'news':
+        if (data.feed === 'zh') return validChineseNews(data);
         if (data.feed === 'sspai') return Array.isArray(data.stories) && data.stories.length <= 10 && data.stories.every(s => object(s) && typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 500 && s.source === '少数派' && finite(s.time) && s.time > 0 && s.time * 1000 <= Date.now() + DAY && !!sspaiUrl(s.url));
         return ['top', 'new', 'show'].includes(data.feed) && Array.isArray(data.stories) && data.stories.length <= 12 && data.stories.every(s => object(s) && Number.isSafeInteger(s.id) && s.id > 0 && typeof s.title === 'string' && finite(s.score) && finite(s.comments) && finite(s.time) && typeof s.by === 'string' && !!safeUrl(s.url) && s.discussion === `https://news.ycombinator.com/item?id=${s.id}`);
       default: return false;
@@ -186,7 +206,7 @@
   }
   function cleanLimits() {
     const now = Date.now();
-    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com', 'api.coinbase.com', binanceHost].includes(key) && finite(value) && value > now && value <= now + (key === binanceHost ? 3 : 2) * DAY));
+    limits = Object.fromEntries(Object.entries(limits).filter(([key, value]) => ['api.open-meteo.com', 'geocoding-api.open-meteo.com', 'hacker-news.firebaseio.com', 'sspai.com', 'api.coinbase.com', binanceHost, new URL(newsSnapshotUrl).host].includes(key) && finite(value) && value > now && value <= now + (key === binanceHost ? 3 : 2) * DAY));
     saveObject(LIMIT_KEY, limits);
   }
   function blockedMessage(host, until) {
@@ -353,6 +373,19 @@
         return { data: { hours, timezone: raw.timezone, utcOffsetSeconds: raw.utc_offset_seconds } };
       }
       case 'news': {
+        if (args.feed === 'zh') {
+          const raw = await jsonFetch(newsSnapshotUrl);
+          requireValue(validChineseNews(raw), '中文资讯数据暂不可用，请稍后刷新。');
+          const seenUrls = new Set(), seenTitles = new Set();
+          const stories = [...raw.stories].sort((a, b) => (b.time || 0) - (a.time || 0)).filter(s => {
+            const key = s.title.replace(/\s+/g, ' ').trim().toLowerCase();
+            if (seenUrls.has(s.url) || seenTitles.has(key)) return false;
+            seenUrls.add(s.url); seenTitles.add(key); return true;
+          });
+          const warnings = raw.sources.filter(s => s.status !== 'ok').map(s => `${s.name}${s.status === 'cached' ? '暂不可用，显示缓存' : '暂不可用'}`);
+          if (Date.now() - Date.parse(raw.generatedAt) > 3 * 60 * MINUTE) warnings.push('资讯快照较旧，显示最近可用内容');
+          return { data: { ...raw, feed: 'zh', stories }, ...(warnings.length ? { warning: warnings.join('；') } : {}) };
+        }
         if (args.feed === 'sspai') {
           const xml = await jsonFetch('https://sspai.com/feed', { xml: true });
           requireValue(!/<!DOCTYPE|<!ENTITY/i.test(xml), '资讯源 XML 格式不受支持。');

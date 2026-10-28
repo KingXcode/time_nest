@@ -32,10 +32,10 @@ class _FakeClient implements DashboardClient {
           'stories': emptyNews
               ? []
               : [
-                  for (var i = 1; i <= 10; i++)
+                  for (var i = 1; i <= (args['feed'] == 'zh' ? 45 : 10); i++)
                     {
                       'id': i,
-                      'title': args['feed'] == 'sspai'
+                      'title': args['feed'] == 'zh'
                           ? '中文资讯 $i：科技、数码与效率生活'
                           : 'Story $i: An English headline that wraps on a small screen',
                       'score': 100 + i,
@@ -78,13 +78,21 @@ void main() {
       final client = _FakeClient();
       await _pumpPanel(
         tester,
-        NewsPanel(client: client, feed: 'sspai', onFeedChanged: (_) {}),
+        NewsPanel(client: client, feed: 'zh', onFeedChanged: (_) {}),
       );
-      expect(client.requests.single['feed'], 'sspai');
-      expect(find.textContaining('中文资讯 1'), findsOneWidget);
-      expect(find.text('少数派 · 官方 RSS ↗'), findsOneWidget);
+      expect(client.requests.single['feed'], 'zh');
+      expect(find.text('中文资讯 1：科技、数码与效率生活'), findsOneWidget);
+      expect(find.text('中文资讯 · 官方 RSS 汇总 ↗'), findsOneWidget);
       expect(find.textContaining('条评论 · HN'), findsNothing);
       expect(find.text('101 分'), findsNothing);
+      expect(find.text('中文资讯 20：科技、数码与效率生活'), findsOneWidget);
+      expect(find.text('中文资讯 21：科技、数码与效率生活'), findsNothing);
+      await tester.ensureVisible(find.text('加载更多 · 已显示 20 / 45 条'));
+      await tester.tap(find.text('加载更多 · 已显示 20 / 45 条'));
+      await tester.pumpAndSettle();
+      expect(find.text('中文资讯 40：科技、数码与效率生活'), findsOneWidget);
+      expect(find.text('中文资讯 41：科技、数码与效率生活'), findsNothing);
+
       expect(tester.takeException(), isNull);
     },
   );

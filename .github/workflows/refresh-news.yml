@@ -1,0 +1,106 @@
+name: Refresh Chinese news data
+
+# Owner-approved hourly refresh. GitHub scheduling may be delayed.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_run:
+    workflows: ['Deploy GitHub Pages']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Same lock as the app deployment: cannot deploy an older app over a new build.
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  refresh:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.name == 'Deploy GitHub Pages' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_sha == github.sha &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event))
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+      - name: Select successful current application deployment
+        id: app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          gh run list --workflow deploy-pages.yml --branch main --status success --limit 20 --json databaseId,headSha,headBranch,conclusion,event,updatedAt > "$RUNNER_TEMP/app-runs.json"
+          gh run list --workflow refresh-news.yml --branch main --status success --limit 20 --json databaseId,headSha,headBranch,conclusion,event,updatedAt > "$RUNNER_TEMP/news-runs.json"
+          candidate_ids="$(python3 tool/refresh_news_artifact.py select "$RUNNER_TEMP/app-runs.json" "$sha" --refresh-runs "$RUNNER_TEMP/news-runs.json" --all)"
+          run_id=
+          for candidate in $candidate_ids; do
+            available="$(gh api "repos/$GH_REPO/actions/runs/$candidate/artifacts" --jq '[.artifacts[] | select(.name == "github-pages" and .expired == false)] | length')"
+            if [ "$available" -gt 0 ]; then run_id="$candidate"; break; fi
+          done
+          if [ -z "$run_id" ]; then echo "No retained current-app artifact. Run the app deployment again." >&2; exit 1; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          gh run download "$run_id" --name github-pages --dir "$RUNNER_TEMP/app-artifact"
+          python3 tool/refresh_news_artifact.py extract "$RUNNER_TEMP/app-artifact/artifact.tar" build/web
+      - name: Fetch previous published headlines if available
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          # Public metadata only; no tokens sent to the Pages host.
+          python3 - <<'PY'
+          import os, pathlib, urllib.request
+          owner, repo = os.environ['REPOSITORY'].split('/')
+          try:
+              with urllib.request.urlopen(f'https://{owner.lower()}.github.io/{repo}/news.json', timeout=12) as r:
+                  raw = r.read(1_000_001)
+              if len(raw) <= 1_000_000:
+                  pathlib.Path('build/previous-news.json').write_bytes(raw)
+          except Exception:
+              pass # The checked app artifact still provides a valid fallback.
+          PY
+      - name: Refresh metadata without rebuilding application
+        run: |
+          previous=build/web/news.json
+          if [ -f build/previous-news.json ]; then previous=build/previous-news.json; fi
+          python3 tool/fetch_news.py build/web/news.json --previous "$previous"
+      - name: Recheck current main before upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_SHA: ${{ steps.app.outputs.sha }}
+        run: test "$(gh api "repos/$GH_REPO/commits/main" --jq .sha)" = "$APP_SHA"
+      - name: Upload unchanged app with fresh news
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: build/web
+
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy news snapshot
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

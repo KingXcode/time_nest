@@ -6,7 +6,7 @@ import 'crypto_view_settings.dart';
 
 const dashboardModules = ['weather', 'news', 'crypto'];
 
-const dashboardFeeds = ['sspai', 'top', 'new', 'show'];
+const dashboardFeeds = ['zh', 'top', 'new', 'show'];
 
 const cryptoMinPaneHeight = 64.0, cryptoMaxPaneHeight = 400.0;
 
@@ -43,7 +43,7 @@ Map<String, double> cleanCryptoBookSteps(Object? raw) {
 class DashboardPreferences {
   DashboardPreferences({
     this.city,
-    this.feed = 'sspai',
+    this.feed = 'zh',
     this.cryptoSymbol = 'BTCUSDT',
     this.cryptoInterval = '1h',
     this.cryptoOverlays = defaultCryptoOverlays,
@@ -89,7 +89,7 @@ class DashboardPreferences {
         prefs.feed = json['feed'] as String;
       }
       if (json['version'] == null && json['feed'] == 'top') {
-        prefs.feed = 'sspai';
+        prefs.feed = 'zh';
       }
       if (isCryptoSymbol(json['cryptoSymbol'])) {
         prefs.cryptoSymbol = json['cryptoSymbol'] as String;

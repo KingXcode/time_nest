@@ -24,18 +24,22 @@ class NewsPanel extends StatefulWidget {
 }
 
 class _NewsPanelState extends State<NewsPanel> {
-  bool _expanded = false;
+  int _visible = 20;
+  bool _expandedHN = false;
 
   @override
   void didUpdateWidget(covariant NewsPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.feed != widget.feed) _expanded = false;
+    if (oldWidget.feed != widget.feed) {
+      _visible = 20;
+      _expandedHN = false;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final feed = dashboardFeeds.contains(widget.feed) ? widget.feed : 'sspai';
-    final chinese = feed == 'sspai';
+    final feed = dashboardFeeds.contains(widget.feed) ? widget.feed : 'zh';
+    final chinese = feed == 'zh';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -44,7 +48,7 @@ class _NewsPanelState extends State<NewsPanel> {
           runSpacing: 6,
           children: [
             for (final option in const [
-              ('sspai', '中文 · 少数派'),
+              ('zh', '中文 · 全部来源'),
               ('top', 'HN 热门'),
               ('new', 'HN 最新'),
               ('show', 'Show HN'),
@@ -64,7 +68,7 @@ class _NewsPanelState extends State<NewsPanel> {
         const SizedBox(height: 8),
         Text(
           chinese
-              ? '少数派官方 RSS · 科技、数码与效率生活，标题为中文原文。'
+              ? '少数派、IT之家、Solidot · 中文汇总，按发布时间从新到旧排列。'
               : 'Hacker News 英文原文，保留文章与讨论链接。',
           style: const TextStyle(
             color: Color(0xFFA8B5BB),
@@ -72,19 +76,32 @@ class _NewsPanelState extends State<NewsPanel> {
             height: 1.5,
           ),
         ),
+        if (chinese)
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final source in const [
+                ('少数派', 'https://sspai.com/feed'),
+                ('IT之家', 'https://www.ithome.com/rss/'),
+                ('Solidot', 'https://www.solidot.org/index.rss'),
+              ])
+                TextButton(
+                  onPressed: () => widget.client.openUrl(source.$2),
+                  child: Text('${source.$1} RSS ↗'),
+                ),
+            ],
+          ),
         const SizedBox(height: 12),
         ApiSection(
           client: widget.client,
           module: 'news',
           args: {'feed': feed},
-          sourceLabel: chinese ? '少数派 · 官方 RSS' : 'Hacker News · 官方 API',
-          sourceUrl: chinese
-              ? 'https://sspai.com/feed'
-              : 'https://github.com/HackerNews/API',
+          sourceLabel: chinese ? '中文资讯 · 官方 RSS 汇总' : 'Hacker News · 官方 API',
+          sourceUrl: chinese ? null : 'https://github.com/HackerNews/API',
           builder: (context, result) {
             final raw = result.data['stories'];
             final stories = raw is List
-                ? raw.whereType<Map>().take(10).toList()
+                ? raw.whereType<Map>().take(300).toList()
                 : <Map>[];
             if (stories.isEmpty) {
               return const Padding(
@@ -92,12 +109,28 @@ class _NewsPanelState extends State<NewsPanel> {
                 child: Text('当前列表暂无可显示的文章，请稍后刷新。'),
               );
             }
-            final count = _expanded
-                ? stories.length
-                : stories.length.clamp(0, 6);
+            final count = stories.length.clamp(
+              0,
+              chinese
+                  ? _visible
+                  : _expandedHN
+                  ? 12
+                  : 6,
+            );
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (chinese && result.data['generatedAt'] is String)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '快照生成：${_snapshotTime(result.data['generatedAt'] as String)} · ${stories.length} 条',
+                      style: const TextStyle(
+                        color: Color(0xFFA8B5BB),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
                 DashboardColumns(
                   children: [
                     for (var i = 0; i < count; i++)
@@ -109,18 +142,30 @@ class _NewsPanelState extends State<NewsPanel> {
                       ),
                   ],
                 ),
-                if (stories.length > 6)
+                if (chinese && count < stories.length)
                   AppleButton.textIcon(
-                    onPressed: () => setState(() => _expanded = !_expanded),
+                    onPressed: () => setState(() => _visible += 20),
+                    icon: const Icon(Icons.expand_more_rounded),
+                    label: Text('加载更多 · 已显示 $count / ${stories.length} 条'),
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 32)),
+                  ),
+                if (!chinese && stories.length > 6)
+                  AppleButton.textIcon(
+                    onPressed: () => setState(() => _expandedHN = !_expandedHN),
                     icon: Icon(
-                      _expanded
+                      _expandedHN
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
                     ),
                     label: Text(
-                      _expanded ? '收起列表' : '展开全部 ${stories.length} 条',
+                      _expandedHN ? '收起列表' : '展开全部 ${stories.length} 条',
                     ),
                     style: TextButton.styleFrom(minimumSize: const Size(0, 32)),
+                  ),
+                if (chinese)
+                  const Text(
+                    '仅显示来源公开提供的近期资讯，不代表完整历史。',
+                    style: TextStyle(color: Color(0xFFA8B5BB), fontSize: 11),
                   ),
                 const SizedBox(height: 8),
               ],
@@ -165,7 +210,9 @@ class _NewsStory extends StatelessWidget {
         ? (story['comments'] as num).toInt()
         : 0;
     final by = story['by'] is String ? story['by'] as String : '';
-    final time = _storyTime(story['time']);
+    final time = story['time'] == null && chinese
+        ? '发布时间未知'
+        : _storyTime(story['time']);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -212,7 +259,7 @@ class _NewsStory extends StatelessWidget {
                     ),
                   if (domain.isNotEmpty)
                     Text(
-                      domain,
+                      chinese ? '${story['source'] ?? domain}' : domain,
                       style: const TextStyle(
                         color: Color(0xFFA8B5BB),
                         fontSize: 12,
@@ -279,4 +326,9 @@ String _storyTime(Object? time) {
   if (difference.inHours < 1) return '${difference.inMinutes} 分钟前';
   if (difference.inDays < 1) return '${difference.inHours} 小时前';
   return '${difference.inDays} 天前';
+}
+
+String _snapshotTime(String raw) {
+  final time = DateTime.tryParse(raw)?.toLocal();
+  return time == null ? '未知' : time.toString().substring(0, 16);
 }

@@ -250,15 +250,15 @@ class DashboardOverview extends StatelessWidget {
     'news',
     '科技资讯',
     Icons.article_outlined,
-    preferences.feed == 'sspai' ? '少数派 / 中文原文' : 'Hacker News / 英文原文',
+    preferences.feed == 'zh' ? '中文汇总 / 按时间排序' : 'Hacker News / 英文原文',
     ApiSection(
       client: client,
       module: 'news',
       args: {'feed': preferences.feed},
       compact: true,
-      sourceLabel: preferences.feed == 'sspai' ? '少数派 RSS' : 'Hacker News',
-      sourceUrl: preferences.feed == 'sspai'
-          ? 'https://sspai.com/feed'
+      sourceLabel: preferences.feed == 'zh' ? '中文官方 RSS 汇总' : 'Hacker News',
+      sourceUrl: preferences.feed == 'zh'
+          ? null
           : 'https://news.ycombinator.com/',
       builder: (context, result) {
         final stories = (result.data['stories'] as List? ?? [])

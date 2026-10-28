@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const templatePath = fileURLToPath(new URL('../web/sw.template.js', import.meta.url));
 const placeholder = '__SHIKE_BUILD_MANIFEST__';
-const excluded = new Set(['shike-sw.js', 'sw.template.js', 'flutter_service_worker.js', 'network-probe.txt']);
+const excluded = new Set(['shike-sw.js', 'sw.template.js', 'flutter_service_worker.js', 'network-probe.txt', 'news.json']);
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 export function includedPath(name) {

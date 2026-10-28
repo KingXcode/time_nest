@@ -15,3 +15,6 @@ __pycache__/
 # Explicitly override developer-level global ignore rules.
 !/pubspec.lock
 !/.fvmrc
+
+# Generated public news snapshot (never commit feed contents)
+/web/news.json

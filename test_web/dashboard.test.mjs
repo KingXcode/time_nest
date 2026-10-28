@@ -911,3 +911,41 @@ test('UTF-8 catalog symbols preserve exact assets in selected REST calls, rules 
   assert.equal((await reload.request('cryptoCandles', { symbol, interval: '1h' })).cached, true);
   assert.equal(reload.calls.length, 0);
 });
+
+function chineseSnapshot() {
+  return {schemaVersion: 1, generatedAt: new Date(START).toISOString(), sources: [
+    {id:'sspai',name:'少数派',status:'ok',fetchedAt:new Date(START).toISOString()},
+    {id:'ithome',name:'IT之家',status:'unavailable',fetchedAt:null},
+    {id:'solidot',name:'Solidot',status:'cached',fetchedAt:new Date(START-hour).toISOString()},
+  ], stories: [
+    {title:'未知',url:'https://sspai.com/post/1',sourceId:'sspai',source:'少数派',time:null},
+    {title:'旧文',url:'https://www.solidot.org/story?sid=2',sourceId:'solidot',source:'Solidot',time:START/1000-100},
+    {title:'新文',url:'https://sspai.com/post/3',sourceId:'sspai',source:'少数派',time:START/1000},
+    {title:'新文',url:'https://sspai.com/post/3',sourceId:'sspai',source:'少数派',time:START/1000},
+  ]};
+}
+test('Chinese aggregation uses same-origin snapshot, publication sort, dedup, unknown last and partial status', async () => {
+  const h=harness(()=>response(chineseSnapshot()));
+  const r=await h.request('news',{feed:'zh'});
+  assert.deepEqual(r.data.stories.map(s=>s.title),['新文','旧文','未知']);
+  assert.match(r.warning,/IT之家暂不可用/); assert.match(r.warning,/Solidot暂不可用，显示缓存/);
+  assert.match(h.calls[0].url,/time_nest\/news.json$/); assert.equal(h.calls[0].init.cache,'no-store');
+});
+test('Chinese snapshot stale label and invalid source URL rejection', async () => {
+  const stale=chineseSnapshot();stale.generatedAt=new Date(START-day).toISOString();
+  assert.match((await harness(()=>response(stale)).request('news',{feed:'zh'})).warning,/快照较旧/);
+  const bad=chineseSnapshot();bad.stories[0].url='https://evil.example/post/1';
+  await assert.rejects(harness(()=>response(bad)).request('news',{feed:'zh'}),/暂不可用/);
+});
+test('corrupted Chinese snapshot source cannot prevent API startup', async () => {
+  const bad = {...chineseSnapshot(), feed:'zh', sources:[null,{},{}]};
+  const h = harness(()=>response(chineseSnapshot()), {storage:storage({[CACHE_KEY]:JSON.stringify({['news:'+JSON.stringify({feed:'zh'})]:{data:bad,fetchedAt:START}})})});
+  assert.ok(h.api);
+  assert.equal((await h.request('news',{feed:'zh'})).data.stories.length,3);
+});
+test('same-origin news snapshot respects Retry-After without NaN', async () => {
+  const h=harness(()=>response({},429,{'retry-after':'120'}));
+  await assert.rejects(h.request('news',{feed:'zh'}), /2 分钟/);
+  await assert.rejects(h.request('news',{feed:'zh'},true), /2 分钟/);
+  assert.equal(h.calls.length,1);
+});

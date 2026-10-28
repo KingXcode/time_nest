@@ -151,7 +151,7 @@ Safari 添加到主屏幕：分享菜单 → 添加到主屏幕 → 从图标重
 | 模块 | 数据及边界 |
 | --- | --- |
 | 天气 | [Open-Meteo](https://open-meteo.com/en/docs)：先手动搜索城市，展示气温、体感、天气状况、降雨概率、风速与逐小时预报。气温为当地当前小时的模型预报，不是传感器实时观测；缺少气温的旧缓存会明确显示体感温度。免费托管 API **仅限非商用**，有调用配额及服务限制；商用前需替换方案或购买服务。 |
-| 科技资讯 | 默认 [少数派官方 RSS](https://sspai.com/feed)：中文科技、数码与效率生活文章，仅展示原始标题、文章链接与发布时间，不转载正文或图片。直接从浏览器读取，缓存 10 分钟，失败时标示旧缓存；并非实时快讯。也可切换 [Hacker News 官方 API](https://github.com/HackerNews/API) 的英文热门、最新、Show HN。 |
+| 科技资讯 | 默认汇总 [少数派](https://sspai.com/feed)、[IT之家](https://www.ithome.com/rss/)、[Solidot](https://www.solidot.org/index.rss) 官方 RSS，按真实发布时间倒序，未知时间置后。仅标题、原文链接、来源与日期，不转载正文或图片。构建生成同源 `news.json`，避免第三方浏览器 CORS 限制；每页增加 20 条，最多保留 7 天 / 300 条，来源失败保留可用缓存并提示。浏览器缓存 10 分钟，快照超过 3 小时标示陈旧；不是实时快讯。数据专用工作流每小时第 23 分钟刷新（GitHub 调度可能延迟），也支持手动触发；仅更新资讯数据，不重建应用。详见 [资讯聚合维护说明](docs/news-aggregation.md)。也可切换 [Hacker News 官方 API](https://github.com/HackerNews/API) 的英文热门、最新、Show HN。 |
 
 新闻旧默认热门频道切为中文，已主动选择最新或 Show HN 的偏好保留。
 

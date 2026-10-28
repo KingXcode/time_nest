@@ -172,7 +172,7 @@ self.addEventListener('fetch', (event) => {
   const navigation = request.mode === 'navigate';
   if (navigation && url.pathname !== SCOPE.pathname && url.pathname !== resourceURL('index.html').replace(SCOPE.origin, '')) return;
   // The toolbox probe must never report the offline cache as a network RTT.
-  if (url.pathname === new URL('network-probe.txt', SCOPE).pathname) return;
+  if (['network-probe.txt', 'news.json'].some(name => url.pathname === new URL(name, SCOPE).pathname)) return;
   // Worker probes always go to the network, including when an old worker controls
   // the page; generated workers and source templates are not precache resources.
   if (url.pathname === new URL('shike-sw.js', SCOPE).pathname

@@ -4,6 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/dashboard/dashboard_preferences.dart';
 
 void main() {
+  test('legacy SSPAI selection migrates to combined Chinese feed', () {
+    expect(
+      DashboardPreferences.decode('{"version":1,"feed":"sspai"}').feed,
+      'zh',
+    );
+  });
+
   test('order book levels and per-symbol steps validate and retain other preferences', () {
     expect(DashboardPreferences.decode(null).cryptoBookLevels, isNull);
     for (final value in [0, 15, '5', 5.0]) {
@@ -103,7 +110,7 @@ void main() {
 
   test('active modules and Chinese news are provided on first launch', () {
     final read = DashboardPreferences.decode(null);
-    expect(read.feed, 'sspai');
+    expect(read.feed, 'zh');
     expect(read.order, ['weather', 'news', 'crypto']);
     expect(read.favorites, ['weather']);
   });
@@ -112,7 +119,7 @@ void main() {
     final old = DashboardPreferences.decode(
       '{"repos":["flutter/flutter"],"feed":"top"}',
     );
-    expect(old.feed, 'sspai');
+    expect(old.feed, 'zh');
     final custom = DashboardPreferences.decode(
       '{"repos":["owner/project"],"feed":"show"}',
     );
@@ -251,7 +258,7 @@ void main() {
       }),
     );
     expect(read.city, isNull);
-    expect(read.feed, 'sspai');
+    expect(read.feed, 'zh');
     expect(read.order.toSet(), dashboardModules.toSet());
     expect(read.favorites, isEmpty);
   });
