@@ -42,7 +42,11 @@ void main() {
         '自动方向': 'auto',
       }.entries) {
         await reveal(tester);
-        await tester.tap(find.byTooltip('横竖屏切换'));
+        await tester.tap(
+          find.byTooltip('横竖屏切换').evaluate().isNotEmpty
+              ? find.byTooltip('横竖屏切换')
+              : find.byTooltip('切换模式'),
+        );
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
         await tester.tap(

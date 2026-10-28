@@ -51,6 +51,7 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
   );
   late bool _wide = widget.desktop || widget.landscape;
   String _selected = 'time';
+  String? _placementMessage;
   final _canvasKey = GlobalKey();
   Offset _canvasPoint(Offset global) =>
       (_canvasKey.currentContext!.findRenderObject()! as RenderBox)
@@ -59,7 +60,23 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
   Offset _focalStart = Offset.zero;
   HomeModuleLayout get _item => _draft.forOrientation(_wide)[_selected]!;
   void _change(HomeModuleLayout value) => setState(() {
-    final modules = {..._draft.forOrientation(_wide), _selected: value};
+    final current = _draft.forOrientation(_wide);
+    // Hiding is not a geometry edit: preserve legacy/off-grid positions.
+    final previous = current[_selected]!;
+    final hiding = previous.visible && !value.visible;
+    final constrained = hiding
+        ? previous.copyWith(visible: false)
+        : HomeLayout.constrainEdit(_selected, value, wide: _wide);
+    if (current.entries.any(
+      (entry) =>
+          entry.key != _selected &&
+          HomeLayout.overlaps(constrained, entry.value),
+    )) {
+      _placementMessage = '位置与其他组件重叠，请移到空白处或使用「一键整理」。';
+      return;
+    }
+    _placementMessage = null;
+    final modules = {...current, _selected: constrained};
     _draft = _wide
         ? _draft.copyWith(landscape: modules)
         : _draft.copyWith(portrait: modules);
@@ -151,6 +168,7 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
                 onSelected: (_) => setState(() {
                   _selected = id;
                   _gestureStart = null;
+                  _placementMessage = null;
                 }),
               ),
           ],
@@ -204,8 +222,38 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
             ],
           ],
         ),
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton.icon(
+              key: const Key('arrange-layout'),
+              onPressed: () => setState(() {
+                final arranged = HomeLayout.arranged(
+                  _draft.forOrientation(_wide),
+                  wide: _wide,
+                );
+                _draft = _wide
+                    ? _draft.copyWith(landscape: arranged)
+                    : _draft.copyWith(portrait: arranged);
+                _placementMessage = null;
+              }),
+              icon: const Icon(Icons.grid_view_rounded, size: 18),
+              label: const Text('一键整理'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  _change(_item.copyWith(x: (1 - _item.width) / 2)),
+              child: const Text('水平居中'),
+            ),
+          ],
+        ),
+        if (_placementMessage != null)
+          Text(
+            _placementMessage!,
+            style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
+          ),
         const Text(
-          '拖拽移动 · 双指捏合缩放\n电脑滚轮缩放选中模块，方向键微调',
+          '网格吸附 · 统一边距 · 防止重叠\n拖拽移动 / 双指或滚轮缩放，方向键按网格调整',
           style: TextStyle(fontSize: 12, color: Color(0xFF98A2AF)),
         ),
         if (_selected == 'date' && !widget.settings.showDate)
@@ -239,6 +287,11 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
                 key: _canvasKey,
                 clipBehavior: Clip.hardEdge,
                 children: [
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(painter: _LayoutGridPainter()),
+                    ),
+                  ),
                   for (final entry in _draft.forOrientation(_wide).entries)
                     if (entry.value.visible)
                       Positioned(
@@ -252,9 +305,15 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
                           child: GestureDetector(
                             key: ValueKey('edit-${entry.key}'),
                             behavior: HitTestBehavior.opaque,
-                            onTap: () => setState(() => _selected = entry.key),
+                            onTap: () => setState(() {
+                              _selected = entry.key;
+                              _placementMessage = null;
+                            }),
                             onScaleStart: (details) {
-                              setState(() => _selected = entry.key);
+                              setState(() {
+                                _selected = entry.key;
+                                _placementMessage = null;
+                              });
                               _gestureStart = _item;
                               _focalStart = _canvasPoint(details.focalPoint);
                             },
@@ -332,6 +391,7 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
       actions: [
         TextButton(
           onPressed: () => setState(() {
+            _placementMessage = null;
             final defaults = HomeLayout.defaults(_wide);
             _draft = _wide
                 ? _draft.copyWith(landscape: defaults)
@@ -357,13 +417,13 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
             return KeyEventResult.handled;
           }
           final delta = event.logicalKey == LogicalKeyboardKey.arrowLeft
-              ? const Offset(-.005, 0)
+              ? const Offset(-.02, 0)
               : event.logicalKey == LogicalKeyboardKey.arrowRight
-              ? const Offset(.005, 0)
+              ? const Offset(.02, 0)
               : event.logicalKey == LogicalKeyboardKey.arrowUp
-              ? const Offset(0, -.005)
+              ? const Offset(0, -.02)
               : event.logicalKey == LogicalKeyboardKey.arrowDown
-              ? const Offset(0, .005)
+              ? const Offset(0, .02)
               : null;
           if (delta == null) return KeyEventResult.ignored;
           _change(_item.copyWith(x: _item.x + delta.dx, y: _item.y + delta.dy));
@@ -383,6 +443,7 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
                     onSelected: (_) => setState(() {
                       _wide = false;
                       _gestureStart = null;
+                      _placementMessage = null;
                     }),
                   ),
                   const SizedBox(width: 8),
@@ -394,6 +455,7 @@ class _HomeLayoutEditorState extends State<HomeLayoutEditor> {
                   onSelected: (_) => setState(() {
                     _wide = true;
                     _gestureStart = null;
+                    _placementMessage = null;
                   }),
                 ),
                 const SizedBox(width: 12),
@@ -480,7 +542,7 @@ class _PreciseLayoutDialogState extends State<_PreciseLayoutDialog> {
                 ),
               ),
             ),
-          const Text('坐标相对于安全显示区域，超出边界会自动收回。'),
+          const Text('坐标按 2% 网格吸附，保留边距与最小尺寸；重叠调整不会应用。'),
           if (_error != null)
             Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
         ],
@@ -512,4 +574,29 @@ class _PreciseLayoutDialogState extends State<_PreciseLayoutDialog> {
       ),
     ],
   );
+}
+
+class _LayoutGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0x1867D8C2)
+      ..strokeWidth = .5;
+    // Major 10% guides keep the small preview readable; edits use a 2% grid.
+    for (var i = 1; i < 10; i++) {
+      canvas.drawLine(
+        Offset(size.width * i / 10, 0),
+        Offset(size.width * i / 10, size.height),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(0, size.height * i / 10),
+        Offset(size.width, size.height * i / 10),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LayoutGridPainter oldDelegate) => false;
 }

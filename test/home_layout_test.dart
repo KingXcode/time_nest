@@ -4,6 +4,65 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:time_nest/clock/home_layout.dart';
 
 void main() {
+  test('editing snaps to a shared grid, gutter and module minimums', () {
+    final tiny = HomeLayout.constrainEdit(
+      'crypto',
+      const HomeModuleLayout(x: .999, y: -.1, width: .13, height: .07),
+      wide: false,
+    );
+    expect(tiny.width, .8);
+    expect(tiny.height, .28);
+    expect(tiny.x, closeTo(.18, .00001));
+    expect(tiny.y, .02);
+    final time = HomeLayout.constrainEdit(
+      'time',
+      const HomeModuleLayout(x: .113, y: .193, width: .533, height: .177),
+      wide: true,
+    );
+    expect(time.x, .12);
+    expect(time.y, .2);
+    expect(time.width, .54);
+    expect(time.height, .18);
+  });
+
+  test(
+    'arrange preserves visibility and does not change input or other profile',
+    () {
+      for (final wide in [false, true]) {
+        final source = HomeLayout.defaults(wide);
+        final before = jsonEncode(
+          source.map((k, v) => MapEntry(k, v.toJson())),
+        );
+        final arranged = HomeLayout.arranged(source, wide: wide);
+        expect(
+          jsonEncode(source.map((k, v) => MapEntry(k, v.toJson()))),
+          before,
+        );
+        for (final id in homeModules) {
+          expect(arranged[id]!.visible, source[id]!.visible);
+          final item = arranged[id]!;
+          expect(item.x, greaterThanOrEqualTo(.02));
+          expect(item.y, greaterThanOrEqualTo(.02));
+          expect(item.x + item.width, lessThanOrEqualTo(.98));
+          expect(item.y + item.height, lessThanOrEqualTo(.98));
+          for (final other in homeModules.where((v) => v != id)) {
+            expect(
+              HomeLayout.overlaps(
+                item.copyWith(visible: true),
+                arranged[other]!.copyWith(visible: true),
+              ),
+              isFalse,
+            );
+          }
+        }
+        if (!wide) {
+          expect(arranged['weather']!.x, arranged['crypto']!.x);
+          expect(arranged['weather']!.width, arranged['crypto']!.width);
+        }
+      }
+    },
+  );
+
   test('invalid documents and unknown versions use safe defaults', () {
     for (final raw in [
       null,

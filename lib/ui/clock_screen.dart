@@ -286,6 +286,12 @@ class _ClockScreenState extends State<ClockScreen>
           MediaQuery.textScalerOf(context).scale(1) <
       500;
 
+  double get _headerHeight =>
+      (MediaQuery.textScalerOf(context).scale(16) * 1.2 +
+              MediaQuery.textScalerOf(context).scale(9) * 1.4 +
+              24)
+          .clamp(64.0, 160.0);
+
   List<Widget> _toolbarControls() => [
     if (!_introVisible || _panelOpen)
       if (_compactToolbar)
@@ -386,7 +392,7 @@ class _ClockScreenState extends State<ClockScreen>
                     onStart: _startPresentation,
                   )
                 else
-                  SizedBox(height: _timer.mode == 'clock' ? 52 : 28),
+                  const SizedBox(height: 12),
             ],
           ),
         ),
@@ -457,7 +463,7 @@ class _ClockScreenState extends State<ClockScreen>
             child: Stack(
               children: [
                 Positioned.fill(
-                  top: _compactToolbar ? 112 : 52,
+                  top: _headerHeight + 8,
                   child: Column(
                     children: [
                       Expanded(
@@ -465,6 +471,25 @@ class _ClockScreenState extends State<ClockScreen>
                           builder: (_, box) => _workspace(box),
                         ),
                       ),
+                      if (!_introVisible && !_panelOpen && !_showUpdateNotice)
+                        Padding(
+                          key: const Key('home-status-footer'),
+                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+                          child: Visibility(
+                            visible: _toolbarVisible,
+                            maintainSize: true,
+                            maintainAnimation: true,
+                            maintainState: true,
+                            child: Text(
+                              '${_browser.state.wakeLabel} · 轻点屏幕唤出操作',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFF989DA5),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
                       if (_showUpdateNotice)
                         _UpdateNotice(
                           state: _browser.state,
@@ -476,7 +501,7 @@ class _ClockScreenState extends State<ClockScreen>
                 Align(
                   alignment: Alignment.topCenter,
                   child: Padding(
-                    padding: const EdgeInsets.only(right: 96),
+                    padding: EdgeInsets.only(right: _compactToolbar ? 144 : 96),
                     child: ExcludeFocus(
                       excluding: !_toolbarVisible,
                       child: ExcludeSemantics(
@@ -496,123 +521,163 @@ class _ClockScreenState extends State<ClockScreen>
                                 children: [
                                   Row(
                                     children: [
-                                      PopupMenuButton<String>(
-                                        tooltip: '切换模式',
-                                        initialValue: _timer.mode,
-                                        onSelected: (value) {
-                                          if (value == 'layout') {
-                                            _openLayout();
-                                            return;
-                                          }
-                                          if (value == 'dashboard') {
-                                            _openDashboard();
-                                            return;
-                                          }
-                                          if (value == 'toolbox') {
-                                            _openToolbox();
-                                            return;
-                                          }
-                                          if (value == 'presentation') {
-                                            _startPresentation();
-                                            return;
-                                          }
-                                          _timer.selectMode(value);
-                                          _clock.updateSettings(
-                                            value == 'clock'
-                                                ? _settings.value
-                                                : _settings.value.copyWith(
-                                                    showSeconds: false,
-                                                    showMilliseconds: false,
+                                      Flexible(
+                                        child: PopupMenuButton<String>(
+                                          tooltip: '切换模式',
+                                          initialValue: _timer.mode,
+                                          onSelected: (value) {
+                                            if (value.startsWith(
+                                              'orientation:',
+                                            )) {
+                                              _changeSettings(
+                                                _settings.value.copyWith(
+                                                  orientation: value.substring(
+                                                    12,
                                                   ),
-                                          );
-                                          _reveal();
-                                        },
-                                        itemBuilder: (_) => const [
-                                          PopupMenuItem(
-                                            value: 'clock',
-                                            child: Text('时钟'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'countdown',
-                                            child: Text('倒计时'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'focus',
-                                            child: Text('番茄钟'),
-                                          ),
-                                          PopupMenuDivider(),
-                                          PopupMenuItem(
-                                            value: 'layout',
-                                            child: Text('首页布局'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'toolbox',
-                                            child: Text('工具箱'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'presentation',
-                                            child: Text('开始展示'),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'dashboard',
-                                            child: Text('每日看板'),
-                                          ),
-                                        ],
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 12,
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    switch (_timer.mode) {
-                                                      'countdown' => '倒计时',
-                                                      'focus' => '番茄钟',
-                                                      _ => '此刻',
-                                                    },
-                                                    style: const TextStyle(
-                                                      fontSize: 16,
+                                                ),
+                                              );
+                                              return;
+                                            }
+                                            if (value == 'layout') {
+                                              _openLayout();
+                                              return;
+                                            }
+                                            if (value == 'dashboard') {
+                                              _openDashboard();
+                                              return;
+                                            }
+                                            if (value == 'toolbox') {
+                                              _openToolbox();
+                                              return;
+                                            }
+                                            if (value == 'presentation') {
+                                              _startPresentation();
+                                              return;
+                                            }
+                                            _timer.selectMode(value);
+                                            _clock.updateSettings(
+                                              value == 'clock'
+                                                  ? _settings.value
+                                                  : _settings.value.copyWith(
+                                                      showSeconds: false,
+                                                      showMilliseconds: false,
                                                     ),
-                                                  ),
-                                                  if (_timer.mode == 'clock')
-                                                    const Text(
-                                                      '版本 $appVersion',
-                                                      key: Key('home-version'),
-                                                      style: TextStyle(
-                                                        fontSize: 9,
-                                                        height: 1.4,
-                                                        color: Color(
-                                                          0xFF8995A5,
-                                                        ),
-                                                        letterSpacing: 0.2,
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                              const Icon(
-                                                Icons.expand_more_rounded,
-                                                size: 20,
-                                              ),
+                                            );
+                                            _reveal();
+                                          },
+                                          itemBuilder: (_) => [
+                                            PopupMenuItem(
+                                              value: 'clock',
+                                              child: Text('时钟'),
+                                            ),
+                                            PopupMenuItem(
+                                              value: 'countdown',
+                                              child: Text('倒计时'),
+                                            ),
+                                            PopupMenuItem(
+                                              value: 'focus',
+                                              child: Text('番茄钟'),
+                                            ),
+                                            PopupMenuDivider(),
+                                            PopupMenuItem(
+                                              value: 'layout',
+                                              child: Text('首页布局'),
+                                            ),
+                                            PopupMenuItem(
+                                              value: 'toolbox',
+                                              child: Text('工具箱'),
+                                            ),
+                                            PopupMenuItem(
+                                              value: 'presentation',
+                                              child: Text('开始展示'),
+                                            ),
+                                            if (_compactToolbar) ...[
+                                              const PopupMenuDivider(),
+                                              for (final entry in const {
+                                                'auto': '自动方向',
+                                                'landscape': '手动横屏',
+                                                'portrait': '手动竖屏',
+                                              }.entries)
+                                                CheckedPopupMenuItem<String>(
+                                                  value:
+                                                      'orientation:${entry.key}',
+                                                  checked:
+                                                      _settings
+                                                          .value
+                                                          .orientation ==
+                                                      entry.key,
+                                                  child: Text(entry.value),
+                                                ),
                                             ],
+                                            const PopupMenuItem(
+                                              value: 'dashboard',
+                                              child: Text('每日看板'),
+                                            ),
+                                          ],
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 12,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Flexible(
+                                                  child: Column(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        switch (_timer.mode) {
+                                                          'countdown' => '倒计时',
+                                                          'focus' => '番茄钟',
+                                                          _ => '此刻',
+                                                        },
+                                                        style: const TextStyle(
+                                                          fontSize: 16,
+                                                        ),
+                                                      ),
+                                                      if (_timer.mode ==
+                                                          'clock')
+                                                        const Text(
+                                                          '版本 $appVersion',
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          key: Key(
+                                                            'home-version',
+                                                          ),
+                                                          style: TextStyle(
+                                                            fontSize: 9,
+                                                            height: 1.4,
+                                                            color: Color(
+                                                              0xFF8995A5,
+                                                            ),
+                                                            letterSpacing: 0.2,
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                const Icon(
+                                                  Icons.expand_more_rounded,
+                                                  size: 20,
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
-                                      const Spacer(),
+                                      if (!_compactToolbar) const Spacer(),
                                       if (!_compactToolbar)
                                         ..._toolbarControls(),
                                     ],
                                   ),
-                                  if (_compactToolbar)
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: _toolbarControls(),
-                                    ),
                                 ],
                               ),
                             ),
@@ -624,41 +689,33 @@ class _ClockScreenState extends State<ClockScreen>
                 ),
                 Align(
                   alignment: Alignment.topRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        key: const Key('home-toolbox'),
-                        tooltip: '工具箱',
-                        onPressed: _openToolbox,
-                        icon: const Icon(Icons.handyman_outlined, size: 22),
-                      ),
-                      IconButton(
-                        tooltip: '每日看板',
-                        onPressed: _openDashboard,
-                        icon: const Icon(Icons.dashboard_outlined, size: 22),
-                      ),
-                    ],
-                  ),
-                ),
-                if (!_introVisible &&
-                    _toolbarVisible &&
-                    !_panelOpen &&
-                    !_showUpdateNotice)
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        '${_browser.state.wakeLabel} · 轻点屏幕唤出操作',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFF989DA5),
-                          fontSize: 11,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: (_headerHeight - 48) / 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_compactToolbar)
+                          IconButton(
+                            tooltip: '展示设置',
+                            onPressed: _toggleSettings,
+                            isSelected: _panelOpen,
+                            icon: const Icon(Icons.tune_rounded, size: 22),
+                          ),
+                        IconButton(
+                          key: const Key('home-toolbox'),
+                          tooltip: '工具箱',
+                          onPressed: _openToolbox,
+                          icon: const Icon(Icons.handyman_outlined, size: 22),
                         ),
-                      ),
+                        IconButton(
+                          tooltip: '每日看板',
+                          onPressed: _openDashboard,
+                          icon: const Icon(Icons.dashboard_outlined, size: 22),
+                        ),
+                      ],
                     ),
                   ),
+                ),
               ],
             ),
           ),

@@ -233,7 +233,7 @@ void main() {
       );
 
       testWidgets(
-        '$module editor painted bounds match selection and drag to edges for ${profile.name}',
+        '$module editor painted bounds match selection and drag to gutters for ${profile.name}',
         (tester) async {
           await tester.binding.setSurfaceSize(profile.size);
           addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -297,7 +297,12 @@ void main() {
               _expectRect(actual, _paintRect(tester, selection));
               expect(
                 right ? actual.right : actual.left,
-                closeTo(right ? preview.right : preview.left, .01),
+                closeTo(
+                  right
+                      ? preview.right - preview.width * .02
+                      : preview.left + preview.width * .02,
+                  .01,
+                ),
               );
             }
             expect(tester.takeException(), isNull);

@@ -257,7 +257,7 @@ try {
   await delay(500); await page.screenshot('05-portrait.png');
   passed('desktop, landscape, portrait and settings screenshots');
   await showToolbar();
-  await activate('横竖屏切换'); await activate('手动横屏');
+  await activate((await labels()).some(item => item.label === '横竖屏切换') ? '横竖屏切换' : '切换模式'); await activate('手动横屏');
   assert.equal(await page.evaluate('JSON.parse(shike.readSettings()).orientation'), 'landscape');
   await showToolbar(); await activate('展示设置');
   for (const [label, tone, showDate] of [['办公','neutral',true], ['床头','warm',true], ['极简','neutral',false]]) {
@@ -270,7 +270,7 @@ try {
   await page.screenshot('07-manual-landscape.png');
   await page.send('Page.reload'); await ready(); await enableSemantics();
   assert.equal(await page.evaluate('JSON.parse(shike.readSettings()).orientation'), 'landscape');
-  await showToolbar(); await activate('横竖屏切换'); await activate('手动竖屏');
+  await showToolbar(); await activate((await labels()).some(item => item.label === '横竖屏切换') ? '横竖屏切换' : '切换模式'); await activate('手动竖屏');
   await page.screenshot('08-manual-portrait.png');
   passed('all three presets and manual orientation persist; rotated controls remain clickable');
   await showToolbar(); await activate('切换模式'); await activate('倒计时');
@@ -298,7 +298,7 @@ try {
   assert.equal(await page.evaluate('JSON.parse(shike.readTimer()).focus.phase'), 'shortBreak');
   await page.screenshot('10-focus-rest.png');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 736, height: 320, deviceScaleFactor: 1, mobile: false });
-  await showToolbar(); await activate('横竖屏切换'); await activate('自动方向');
+  await showToolbar(); await activate((await labels()).some(item => item.label === '横竖屏切换') ? '横竖屏切换' : '切换模式'); await activate('自动方向');
   await activate('暂停');
   assert.equal(await page.evaluate('JSON.parse(shike.readTimer()).focus.status'), 'paused');
   await page.screenshot('11-short-landscape.png');

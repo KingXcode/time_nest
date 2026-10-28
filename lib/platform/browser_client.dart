@@ -22,6 +22,7 @@ class BrowserState {
     this.offlineTotal = 0,
     this.updateAvailable = false,
     this.updateError = false,
+    this.updateCheckStatus = 'idle',
     this.refreshing = false,
     this.secureContext = false,
   });
@@ -42,6 +43,7 @@ class BrowserState {
     offlineTotal: (json['offlineTotal'] as num?)?.toInt() ?? 0,
     updateAvailable: json['updateAvailable'] == true,
     updateError: json['updateError'] == true,
+    updateCheckStatus: json['updateCheckStatus'] as String? ?? 'idle',
     refreshing: json['refreshing'] == true,
     secureContext: json['secureContext'] == true,
   );
@@ -61,6 +63,20 @@ class BrowserState {
   final int offlineTotal;
   final bool updateAvailable;
   final bool updateError;
+  final String updateCheckStatus;
+
+  bool get checkingUpdate =>
+      updateCheckStatus == 'checking' || updateCheckStatus == 'downloading';
+
+  String? get updateCheckLabel => switch (updateCheckStatus) {
+    'checking' => '正在连接服务器检查新版本…',
+    'downloading' => '发现新版本，正在准备更新资源…',
+    'current' => '检查完成，当前已是最新版本',
+    'available' => '新版本已就绪，可更新并重新加载',
+    'failed' => '检查更新失败，请联网后重试',
+    'timeout' => '检查更新超时，请稍后重试',
+    _ => null,
+  };
   final bool refreshing;
   final bool secureContext;
 

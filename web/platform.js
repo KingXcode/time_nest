@@ -31,6 +31,7 @@
     offlineCompleted: 0,
     offlineTotal: 0,
     updateAvailable: false,
+    updateCheckStatus: 'idle',
     updateError: false,
     refreshing: false,
     secureContext: win.isSecureContext === true,
@@ -53,6 +54,7 @@
   let setupPending = null;
   let swEpoch = 0;
   let updatePending = null;
+  let checkProgress = null;
   const explicitlyCheckedWorkers = new WeakSet();
   let probeAbort = null;
   let acceptedWorker = null;
@@ -192,7 +194,14 @@
   function queryReady() {
     if (disposed || paused || !registration?.active || !ownsWorker(registration.active)) return;
     const serial = ++readySerial;
-    if (typeof win.MessageChannel !== 'function') { patch({ offlineStatus: 'unavailable' }); return; }
+    const operation = checkProgress;
+    const queriedWorker = registration.active;
+    if (operation) operation.readiness = 'pending';
+    if (typeof win.MessageChannel !== 'function') {
+      patch({ offlineStatus: 'unavailable' });
+      if (operation) { operation.readiness = 'failed'; advanceCheck(); }
+      return;
+    }
     const channel = new win.MessageChannel();
     let finished = false;
     let timer;
@@ -203,7 +212,15 @@
       channel.port1.close();
       channel.port2.close();
       channels.delete(cancel);
-      if (value && serial === readySerial && !paused) patch({ offlineStatus: value });
+      if (value && serial === readySerial && !paused) {
+        patch({ offlineStatus: value });
+        if (operation && checkProgress === operation) {
+          operation.readiness = value;
+          operation.readyWorker = queriedWorker;
+          advanceCheck();
+          continueRefresh();
+        }
+      }
     }
     const cancel = () => finish(null);
     channels.add(cancel);
@@ -214,7 +231,12 @@
         activeUpdateAvailable = Boolean(event.data.version && event.data.activeVersion
           && event.data.version !== event.data.activeVersion);
         patch({ updateAvailable: activeUpdateAvailable || Boolean(registration?.waiting && ownsWorker(registration.waiting)) });
-        finish(event.data.ready === true ? 'ready' : 'failed');
+        if (state.updateAvailable && state.updateCheckStatus === 'current') {
+          patch({ updateCheckStatus: 'available' });
+        }
+        const verifiedVersions = typeof event.data.version === 'string' && event.data.version.length > 0
+          && typeof event.data.activeVersion === 'string' && event.data.activeVersion.length > 0;
+        finish(event.data.ready === true && (!operation || verifiedVersions) ? 'ready' : 'failed');
         maybeAutoUpdate();
       }
     };
@@ -233,6 +255,7 @@
       observeWorker(registration.active);
       if (registration.active.state === 'activated') queryReady();
     }
+    advanceCheck();
     continueRefresh();
     maybeAutoUpdate();
   }
@@ -332,17 +355,69 @@
     if (!setupPending && Date.now() - lastUpdateCheckAt >= resumeCheckInterval) checkForUpdate(true);
     else scheduleUpdateCheck();
   }
+  // UI progress belongs to one check, not to the periodic scheduler. Installing
+  // workers outlive registration.update(); never call that intermediate state
+  // "current". A late promise or worker event cannot complete a newer check.
+  function endCheck(status, operation = checkProgress) {
+    if (!operation || checkProgress !== operation) return;
+    win.clearTimeout(operation.timer);
+    checkProgress = null;
+    patch({ updateCheckStatus: status });
+  }
+  function armCheck(operation, delay) {
+    win.clearTimeout(operation.timer);
+    operation.timer = win.setTimeout(() => {
+      if (checkProgress !== operation) return;
+      if (updatePending === operation) updatePending = null;
+      endCheck('timeout', operation);
+      if (operation.explicit || state.refreshing) patch({ updateError: true });
+      continueRefresh();
+      scheduleUpdateCheck();
+    }, delay);
+  }
+  function advanceCheck() {
+    const operation = checkProgress;
+    if (!operation || disposed || paused) return;
+    const worker = registration?.installing;
+    if (ownsWorker(worker) && worker.state !== 'redundant') {
+      operation.worker = worker;
+      if (state.updateCheckStatus !== 'downloading') {
+        patch({ updateCheckStatus: 'downloading' });
+        armCheck(operation, 90000);
+      }
+      return;
+    }
+    if (operation.worker?.state === 'redundant') {
+      if (updatePending === operation) updatePending = null;
+      endCheck('failed', operation);
+      if (operation.explicit || state.refreshing) patch({ updateError: true });
+      scheduleUpdateCheck();
+      return;
+    }
+    if (!operation.checked) return;
+    if (state.updateAvailable) { endCheck('available', operation); return; }
+    if (operation.readiness === 'pending') return;
+    if (operation.readiness === 'ready' && operation.readyWorker === registration?.active) {
+      endCheck('current', operation);
+    } else {
+      endCheck('failed', operation);
+      if (operation.explicit || state.refreshing) patch({ updateError: true });
+    }
+  }
   function checkForUpdate(automatic = false) {
     if (disposed || paused || !appReady || reloading) return;
     if (automatic && !canCheckAutomatically()) return;
-    if (updatePending || acceptedWorker || (state.refreshing && automatic)) {
+    if (updatePending || checkProgress || acceptedWorker || (state.refreshing && automatic)) {
       if (automatic) scheduleUpdateCheck();
       return;
     }
     stopUpdateChecks();
     lastUpdateCheckAt = Date.now();
-    const operation = { explicit: !automatic };
+    const operation = { explicit: !automatic, checked: false, timer: null, worker: null, readiness: null, readyWorker: null };
     updatePending = operation;
+    checkProgress = operation;
+    patch({ updateCheckStatus: 'checking' });
+    armCheck(operation, 30000);
     const epoch = swEpoch;
     const cancelled = () => disposed || paused || epoch !== swEpoch || updatePending !== operation;
     if (!automatic) patch({ updateError: false });
@@ -354,12 +429,16 @@
       if (cancelled()) return;
       await registration.update();
       if (!cancelled()) {
+        operation.checked = true;
         patch({ updateError: false });
         if (registration.waiting) automaticallyAcceptedWorkers.delete(registration.waiting);
         refreshRegistration();
       }
     })().catch(() => {
-      if (!cancelled() && (!automatic || state.refreshing)) patch({ updateError: true });
+      if (!cancelled()) {
+        endCheck('failed', operation);
+        if (!automatic || state.refreshing) patch({ updateError: true });
+      }
     }).finally(() => {
       if (updatePending !== operation) return;
       updatePending = null;
@@ -370,6 +449,7 @@
   }
   function finishRefresh(failed = false) {
     const wasRefreshing = state.refreshing;
+    if (failed && checkProgress) endCheck('failed');
     if (state.refreshing) updatePending = null;
     if (refreshTimer !== null) win.clearTimeout(refreshTimer);
     refreshTimer = null;
@@ -381,13 +461,14 @@
   }
   function reloadPage() {
     if (disposed || paused || reloading) return;
+    if (checkProgress) endCheck(state.updateAvailable ? 'available' : 'current');
     finishRefresh();
     reloading = true;
     stopUpdateChecks();
     win.location.reload();
   }
   function continueRefresh() {
-    if (!state.refreshing || disposed || paused || updatePending || reloading) return;
+    if (!state.refreshing || disposed || paused || updatePending || checkProgress || reloading) return;
     const owned = registration && [registration.active, registration.waiting, registration.installing].some(ownsWorker);
     // Development servers may intentionally have no release worker.
     if (!owned && state.offlineStatus === 'unavailable') { reloadPage(); return; }
@@ -413,7 +494,7 @@
     if (!state.secureContext || !sw) { reloadPage(); return; }
     // No polling: update completion and worker lifecycle events advance this
     // explicit request. A stalled download/activation must remain retryable.
-    refreshTimer = win.setTimeout(() => finishRefresh(true), 90000);
+    refreshTimer = win.setTimeout(() => { endCheck('timeout'); finishRefresh(true); }, 90000);
     checkForUpdate();
   }
   function maybeAutoUpdate() {
@@ -428,7 +509,7 @@
       automaticRefresh = true;
       refreshWorker = waiting;
       patch({ refreshing: true, updateError: false });
-      refreshTimer = win.setTimeout(() => finishRefresh(true), 90000);
+      refreshTimer = win.setTimeout(() => { endCheck('timeout'); finishRefresh(true); }, 90000);
       applyUpdate();
       if (state.updateError) finishRefresh(true);
     } else if (activeUpdateAvailable && state.offlineStatus === 'ready') {
@@ -472,6 +553,7 @@
   }
   function pageHide() {
     if (disposed) return;
+    endCheck('idle');
     finishRefresh();
     paused = true;
     stopUpdateChecks();
@@ -493,6 +575,7 @@
   }
   function dispose() {
     if (disposed) return;
+    endCheck('idle');
     finishRefresh();
     subscriber = null;
     keepAwake = false;

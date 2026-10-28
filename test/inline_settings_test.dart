@@ -109,9 +109,11 @@ void main() {
     tester,
   ) async {
     await launch(tester, introSeen: false);
-    // Compact toolbars expose the same action as an accessible play button.
-    expect(find.byTooltip('开始展示'), findsOneWidget);
-    await tester.tap(find.byTooltip('开始展示'));
+    // Mobile presentation now lives in the single-row header menu.
+    await tester.tap(find.byTooltip('切换模式'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('开始展示'));
     await tester.pump();
     expect(find.byType(SettingsPanel), findsNothing);
     expect(find.text('知道了'), findsNothing);

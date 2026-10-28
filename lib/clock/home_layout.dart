@@ -119,6 +119,78 @@ class HomeLayout {
             visible: false,
           ),
         };
+
+  /// Editing uses a shared 2% grid and a 2% outer gutter. Existing documents
+  /// are deliberately not rewritten until the user edits or chooses Arrange.
+  static HomeModuleLayout constrainEdit(
+    String id,
+    HomeModuleLayout item, {
+    required bool wide,
+  }) {
+    double snap(double n) => (n / .02).round() * .02;
+    final minWidth = switch (id) {
+      'weather' => wide ? .28 : .60,
+      'crypto' => wide ? .44 : .80,
+      _ => .40,
+    };
+    final minHeight = switch (id) {
+      'weather' => .18,
+      'crypto' => .28,
+      'time' => .12,
+      _ => .06,
+    };
+    final w = snap(item.width).clamp(minWidth, .96).toDouble();
+    final h = snap(item.height).clamp(minHeight, .96).toDouble();
+    return item.copyWith(
+      width: w,
+      height: h,
+      x: snap(item.x).clamp(.02, .98 - w).toDouble(),
+      y: snap(item.y).clamp(.02, .98 - h).toDouble(),
+    );
+  }
+
+  static bool overlaps(HomeModuleLayout a, HomeModuleLayout b) =>
+      a.visible &&
+      b.visible &&
+      a.x < b.x + b.width - .000001 &&
+      b.x < a.x + a.width - .000001 &&
+      a.y < b.y + b.height - .000001 &&
+      b.y < a.y + a.height - .000001;
+
+  /// A deliberate, reversible draft action. No module is hidden or re-enabled.
+  static Map<String, HomeModuleLayout> arranged(
+    Map<String, HomeModuleLayout> modules, {
+    required bool wide,
+  }) {
+    final slots = wide
+        ? const {
+            'date': HomeModuleLayout(x: .04, y: .04, width: .92, height: .10),
+            'time': HomeModuleLayout(x: .04, y: .16, width: .92, height: .30),
+            'weather': HomeModuleLayout(
+              x: .04,
+              y: .50,
+              width: .30,
+              height: .46,
+            ),
+            'crypto': HomeModuleLayout(x: .36, y: .50, width: .60, height: .46),
+          }
+        : const {
+            'date': HomeModuleLayout(x: .04, y: .04, width: .92, height: .08),
+            'time': HomeModuleLayout(x: .04, y: .14, width: .92, height: .20),
+            'weather': HomeModuleLayout(
+              x: .04,
+              y: .38,
+              width: .92,
+              height: .20,
+            ),
+            'crypto': HomeModuleLayout(x: .04, y: .62, width: .92, height: .34),
+          };
+    return {
+      for (final entry in slots.entries)
+        entry.key: entry.value.copyWith(visible: modules[entry.key]?.visible),
+    };
+  }
+
   factory HomeLayout.fromJson(Object? raw) {
     if (raw is! Map || raw['version'] != 1) return HomeLayout();
     Map<String, HomeModuleLayout> read(bool wide) {

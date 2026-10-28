@@ -73,8 +73,10 @@ function browser(options = {}) {
       postMessage(message, ports) {
         this.messages.push(message);
         if (message.type === 'SHIKE_STATUS' && !options.noStatusReply) {
-          ports[0].postMessage({ type: 'SHIKE_STATUS', ready: options.ready !== false,
-            version: options.pageVersion || 'one', activeVersion: options.activeVersion || 'one' });
+          const data = { type: 'SHIKE_STATUS', ready: options.ready !== false,
+            version: options.pageVersion || 'one', activeVersion: options.activeVersion || 'one' };
+          if (options.statusReply) options.statusReply(data, ports[0]);
+          else ports[0].postMessage(data);
         }
         if (message.type === 'SKIP_WAITING' && options.postFails) throw new Error('post failed');
       },
@@ -157,7 +159,7 @@ test('public API and state are exact and unsupported browsers never schedule che
   ].sort());
   assert.deepEqual(Object.keys(b.state()).sort(), [
     'visible', 'resumeSerial', 'storageAvailable', 'wakeSupported', 'wakeStatus', 'fullscreenSupported',
-    'fullscreen', 'fullscreenError', 'standalone', 'offlineStatus', 'offlineCompleted', 'offlineTotal', 'updateAvailable', 'updateError', 'refreshing', 'secureContext',
+    'fullscreen', 'fullscreenError', 'standalone', 'offlineStatus', 'offlineCompleted', 'offlineTotal', 'updateAvailable', 'updateCheckStatus', 'updateError', 'refreshing', 'secureContext',
   ].sort());
   assert.equal(b.state().wakeStatus, 'off');
   assert.equal(b.state().offlineStatus, 'unavailable');
@@ -844,4 +846,175 @@ test('completion sound requires a gesture-enabled context and a visible page', (
   b.api.armTimerSound(); b.api.playTimerSound(); assert.equal(starts, 3);
   b.hide(); b.api.playTimerSound(); assert.equal(starts, 3);
   b.api.dispose(); assert.equal(closes, 1);
+});
+
+test('check progress is immediate, deduplicated and current only after network completion', async () => {
+  const pending = deferred();
+  const b = browser({ sw: true, updateRequest: () => pending.promise });
+  await settle();
+  assert.equal(b.state().updateCheckStatus, 'idle');
+  b.api.checkForUpdate(); b.api.checkForUpdate();
+  assert.equal(b.state().updateCheckStatus, 'checking');
+  await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  pending.resolve(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'current');
+  b.api.dispose();
+});
+
+test('download progress outlives update promise and never claims current during installation', async () => {
+  const options = { sw: true };
+  const b = browser(options); await settle();
+  const next = b.worker('installing');
+  options.updateRequest = () => { b.reg.installing = next; b.reg.emit('updatefound'); };
+  b.api.checkForUpdate(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'downloading');
+  b.api.checkForUpdate();
+  assert.equal(b.calls.filter(c => c === 'update').length, 1);
+  b.reg.installing = null; b.reg.waiting = next;
+  next.state = 'installed'; next.emit('statechange');
+  assert.equal(b.state().updateCheckStatus, 'available');
+  b.api.dispose();
+});
+
+test('manual check timeout fences late completion and retry has independent progress', async () => {
+  const first = deferred(), second = deferred();
+  const options = { sw: true, updateRequest: () => first.promise };
+  const b = browser(options); await settle();
+  b.api.checkForUpdate(); await settle();
+  await b.advance(30000);
+  assert.equal(b.state().updateCheckStatus, 'timeout');
+  assert.equal(b.state().updateError, true);
+  options.updateRequest = () => second.promise;
+  b.api.checkForUpdate(); await settle();
+  first.resolve(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'checking');
+  second.resolve(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'current');
+  assert.equal(b.state().updateError, false);
+  b.api.dispose();
+});
+
+test('download timeout is bounded and failed install has explicit failure progress', async () => {
+  for (const outcome of ['timeout', 'failed']) {
+    const options = { sw: true };
+    const b = browser(options); await settle();
+    const next = b.worker('installing');
+    options.updateRequest = () => { b.reg.installing = next; b.reg.emit('updatefound'); };
+    b.api.checkForUpdate(); await settle();
+    if (outcome === 'timeout') await b.advance(90000);
+    else { b.reg.installing = null; next.state = 'redundant'; next.emit('statechange'); }
+    assert.equal(b.state().updateCheckStatus, outcome);
+    assert.equal(b.state().updateError, true);
+    b.api.dispose();
+    assert.equal(b.timers.size, 0);
+  }
+});
+
+test('pagehide and dispose cancel check progress and ignore delayed results', async () => {
+  for (const action of ['pagehide', 'dispose']) {
+    const pending = deferred();
+    const b = browser({ sw: true, updateRequest: () => pending.promise });
+    await settle(); b.api.checkForUpdate(); await settle();
+    if (action === 'pagehide') b.events.emit('pagehide'); else b.api.dispose();
+    assert.equal(b.state().updateCheckStatus, 'idle');
+    pending.resolve(); await settle();
+    assert.equal(b.state().updateCheckStatus, 'idle');
+    assert.equal(b.timers.size, 0);
+    b.api.dispose();
+  }
+});
+
+test('network failure reports failed and install events can show download before update resolves', async () => {
+  const options = { sw: true, updateFails: true };
+  const b = browser(options); await settle();
+  b.api.checkForUpdate(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'failed');
+  options.updateFails = false;
+  const pending = deferred();
+  options.updateRequest = () => pending.promise;
+  b.api.checkForUpdate(); await settle();
+  b.reg.installing = b.worker('installing'); b.reg.emit('updatefound');
+  assert.equal(b.state().updateCheckStatus, 'downloading');
+  await b.advance(30000);
+  assert.equal(b.state().updateCheckStatus, 'downloading');
+  pending.resolve(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'downloading');
+  b.api.dispose();
+});
+
+test('failed install before update promise completes cannot become current', async () => {
+  const pending = deferred();
+  const b = browser({ sw: true, updateRequest: () => pending.promise });
+  await settle(); b.api.checkForUpdate(); await settle();
+  const next = b.worker('installing'); b.reg.installing = next; b.reg.emit('updatefound');
+  b.reg.installing = null; next.state = 'redundant'; next.emit('statechange');
+  assert.equal(b.state().updateCheckStatus, 'failed');
+  pending.resolve(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'failed');
+  assert.equal(b.state().updateError, true);
+  b.api.dispose();
+});
+
+test('late verified active-version response keeps checking until available', async () => {
+  const options = { sw: true, hidden: true };
+  const b = browser(options); await settle();
+  let reply;
+  options.activeVersion = 'two';
+  options.statusReply = (data, port) => { reply = () => port.postMessage(data); };
+  b.api.checkForUpdate(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'checking');
+  reply();
+  assert.equal(b.state().updateAvailable, true);
+  assert.equal(b.state().updateCheckStatus, 'available');
+  assert.equal(b.reloads(), 0);
+  b.api.dispose();
+});
+
+test('failed early installation releases operation guard for immediate retry', async () => {
+  const first = deferred();
+  const options = { sw: true, updateRequest: () => first.promise };
+  const b = browser(options); await settle();
+  b.api.checkForUpdate(); await settle();
+  const next = b.worker('installing'); b.reg.installing = next; b.reg.emit('updatefound');
+  b.reg.installing = null; next.state = 'redundant'; next.emit('statechange');
+  options.updateRequest = undefined;
+  b.api.checkForUpdate(); await settle();
+  assert.equal(b.calls.filter(c => c === 'update').length, 2);
+  assert.equal(b.state().updateCheckStatus, 'current');
+  first.resolve(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'current');
+  assert.equal(b.state().updateError, false);
+  b.api.dispose();
+});
+
+test('current requires a matching version reply and missing reply fails instead of claiming current', async () => {
+  const options = { sw: true, hidden: true };
+  const b = browser(options); await settle();
+  options.noStatusReply = true;
+  b.api.checkForUpdate(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'checking');
+  await b.advance(4000);
+  assert.equal(b.state().updateCheckStatus, 'failed');
+  assert.equal(b.state().updateError, true);
+  let reply;
+  options.noStatusReply = false;
+  options.statusReply = (data, port) => { reply = () => port.postMessage(data); };
+  b.api.checkForUpdate(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'checking');
+  reply();
+  assert.equal(b.state().updateCheckStatus, 'current');
+  assert.equal(b.state().updateError, false);
+  b.api.dispose();
+});
+
+test('unverifiable version reply never reports current and manual refresh does not reload', async () => {
+  const options = { sw: true };
+  const b = browser(options); await settle();
+  options.statusReply = (data, port) => port.postMessage({ type: 'SHIKE_STATUS', ready: true });
+  b.api.refreshPage(); await settle();
+  assert.equal(b.state().updateCheckStatus, 'failed');
+  assert.equal(b.state().refreshing, false);
+  assert.equal(b.reloads(), 0);
+  b.api.dispose();
 });

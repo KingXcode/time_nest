@@ -287,11 +287,21 @@ class SettingsPanel extends StatelessWidget {
                                 : const Icon(Icons.refresh_rounded, size: 18),
                             label: Text(state.refreshing ? '正在刷新…' : '刷新页面'),
                           ),
-                          AppleButton.bordered(
-                            onPressed: state.refreshing
+                          AppleButton.borderedIcon(
+                            onPressed: state.refreshing || state.checkingUpdate
                                 ? null
                                 : browser.checkForUpdate,
-                            child: const Text('检查更新'),
+                            icon: state.checkingUpdate
+                                ? const SizedBox.square(
+                                    dimension: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.system_update_alt, size: 18),
+                            label: Text(
+                              state.checkingUpdate ? '检查更新中' : '检查更新',
+                            ),
                           ),
                           if (state.updateAvailable)
                             AppleButton.filled(
@@ -302,6 +312,8 @@ class SettingsPanel extends StatelessWidget {
                             ),
                         ],
                       ),
+                      if (state.updateCheckLabel case final label?)
+                        Semantics(liveRegion: true, child: _Note(label)),
                       const _Note('刷新页面会先检查服务器更新，加载新版后重新打开；保留已保存的设置和计时。'),
                       const _Note('网页会自动检查并加载完整新版；也可以使用上方按钮手动更新。'),
                       if (state.updateError)

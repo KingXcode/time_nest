@@ -220,7 +220,7 @@ void main() {
     await _save(tester);
     expect(host.layout.landscape['time']!.width, closeTo(.72, .0001));
     expect(host.layout.portrait['time']!.width, .94);
-    expect(host.layout.portrait['date']!.width, closeTo(.792, .0001));
+    expect(host.layout.portrait['date']!.width, closeTo(.8, .0001));
     expect(host.layout.landscape['date']!.width, .8);
     await tester.tap(find.text('Open editor'));
     await tester.pumpAndSettle();
@@ -295,7 +295,7 @@ void main() {
         greaterThan(.1),
         reason: 'Screen down is canvas right after a clockwise quarter turn',
       );
-      expect(time.y, closeTo(.17, .0001));
+      expect(time.y, closeTo(.18, .0001));
       await _close(tester);
     },
   );
@@ -322,7 +322,7 @@ void main() {
   );
 
   testWidgets(
-    'precision rejects invalid input, cancels cleanly and clamps confirmed values',
+    'precision rejects invalid input and overlapping placement without losing draft',
     (tester) async {
       final host = await _open(tester);
       final original = _module(tester, 'time');
@@ -349,14 +349,79 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
       await _save(tester);
       final time = host.layout.landscape['time']!;
-      expect(time.x, closeTo(.4, .0001));
-      expect(time.y, 0);
-      expect(time.width, .6);
-      expect(time.height, .2);
+      expect(time.x, .1);
+      expect(time.y, .17);
+      expect(time.width, .8);
+      expect(time.height, .3);
       expect(tester.takeException(), isNull);
       await _close(tester);
     },
   );
+
+  testWidgets(
+    'arrange aligns portrait cards and cancellation preserves saved layout',
+    (tester) async {
+      final host = await _open(tester, landscape: false);
+      await tester.tap(find.byKey(const Key('select-weather')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('module-visible')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('select-crypto')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('module-visible')));
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('arrange-layout')));
+      await tester.tap(find.byKey(const Key('arrange-layout')));
+      await tester.pump();
+      expect(_module(tester, 'weather').left, _module(tester, 'crypto').left);
+      expect(_module(tester, 'weather').width, _module(tester, 'crypto').width);
+      expect(
+        _module(tester, 'weather').bottom,
+        lessThan(_module(tester, 'crypto').top),
+      );
+      await _save(tester);
+      expect(host.layout.portrait['weather']!.visible, isTrue);
+      expect(host.layout.portrait['crypto']!.visible, isTrue);
+      expect(host.layout.landscape['weather']!.visible, isFalse);
+      final saved = host.layout;
+      await tester.tap(find.text('Open editor'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('缩小'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('取消'));
+      await tester.pumpAndSettle();
+      expect(host.layout, saved);
+      expect(tester.takeException(), isNull);
+      await _close(tester);
+    },
+  );
+
+  testWidgets('hiding a legacy off-grid module does not rewrite its geometry', (
+    tester,
+  ) async {
+    final host = await _open(tester);
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pumpAndSettle();
+    const legacy = HomeModuleLayout(
+      x: .117,
+      y: .193,
+      width: .653,
+      height: .271,
+    );
+    host.layout = host.layout.copyWith(
+      landscape: {...host.layout.landscape, 'time': legacy},
+    );
+    await tester.tap(find.text('Open editor'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('module-visible')));
+    await tester.pump();
+    await _save(tester);
+    expect(
+      host.layout.landscape['time']!.toJson(),
+      legacy.copyWith(visible: false).toJson(),
+    );
+    await _close(tester);
+  });
 
   testWidgets('reset restores only selected orientation', (tester) async {
     final host = await _open(tester);
