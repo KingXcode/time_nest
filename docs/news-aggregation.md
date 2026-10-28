@@ -7,6 +7,32 @@
 
 `tool/fetch_news.py` 仅读取标题、原文链接、来源、发布日期，不抓取全文、图片或绕过登录/付费/反爬限制。每源最长 12 秒、最多 2 MB，三路并发；失败源沿用最多 7 天缓存并明确标示。按发布时间降序，缺失/不可信时间为空并排最后，不拿抓取时间冒充发布时间。相同规范 URL / 完全一致的规范标题去重；最多保留 300 条。RSS 本身不提供无限历史，加载更多只展开当前快照已有内容。
 
+## 应用内阅读与内容许可
+
+资讯详情在标题下直接提供「阅读原文」，再显示来源与原始发布时间。文章信息来自已经加载的快照，打开详情不会重复请求原文页。详情明确区分「全文」「摘要」和「未提供正文」，不会把截断文字或标题当作完整文章。
+
+**当前三个中文来源均未启用正文或摘要转载。** 截至 2026-10-28，尚未确认适用于本公开站点的正文再发布许可；可取得 RSS 内容不代表获得转载授权。少数派 [协议](https://sspai.com/page/agreement) 的使用授权有个人用途限制，且 [官方说明](https://sspai.com/post/71637) 已将 RSS 从全文改为摘要；Solidot [条款](https://developers.solidot.org/terms) 要求内容复制/转载联系取得许可；IT之家暂未找到明确允许本用途的授权。因此当前界面提供原文链接与信息，不显示未经许可的片段，不承诺所有来源都能应用内读全文。HN 也不抓取外链正文。此处是本应用的保守内容策略，不是对其他使用场景的法律结论。
+
+### 可扩展且默认拒绝的契约
+
+继续使用 `schemaVersion: 1`，原字段不变，`stories[].content` 是可选附加字段。旧快照缺少该字段仍能读，旧版应用会忽略它。形状如下（仅示例，不表示已有许可）：
+
+```json
+{"kind":"unavailable","reason":"permission_required"}
+{"kind":"excerpt","format":"plain_text","text":"自造测试摘要。","licenseUrl":"https://example.test/license"}
+{"kind":"full","format":"plain_text","text":"自造测试正文。","licenseUrl":"https://example.test/license"}
+```
+
+不可用原因仅有 `permission_required`、`not_provided`、`invalid_content`、`too_large`。摘要最多 280 个字符，超出后以省略号明确截断；完整正文最多 24,000 个字符，超限就回到原文链接，**不会截断后继续标记全文**。生成器限制原始 HTML 64 KB、嵌套 64 层及 10,000 个开始标签；仅输出段落纯文本，去除脚本、样式、iframe、嵌入内容、隐藏元素和图片，不输出属性或可点击正文链接，不加载跟踪资源。XML 限制 2 MB、64 层、20,000 个元素，并拒绝 DTD/实体声明与空字节编码。整份快照最多 850 KB（UTF-8）；达到上限时优先放弃正文，不丢文章标题/链接，不更改正文标签以掩盖截断。
+
+将来新增可复用内容时必须先确认授权适用于公开再发布、保留授权证据与所需署名，然后同步更新三处**代码内**策略：
+
+1. `tool/fetch_news.py` 的 `REUSE_POLICIES[sourceId]`：`mode` 为 `excerpt` 或 `full`，`licenseUrl` 为固定 HTTPS 授权依据，`field` 为获准的 `description` 或 `{http://purl.org/rss/1.0/modules/content/}encoded`。`full` 不允许使用 `description`，还必须明确设置 `verifiedFullText: True`，确认该字段确实完整且授权覆盖它。
+2. `web/dashboard.js` 的 `newsContentGrants[sourceId]`：同一个 `mode` 与 `licenseUrl`。当前表为空，任何从网络或缓存自行声称有授权的内容都会丢弃。
+3. Dart 阅读器的 `NewsReusePermission` 源策略：同样限定模式与授权 URL；不得让 RSS/JSON 的 `license`、`licenseUrl` 或 `kind` 自行授予展示权。
+
+授权依据必须允许页面现有的来源、原文链接和许可链接署名方式；若还要求作者等信息，先扩展并验证署名字段。全文字段必须是完整的转义/CDATA HTML；包含 XML 子节点时拒绝展示，避免 `findtext` 只取前半段而误标全文。开启授权必须伴随对应测试及来源说明更新。变更许可或撤回来源时，旧快照、网络响应、本地缓存都重新验证，未知字段被丢弃；缓存中的旧正文会尽力清理（存储禁用时不能保证写回，但仍不交给界面）。不新增文章抓取端点、第三方代理、秘钥或 GitHub 权限；不绕过登录、付费、验证码或访问限制。Python 的授权路径只用自造 fixture 测试，没有在生产策略加入测试授权。
+
 ## 构建及本地验证
 
 Pages 应用发布在上传前执行 `python3 tool/fetch_news.py build/web/news.json`。所有源失败且无有效缓存时构建失败，避免发布空列表。离线应用构建不依赖网络；本地查看资讯前自行生成：
@@ -44,3 +70,19 @@ flutter test
 - 独立代码审查已修复损坏缓存启动崩溃、未知发布日期无限续留、同源 429 退避问题；refresh job 最长 5 分钟。
 - 浏览器视觉未完成：Chromium 未生成 DevToolsActivePort，45 秒启动超时，未进入页面；不等同于 iOS/macOS 真机验证。未因该环境问题继续重复尝试。
 - 发布前本地验收已完成；上线后需验证 Pages 的 news.json、数据专用刷新和应用字节不变。
+
+
+## 资讯详情页提交前验收（2026-10-28）
+
+基于已发布提交 `59319da9b2dd66383c879e435c22bd4564a905e5` 安全快进后实现；没有覆盖本地修改，没有调整现有移动端边界/设置覆盖层、小时工作流、权限或 SW 排除规则。
+
+- 资讯列表和看板摘要点击标题均进入详情；标题紧接「阅读原文」，随后显示来源、绝对发布时间及原文域名。来源无授权/无正文/正文异常/超限状态明确区分，不虚构摘要。
+- 详情使用当前快照，不发起额外正文请求；保留旧数据及来源失败提示。快速点击使用 Navigator 级锁，返回/系统 Back/Escape 保留列表滚动位置及已展开数量。
+- 新增模型和组件用例覆盖恶意 URL、伪造许可、旧快照、纯文本/正文长度、原文打开失败、列表加载/错误/重试、原文按钮位置、概览入口、连续点击、返回、320px 窄屏/横屏/桌面及双倍字体。
+- 真实三源生成成功：90 条，所有正文均为 `permission_required`。没有获取文章页面或转载来源正文。
+- 新详情中文字形已核验被现有字体覆盖，无需提交字体或图标重新生成造成的无关二进制变化。
+- Flutter 组件渲染截图已人工查看：`build/news-detail-previews/`（手机、320px 双倍字体、桌面）；可运行 `NEWS_DETAIL_SCREENSHOTS=1 flutter test test/news_detail_visual_test.dart` 复现。它们不是浏览器或 iPhone Safari 真机验证。
+- cloud CUA 浏览器访问执行器的 `http://127.0.0.1:8880/time_nest/` 返回 `net::ERR_CONNECTION_REFUSED`，未完成真实浏览器渲染；没有放宽浏览器沙箱或重试此前失败的独立 Chromium 启动。预览服务已停止。
+- 本地完整 Web 构建与 SW 生成通过。最初遇到旧 `build/web/time_nest -> .` 预览软链接；已移至 `/tmp/time-nest-old-build-symlink-20261028` 保留后重建，不改源文件。用户随后授权提交推送及部署，源码版本更新为 `2.7.0+18`；线上构建号继续加上发布工作流序号，不重置序号。
+
+最终结果：`flutter analyze` 无问题；格式检查 101 文件无变化；`flutter test` 366/366；`node --test test_web/*.test.mjs` 263/263（含 Python 18 项）；独立审查无阻断问题。构建产物仍排除 `news.json` 的 SW 缓存。以上为此次提交前的本地验证；线上版本、Pages 部署及随后的数据专用刷新需以该提交的工作流结果核实。

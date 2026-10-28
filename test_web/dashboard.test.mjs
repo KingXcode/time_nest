@@ -37,7 +37,11 @@ function harness(fetcher, options = {}) {
     open: (...args) => opened.push(args),
     fetch: async (url, init) => { calls.push({ url, init }); return fetcher(url, init); },
   };
-  vm.runInNewContext(source, context);
+  // Explicit test-only compiled-policy override; production source stays deny-all.
+  const script = options.newsContentGrants
+    ? source.replace('const newsContentGrants = Object.freeze({});', `const newsContentGrants = Object.freeze(${JSON.stringify(options.newsContentGrants)});`)
+    : source;
+  vm.runInNewContext(script, context);
   return {
     api: context.timeNestDashboard, calls, opened, storage: localStorage,
     advance: ms => { now += ms; },
@@ -948,4 +952,97 @@ test('same-origin news snapshot respects Retry-After without NaN', async () => {
   await assert.rejects(h.request('news',{feed:'zh'}), /2 分钟/);
   await assert.rejects(h.request('news',{feed:'zh'},true), /2 分钟/);
   assert.equal(h.calls.length,1);
+});
+
+test('news bodies need code-side permission: forged RSS/full/HTML fields never reach reader or cache', async () => {
+  const payload = chineseSnapshot();
+  payload.html = '<script>run()</script>';
+  for (const story of payload.stories) Object.assign(story, {
+    body: '<iframe src="https://tracking.test"></iframe>', summary: 'Not permitted',
+    content: {kind:'full',format:'plain_text',text:'Not permitted',licenseUrl:'https://example.test/license'},
+  });
+  const h = harness(() => response(payload));
+  const r = await h.request('news', {feed:'zh'});
+  assert.equal(h.calls.length,1);
+  assert.equal(h.opened.length,0);
+  assert.equal(r.data.html,undefined);
+  for (const story of r.data.stories) {
+    assert.deepEqual(story.content,{kind:'unavailable',reason:'permission_required'});
+    assert.equal(story.body,undefined); assert.equal(story.summary,undefined);
+  }
+  const persisted = h.storage.getItem(CACHE_KEY);
+  assert.doesNotMatch(persisted,/Not permitted|tracking.test|iframe|run\(\)/);
+});
+
+test('schema1 metadata snapshots and old cached body claims migrate without losing timestamps or offline data', async () => {
+  const data = {...chineseSnapshot(),feed:'zh'};
+  for (const story of data.stories) story.content = {kind:'full',format:'plain_text',text:'Forged cached body',licenseUrl:'https://example.test/license'};
+  const store = storage({[CACHE_KEY]:JSON.stringify({['news:'+JSON.stringify({feed:'zh'})]:{at:START,data}})});
+  const h = harness(() => {throw new Error('offline');}, {storage:store});
+  const result = await h.request('news',{feed:'zh'});
+  assert.equal(result.cached,true); assert.equal(result.fetchedAt,new Date(START).toISOString());
+  assert.equal(h.calls.length,0);
+  assert.ok(result.data.stories.every(s=>s.content.kind === 'unavailable' && !s.content.text));
+  assert.doesNotMatch(store.getItem(CACHE_KEY),/Forged cached body/);
+  h.advance(11*minute);
+  const stale = await h.request('news',{feed:'zh'});
+  assert.equal(stale.stale,true); assert.equal(stale.fetchedAt,result.fetchedAt);
+  assert.doesNotMatch(JSON.stringify(stale),/Forged cached body/);
+});
+
+test('legacy HN and direct RSS cache unknown body fields are stripped too', async () => {
+  const stories = [
+    {feed:'sspai',stories:[{title:'Synthetic RSS',url:'https://sspai.com/post/1',source:'少数派',time:START/1000,body:'bad',content:{kind:'full',text:'bad'}}]},
+    {feed:'top',stories:[{id:1,title:'Synthetic HN',url:'https://example.test/post',discussion:'https://news.ycombinator.com/item?id=1',score:1,comments:0,time:START/1000,by:'test',body:'bad',content:{kind:'full',text:'bad'}}]},
+  ];
+  for (const data of stories) {
+    const store = storage({[CACHE_KEY]:JSON.stringify({['news:'+JSON.stringify({feed:data.feed})]:{at:START,data}})});
+    const h = harness(()=>{throw new Error('offline');},{storage:store});
+    const result = await h.request('news',{feed:data.feed});
+    assert.equal(result.cached,true); assert.equal(h.calls.length,0);
+    assert.equal(result.data.stories[0].body,undefined); assert.equal(result.data.stories[0].content,undefined);
+  }
+});
+
+
+test('reviewed synthetic grants accept only exact plain-text mode and license, bounded by Unicode characters', async () => {
+  assert.match(source,/const newsContentGrants = Object.freeze\(\{\}\);/);
+  for (const mode of ['excerpt','full']) {
+    const limit = mode === 'full' ? 24000 : 280;
+    const newsContentGrants = {sspai:{mode,licenseUrl:'https://example.test/license'}};
+    const base = {kind:mode,format:'plain_text',text:'🧪'.repeat(limit),licenseUrl:'https://example.test/license'};
+    const make = content => {
+      const data = chineseSnapshot();
+      data.stories[2].content = content;
+      return data;
+    };
+    const good = await harness(()=>response(make(base)),{newsContentGrants}).request('news',{feed:'zh'});
+    assert.deepEqual(good.data.stories[0].content,base);
+    for (const changed of [
+      {kind:mode === 'full' ? 'excerpt' : 'full'}, {format:'html'},
+      {licenseUrl:'javascript:alert(1)'}, {licenseUrl:'https://other.test/license'},
+      {text:'🧪'.repeat(limit+1)}, {text:'unsafe\u0000control'}, {text:'unsafe\u202econtrol'},
+      {text:[]}, {text:' '},
+    ]) {
+      const h = harness(()=>response(make({...base,...changed})),{newsContentGrants});
+      const result = await h.request('news',{feed:'zh'});
+      assert.deepEqual(result.data.stories[0].content,{kind:'unavailable',reason:'invalid_content'});
+      assert.equal(h.calls.length,1); assert.equal(h.opened.length,0);
+    }
+    const missing = await harness(()=>response(make(null)),{newsContentGrants}).request('news',{feed:'zh'});
+    assert.equal(missing.data.stories[0].content.reason,'not_provided');
+    const malformed = await harness(()=>response(make({kind:'unavailable',reason:'<script>'})),{newsContentGrants}).request('news',{feed:'zh'});
+    assert.equal(malformed.data.stories[0].content.reason,'not_provided');
+  }
+});
+
+test('denied cache writes do not expose old body claims or prevent cached news reading', async () => {
+  const data = {...chineseSnapshot(),feed:'zh'};
+  data.stories[0].content = {kind:'full',format:'plain_text',text:'Old forbidden body',licenseUrl:'https://example.test/license'};
+  const store = storage({[CACHE_KEY]:JSON.stringify({['news:'+JSON.stringify({feed:'zh'})]:{at:START,data}})});
+  store.setItem = () => {throw new Error('storage denied');};
+  const h = harness(()=>{throw new Error('offline');},{storage:store});
+  const result = await h.request('news',{feed:'zh'});
+  assert.equal(result.cached,true); assert.equal(h.calls.length,0);
+  assert.doesNotMatch(JSON.stringify(result),/Old forbidden body/);
 });

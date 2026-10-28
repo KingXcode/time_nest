@@ -4,6 +4,7 @@ import 'crypto_market.dart';
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
+import 'news_detail_screen.dart';
 import '../ui/apple_button.dart';
 
 /// Bounded, on-demand snapshots. The full charts and streams belong to detail
@@ -270,7 +271,12 @@ class DashboardOverview extends StatelessWidget {
           children: [
             for (final story in stories)
               InkWell(
-                onTap: () => client.openUrl('${story['url']}'),
+                onTap: () => openNewsDetail(
+                  context,
+                  client: client,
+                  story: story,
+                  snapshot: result,
+                ),
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 7),
                   decoration: const BoxDecoration(
@@ -298,7 +304,7 @@ class DashboardOverview extends StatelessWidget {
                       const Padding(
                         padding: EdgeInsets.only(left: 6, top: 2),
                         child: Icon(
-                          Icons.north_east,
+                          Icons.chevron_right_rounded,
                           size: 12,
                           color: dashboardMuted,
                         ),

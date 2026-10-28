@@ -87,6 +87,34 @@
   }
   const newsSnapshotUrl = new URL('news.json', typeof document !== 'undefined' && typeof document.baseURI === 'string' ? document.baseURI : 'https://kingxcode.github.io/time_nest/').href;
   const newsSources = { sspai: '少数派', ithome: 'IT之家', solidot: 'Solidot' };
+  const newsFeedUrls = { sspai: 'https://sspai.com/feed', ithome: 'https://www.ithome.com/rss/', solidot: 'https://www.solidot.org/index.rss' };
+  // Deliberately empty: public RSS does not grant public body republication.
+  // Enabling a reviewed source requires matching policy in fetch_news.py and
+  // the Dart reader; neither snapshot fields nor old caches can grant rights.
+  const newsContentGrants = Object.freeze({});
+  function newsContent(sourceId, content) {
+    const grant = newsContentGrants[sourceId];
+    const unavailable = reason => ({ kind: 'unavailable', reason });
+    if (!grant || !['excerpt', 'full'].includes(grant.mode) || !safeUrl(grant.licenseUrl) || !grant.licenseUrl.startsWith('https://')) return unavailable('permission_required');
+    if (!object(content)) return unavailable('not_provided');
+    if (content.kind === 'unavailable') return unavailable(['permission_required', 'not_provided', 'invalid_content', 'too_large'].includes(content.reason) ? content.reason : 'not_provided');
+    const limit = grant.mode === 'full' ? 24_000 : 280;
+    if (content.kind !== grant.mode || content.format !== 'plain_text' || content.licenseUrl !== grant.licenseUrl || typeof content.text !== 'string'
+      || !content.text.trim() || content.text.length > limit * 2 || [...content.text].length > limit || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(content.text)) return unavailable('invalid_content');
+    return { kind: content.kind, format: 'plain_text', text: content.text, licenseUrl: grant.licenseUrl };
+  }
+  function cleanNewsData(data) {
+    if (data.feed === 'zh') return {
+      feed: 'zh', schemaVersion: 1, generatedAt: data.generatedAt,
+      sources: data.sources.map(s => ({ id: s.id, name: newsSources[s.id], url: newsFeedUrls[s.id], status: s.status, fetchedAt: s.fetchedAt,
+        ...(Number.isInteger(s.count) && s.count >= 0 && s.count <= 300 ? { count: s.count } : {}) })),
+      stories: data.stories.map(s => ({ title: s.title, url: newsUrl(s), time: s.time, source: newsSources[s.sourceId], sourceId: s.sourceId, content: newsContent(s.sourceId, s.content) })),
+    };
+    // Legacy direct RSS and HN caches also discard all unreviewed body fields.
+    return { feed: data.feed, stories: data.stories.map(s => data.feed === 'sspai'
+      ? { title: s.title, url: sspaiUrl(s.url), time: s.time, source: '少数派' }
+      : { id: s.id, title: text(s.title, 500), score: s.score, comments: s.comments, url: safeUrl(s.url), discussion: s.discussion, time: s.time, by: text(s.by, 100) }) };
+  }
   function newsUrl(story) {
     const safe = safeUrl(story.url);
     if (!safe) return '';
@@ -168,10 +196,16 @@
   }
   function cleanCache() {
     const now = Date.now();
+    let migratedNews = false;
     const entries = Object.entries(cache).filter(([key, entry]) => {
       const module = key.split(':', 1)[0], config = settings[module];
       if (!config || !object(entry) || !finite(entry.at) || entry.at > now + 5 * MINUTE || now - entry.at > config.retain || !validData(module, entry.data)) return false;
       if (module === 'cryptoPairs' || module === 'cryptoBookRules') return false; // Separate bounded metadata stores.
+      if (module === 'news') {
+        const normalized = cleanNewsData(entry.data);
+        if (JSON.stringify(entry.data) !== JSON.stringify(normalized)) migratedNews = true;
+        entry.data = normalized;
+      }
       if (module === 'cryptoQuotes' || module === 'cryptoConversion') {
         try {
           const args = normalizeArgs(module, JSON.parse(key.slice(module.length + 1)));
@@ -184,6 +218,7 @@
     while (JSON.stringify(cache).length > MAX_CACHE_BYTES && entries.length) {
       delete cache[entries.pop()[0]];
     }
+    if (migratedNews) saveObject(CACHE_KEY, cache); // Best-effort removal of old unlicensed body fields.
     for (const [key, attempt] of attempts) if (now - attempt.at > HOUR) attempts.delete(key);
     while (attempts.size > MAX_CACHE_ENTRIES * 2) {
       const oldest = [...attempts.keys()].find(key => key !== PAIRS_KEY && key !== RULES_KEY);
@@ -377,14 +412,15 @@
           const raw = await jsonFetch(newsSnapshotUrl);
           requireValue(validChineseNews(raw), '中文资讯数据暂不可用，请稍后刷新。');
           const seenUrls = new Set(), seenTitles = new Set();
-          const stories = [...raw.stories].sort((a, b) => (b.time || 0) - (a.time || 0)).filter(s => {
+          const normalized = cleanNewsData({ ...raw, feed: 'zh' });
+          const stories = [...normalized.stories].sort((a, b) => (b.time || 0) - (a.time || 0)).filter(s => {
             const key = s.title.replace(/\s+/g, ' ').trim().toLowerCase();
             if (seenUrls.has(s.url) || seenTitles.has(key)) return false;
             seenUrls.add(s.url); seenTitles.add(key); return true;
           });
           const warnings = raw.sources.filter(s => s.status !== 'ok').map(s => `${s.name}${s.status === 'cached' ? '暂不可用，显示缓存' : '暂不可用'}`);
           if (Date.now() - Date.parse(raw.generatedAt) > 3 * 60 * MINUTE) warnings.push('资讯快照较旧，显示最近可用内容');
-          return { data: { ...raw, feed: 'zh', stories }, ...(warnings.length ? { warning: warnings.join('；') } : {}) };
+          return { data: { ...normalized, stories }, ...(warnings.length ? { warning: warnings.join('；') } : {}) };
         }
         if (args.feed === 'sspai') {
           const xml = await jsonFetch('https://sspai.com/feed', { xml: true });

@@ -115,7 +115,12 @@ void main() {
     expect(find.textContaining('Story 6:'), findsOneWidget);
     expect(find.textContaining('Story 7:'), findsNothing);
     await tester.tap(find.textContaining('Story 1:'));
+    await tester.pumpAndSettle();
+    expect(client.opened, isEmpty);
+    await tester.tap(find.text('阅读原文'));
     expect(client.opened.last, 'https://example.com/story/1');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('1 条评论 · HN'));
     expect(client.opened.last, 'https://news.ycombinator.com/item?id=1');
     await tester.ensureVisible(find.text('展开全部 10 条'));

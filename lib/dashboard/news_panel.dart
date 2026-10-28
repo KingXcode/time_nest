@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dashboard_client.dart';
 import 'dashboard_preferences.dart';
 import 'dashboard_widgets.dart';
+import 'news_detail_screen.dart';
 import '../ui/apple_button.dart';
 
 const _newsAccent = Color(0xFF67D8C2);
@@ -139,6 +140,7 @@ class _NewsPanelState extends State<NewsPanel> {
                         story: stories[i],
                         rank: i + 1,
                         chinese: chinese,
+                        snapshot: result,
                       ),
                   ],
                 ),
@@ -183,11 +185,13 @@ class _NewsStory extends StatelessWidget {
     required this.story,
     required this.rank,
     required this.chinese,
+    required this.snapshot,
   });
   final DashboardClient client;
   final Map story;
   final int rank;
   final bool chinese;
+  final DashboardData snapshot;
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +235,12 @@ class _NewsStory extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AppleButton.text(
-                onPressed: () => client.openUrl(url),
+                onPressed: () => openNewsDetail(
+                  context,
+                  client: client,
+                  story: story,
+                  snapshot: snapshot,
+                ),
                 style: TextButton.styleFrom(
                   foregroundColor: const Color(0xFFE5EDEE),
                   padding: const EdgeInsets.symmetric(vertical: 4),
